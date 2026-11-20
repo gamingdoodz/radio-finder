@@ -1196,7 +1196,7 @@ class MainActivity : ComponentActivity() {
 
         rows.add(Row.Header("Über die App"))
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" }
-        rows.add(Row.Action("Radio Finder $version", "Entwickelt von gamingdoodz · mit Claude von Anthropic", dark = true, icon = R.drawable.ic_radar) {
+        rows.add(Row.Action("Radio Finder $version", "Entwickelt von gamingdoodz", dark = true, icon = R.drawable.ic_radar) {
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder"))) } catch (_: Exception) {}
         })
         rows.add(Row.Empty(
