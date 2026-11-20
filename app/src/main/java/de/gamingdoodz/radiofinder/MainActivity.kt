@@ -878,37 +878,31 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderHome() {
-        rows.add(Row.Header(Moments.greeting(), "Für dich jetzt"))
+        // 1. Begrüßung + passende Vorschläge zur Tageszeit
+        rows.add(Row.Header(Moments.greeting()))
         val moments = Moments.now().toMutableList()
         if (Heard.all(this).size >= 3 || Favorites.all(this).any { it.kind == Kind.TRACK }) {
             moments.add(1.coerceAtMost(moments.size), Moments.Moment("mine", "Mein Mix", "Lieder, die dir gefallen – aus dem Radio", Moments.Action.HITMIX, "mine", "#FF2EE6A8", "#FF6366F1", R.drawable.ic_heart_white))
         }
         rows.add(Row.Moments(moments))
 
-        val recent = Recent.all(this)
-        val favs = Favorites.all(this)
-        val again = (favs + recent).distinctBy { it.id }.take(20)
+        // 2. Weiterhören (Favoriten zuerst)
+        val again = (Favorites.all(this) + Recent.all(this)).distinctBy { it.id }.take(15)
         if (again.isNotEmpty()) {
-            rows.add(Row.Header("Weiterhören", "Deine Favoriten und zuletzt gehört"))
+            rows.add(Row.Header("Weiterhören"))
             rows.add(Row.Carousel(again))
         }
 
-        val chartsLive = dedupe(topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
-            .distinctBy { it.station.id }.map { it.station.toEntry(it.title) })
-        if (chartsLive.isNotEmpty()) {
-            rows.add(Row.Header("Hits gerade im Radio", "Komplett hören – jetzt live"))
-            rows.add(Row.Carousel(chartsLive, live = true))
-        }
+        // 3. Jetzt im Radio: erst Chart-Hits, dann andere Musik – eine Liste statt zwei
+        val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
+            .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
+        val live = dedupe(chartsLive + liveEntries(popular.take(80))).take(25)
+        rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
+        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live, live = true))
 
-        val live = liveEntries(popular.take(60))
-        rows.add(Row.Header("Gerade im Radio", "Was jetzt auf beliebten Sendern läuft"))
-        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.take(25), live = true))
-
-        rows.add(Row.Header("Deutsche Charts", "● LIVE = läuft gerade im Radio", "ALLE 100") { openPage(Page.ChartsPage) })
-        if (topDe.isEmpty()) rows.add(Row.Empty("Lade Charts…")) else {
-            addSongs(topDe.take(5), ranked = true)
-            rows.add(Row.More("Alle 100 Charts anzeigen") { openPage(Page.ChartsPage) })
-        }
+        // 4. Charts kurz, Rest auf eigener Seite
+        rows.add(Row.Header("Deutsche Charts", null, "ALLE") { openPage(Page.ChartsPage) })
+        if (topDe.isEmpty()) rows.add(Row.Empty("Lade Charts…")) else addSongs(topDe.take(5), ranked = true)
     }
 
     private var musicAudience = 0 // 0 = Erwachsene, 1 = Kinder
