@@ -30,9 +30,12 @@ jobs:
           PW: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
         run: |
           if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            # Kopierfehler abfangen: Leerzeichen/Umbrüche, mitkopierte Überschrift
+            printf '%s' "$KS" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/upload.jks"
+            CLEAN=$(printf '%s\n' "$PW" | tr -d '\r' | grep -v 'UPLOAD_KEYSTORE_PASSWORD' | tr -d ' ' | grep -v '^$' | tail -1)
+            echo "::add-mask::$CLEAN"
             echo "UPLOAD_KEYSTORE_FILE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
-            echo "UPLOAD_KEYSTORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+            echo "UPLOAD_KEYSTORE_PASSWORD=$CLEAN" >> "$GITHUB_ENV"
           fi
 
       - name: APK und Store-Paket bauen
