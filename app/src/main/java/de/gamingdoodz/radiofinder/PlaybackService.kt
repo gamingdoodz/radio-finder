@@ -248,7 +248,8 @@ class PlaybackService : MediaLibraryService() {
                         musicSeen = true
                         val took = System.currentTimeMillis() - stationStart
                         // Erst nach >10 s Musik und vorher Werbung/Ansage: das war Vorab-Werbung
-                        if (took > 10_000 && (nonMusicSeen || Ads.isAd(t))) Ads.record(this@PlaybackService, id, took)
+                        // Vorab-Werbung hat meist gar keinen Titel: erstes Lied erst nach >12 s = Werbung davor
+                        if (took in 10_001..170_000 && (nonMusicSeen || Ads.isAd(t) || took > 12_000)) Ads.record(this@PlaybackService, id, took)
                         else if (took < 6_000) Ads.clear(this@PlaybackService, id)
                     } else if (t.isNotEmpty()) {
                         nonMusicSeen = true

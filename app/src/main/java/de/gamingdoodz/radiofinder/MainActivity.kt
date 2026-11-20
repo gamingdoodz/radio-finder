@@ -1422,10 +1422,10 @@ class MainActivity : ComponentActivity() {
         val indexTitle = if (isStation) LiveIndex.fresh().firstOrNull { "st:" + it.station.id == item.mediaId }?.title else null
         val title = live ?: indexTitle ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
         if (isStation && live == null) checkStationTitle(item.mediaId, entry)
-        val adLeft = adRemaining(c, item.mediaId, live)
+        val ad = adInfo(c, item.mediaId, live)
         val sub = when {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
-            adLeft != null -> if (adLeft > 0) "Werbung · noch ca. ${fmt(adLeft)}" else "Werbung oder Ansage – gleich geht's los"
+            ad != null -> adText(ad)
             c.playerError != null -> "Nicht erreichbar – tippe auf Play"
             isStation -> entry?.name ?: (m.artist?.toString() ?: "")
             entry?.preview == true -> "${m.artist ?: ""} · Vorschau"
@@ -1450,6 +1450,7 @@ class MainActivity : ComponentActivity() {
             findViewById<TextView>(R.id.fullTitle).text = title
             findViewById<TextView>(R.id.fullSub).text = sub
             findViewById<TextView>(R.id.fullSource).text = when {
+                ad != null -> "📢 WERBUNG"
                 isStation -> "INTERNETRADIO"
                 entry?.preview == true -> "VORSCHAU"
                 else -> "FREIE MUSIK"
@@ -1468,18 +1469,29 @@ class MainActivity : ComponentActivity() {
         updateProgress()
     }
 
-    /**
-     * Läuft gerade Werbung am Senderanfang? Gibt die geschätzte Restzeit zurück
-     * (0 = Dauer unbekannt) oder null, wenn keine Werbung erkannt wird.
-     */
-    private fun adRemaining(c: MediaController, mediaId: String, live: String?): Long? {
+    /** Werbung am Senderanfang: left = Restzeit (-1 = unbekannt), total = gelernte Dauer. */
+    private data class AdInfo(val left: Long, val total: Long, val elapsed: Long)
+
+    /** Läuft gerade Werbung am Senderanfang? null = nein. */
+    private fun adInfo(c: MediaController, mediaId: String, live: String?): AdInfo? {
         if (!mediaId.startsWith("st:") || !c.isPlaying) return null
-        val known = Ads.duration(this, mediaId.removePrefix("st:"))
-        val elapsed = c.currentPosition
-        if (Ads.isAd(live)) return (known - elapsed).coerceAtLeast(0)
-        val musicNow = live != null && LiveIndex.isMusic(live)
-        if (!musicNow && known > 0 && elapsed < known) return known - elapsed
+        val id = mediaId.removePrefix("st:")
+        val known = Ads.duration(this, id)
+        val elapsed = c.currentPosition.coerceAtLeast(0)
+        if (live != null && LiveIndex.isMusic(live) && !Ads.isAd(live)) return null
+        if (Ads.isAd(live)) return AdInfo(if (known > elapsed) known - elapsed else -1, known, elapsed)
+        // Bekannte Vorab-Werbung: Countdown (mit etwas Puffer)
+        if (known > 0 && elapsed < known + 15_000) return AdInfo((known - elapsed).coerceAtLeast(0), known, elapsed)
+        // Sender schickt sonst Liedtitel, gerade aber keinen: am Anfang ist das fast immer Werbung
+        val sendsTitles = LiveIndex.get(id)?.let { LiveIndex.isMusic(it.title) } == true
+        if (live == null && sendsTitles && elapsed < 120_000) return AdInfo(-1, 0, elapsed)
         return null
+    }
+
+    private fun adText(ad: AdInfo) = when {
+        ad.left > 0 -> "📢 Werbung · noch ${fmt(ad.left)}"
+        ad.left == 0L -> "📢 Werbung · gleich geht's los"
+        else -> "📢 Werbung · läuft seit ${fmt(ad.elapsed)}"
     }
 
     private var lastTitleCheck = 0L
@@ -1502,10 +1514,22 @@ class MainActivity : ComponentActivity() {
         val isStation = item.mediaId.startsWith("st:")
         if (isStation) {
             val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
-            adRemaining(c, item.mediaId, live)?.let { left ->
-                val t = if (left > 0) "Werbung · noch ca. ${fmt(left)}" else "Werbung oder Ansage – gleich geht's los"
+            val ad = adInfo(c, item.mediaId, live)
+            val miniP = findViewById<ProgressBar>(R.id.miniProgress)
+            if (ad != null) {
+                val t = adText(ad)
                 findViewById<TextView>(R.id.miniSub).text = t
                 findViewById<TextView>(R.id.fullSub).text = t
+                findViewById<TextView>(R.id.fullSource).text = "📢 WERBUNG"
+                // Fortschritt der Werbung als Balken, wenn die Dauer bekannt ist
+                if (ad.total > 0) {
+                    miniP.visibility = View.VISIBLE
+                    miniP.max = ad.total.toInt()
+                    miniP.progress = ad.elapsed.coerceAtMost(ad.total).toInt()
+                } else miniP.visibility = View.INVISIBLE
+            } else {
+                miniP.visibility = View.INVISIBLE
+                if (full.visibility == View.VISIBLE) findViewById<TextView>(R.id.fullSource).text = "INTERNETRADIO"
             }
         }
         val pos = c.currentPosition.coerceAtLeast(0)
