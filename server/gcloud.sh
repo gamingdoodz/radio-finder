@@ -12,6 +12,20 @@ if [ -z "$PROJECT" ]; then
 fi
 echo "Projekt: $PROJECT"
 
+# Abrechnungskonto verknüpfen (nötig, auch für die kostenlosen Angebote)
+if [ "$(gcloud billing projects describe "$PROJECT" --format='value(billingEnabled)' 2>/dev/null)" != "True" ]; then
+  BA=$(gcloud billing accounts list --filter=open=true --format="value(name)" --limit=1 2>/dev/null)
+  if [ -z "$BA" ]; then
+    echo
+    echo "Es gibt noch kein Abrechnungskonto."
+    echo "Bitte hier anlegen (Kreditkarte), dann diesen Befehl nochmal starten:"
+    echo "  https://console.cloud.google.com/billing/create"
+    exit 1
+  fi
+  echo "Verknüpfe Abrechnungskonto $BA…"
+  gcloud billing projects link "$PROJECT" --billing-account="$BA"
+fi
+
 echo "Compute Engine wird aktiviert (kann 1-2 Minuten dauern)…"
 gcloud services enable compute.googleapis.com
 
