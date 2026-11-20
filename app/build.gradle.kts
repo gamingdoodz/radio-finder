@@ -25,7 +25,7 @@ android {
             keyAlias = "radiofinder"
             keyPassword = "radiofinder"
         }
-        // Geheimer Upload-Schlüssel für Google Play (kommt aus den GitHub-Secrets)
+        // Geheimer Upload-Schlüssel für Google Play (aus den GitHub-Secrets)
         val upload = System.getenv("UPLOAD_KEYSTORE_FILE")
         if (upload != null) {
             create("upload") {
