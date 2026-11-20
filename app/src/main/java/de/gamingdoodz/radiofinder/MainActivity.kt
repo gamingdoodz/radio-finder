@@ -739,6 +739,12 @@ class MainActivity : ComponentActivity() {
     private fun checkUpdate() {
         if (updateChecked) return
         updateChecked = true
+        // Aus dem Play Store installiert? Dann kümmert sich Google Play um Updates.
+        val installer = try {
+            if (Build.VERSION.SDK_INT >= 30) packageManager.getInstallSourceInfo(packageName).installingPackageName
+            else @Suppress("DEPRECATION") packageManager.getInstallerPackageName(packageName)
+        } catch (_: Exception) { null }
+        if (installer == "com.android.vending") return
         lifecycleScope.launch {
             val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 Net.get("https://api.github.com/repos/gamingdoodz/radio-finder/releases/latest")
