@@ -12,6 +12,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,3 +57,14 @@ jobs:
             Hitradar.apk
             Hitradar-PlayStore.aab
           make_latest: true
+
+      # Automatisch in den internen Play-Test hochladen (sobald der Schlüssel hinterlegt ist)
+      - name: In Google Play hochladen (interner Test)
+        if: ${{ env.PLAY_JSON != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: de.gamingdoodz.hitradar
+          releaseFiles: Hitradar-PlayStore.aab
+          track: internal
+          status: completed
