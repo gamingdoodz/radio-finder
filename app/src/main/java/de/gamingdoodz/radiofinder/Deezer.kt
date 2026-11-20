@@ -40,6 +40,8 @@ object Deezer {
             val nq = Scanner.normalize(q)
             val nn = Scanner.normalize(name)
             if (nn.isEmpty() || !(nq.contains(nn) || nn.contains(nq))) return@withContext null
+            // Unbekannte Bands, die zufällig wie ein Lied heißen, nicht als Künstler werten
+            if (o.optLong("nb_fan", 0L) < 20_000) return@withContext null
             Artist(o.optLong("id"), name, o.optString("picture_big"))
         } catch (_: Exception) {
             null

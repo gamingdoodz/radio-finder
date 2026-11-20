@@ -940,6 +940,9 @@ class MainActivity : ComponentActivity() {
         stationHits.firstOrNull { Scanner.normalize(it.name).startsWith(nq) }?.let { e ->
             return Row.Top(e, "SENDER", "Jetzt einschalten") { play(e, stationHits) }
         }
+        songHits.firstOrNull { Scanner.normalize(it.title) == nq }?.let { e ->
+            return Row.Top(e, "SONG", "${e.subtitle} · im Radio suchen, Vorschau oder Wächter") { onEntryTap(e, songHits) }
+        }
         artistMix?.let { a ->
             val e = Entry("ar:${a.id}", Kind.TRACK, a.name, "Künstler", "", a.picture, a.name)
             return Row.Top(e, "KÜNSTLER", "${a.name}-Mix: nur ${a.name} aus dem Radio") { startHitMix("artist:${a.id}:${a.name}", "– ${a.name}") }
