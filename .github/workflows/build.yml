@@ -3,6 +3,7 @@ name: App bauen
 on:
   push:
     branches: [main]
+    paths-ignore: ["server/**", "README.md"]
   workflow_dispatch:
 
 permissions:
