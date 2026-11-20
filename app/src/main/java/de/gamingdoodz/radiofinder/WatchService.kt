@@ -92,7 +92,7 @@ class WatchService : Service() {
         while (scope.isActive && System.currentTimeMillis() < end) {
             round++
             setStatus(query, "Suche läuft (Runde $round)…")
-            val stations = try { StationRepository.load(applicationContext) } catch (_: Exception) { emptyList() }
+            val stations = try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }
             val hit = Scanner.scan(stations, query, stopAfterFirst = true).firstOrNull()
             if (hit != null) {
                 onFound(query, hit)

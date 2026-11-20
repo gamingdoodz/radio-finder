@@ -10,30 +10,52 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Kopf mit Suche -->
+        <!-- Kopf -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingStart="18dp"
-            android:paddingTop="14dp"
+            android:paddingTop="12dp"
             android:paddingEnd="18dp"
-            android:paddingBottom="6dp">
+            android:paddingBottom="4dp">
 
-            <TextView
-                android:id="@+id/pageTitle"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:fontFamily="sans-serif-black"
-                android:text="Radio Finder"
-                android:textColor="#FFFFFFFF"
-                android:textSize="30sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/back"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_round_btn"
+                    android:contentDescription="Zurück"
+                    android:src="@drawable/ic_back"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/pageTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-black"
+                    android:maxLines="1"
+                    android:text="Radio Finder"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="28sp" />
+            </LinearLayout>
 
             <FrameLayout
+                android:id="@+id/searchBox"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
                 android:layout_marginTop="12dp"
-                android:background="@drawable/bg_search">
+                android:background="@drawable/bg_search"
+                android:visibility="gone">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -47,7 +69,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:background="@null"
-                    android:hint="Welches Lied willst du hören?"
+                    android:hint="Lied, Künstler oder Sender"
                     android:imeOptions="actionSearch"
                     android:inputType="text"
                     android:paddingStart="48dp"
@@ -88,70 +110,103 @@
             android:layout_marginBottom="6dp"
             android:background="@drawable/bg_player"
             android:elevation="10dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="8dp"
+            android:orientation="vertical"
             android:visibility="gone">
 
-            <FrameLayout
-                android:layout_width="52dp"
-                android:layout_height="52dp">
-
-                <TextView
-                    android:id="@+id/miniInitials"
-                    style="@style/Initials"
-                    android:background="@drawable/bg_art_small"
-                    android:textSize="18sp" />
-
-                <ImageView
-                    android:id="@+id/miniArt"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent" />
-            </FrameLayout>
+            <ProgressBar
+                android:id="@+id/miniProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:layout_marginStart="18dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginEnd="18dp"
+                android:progressBackgroundTint="#22FFFFFF"
+                android:progressTint="#FFF97316" />
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="8dp">
 
-                <TextView
-                    android:id="@+id/miniTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
+                <FrameLayout
+                    android:layout_width="52dp"
+                    android:layout_height="52dp">
 
-                <TextView
-                    android:id="@+id/miniSub"
-                    android:layout_width="match_parent"
+                    <TextView
+                        android:id="@+id/miniInitials"
+                        style="@style/Initials"
+                        android:textSize="18sp" />
+
+                    <ImageView
+                        android:id="@+id/miniArt"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="13sp" />
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <de.gamingdoodz.radiofinder.EqualizerView
+                            android:id="@+id/miniEq"
+                            android:layout_width="16dp"
+                            android:layout_height="14dp"
+                            android:layout_marginEnd="6dp" />
+
+                        <TextView
+                            android:id="@+id/miniTitle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/miniSub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/miniPlay"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/bg_play"
+                    android:contentDescription="Abspielen"
+                    android:src="@drawable/ic_play" />
+
+                <ImageButton
+                    android:id="@+id/miniNext"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="2dp"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Weiter"
+                    android:src="@drawable/ic_next" />
             </LinearLayout>
-
-            <ImageButton
-                android:id="@+id/miniPlay"
-                android:layout_width="46dp"
-                android:layout_height="46dp"
-                android:background="@drawable/bg_play"
-                android:contentDescription="Abspielen"
-                android:src="@drawable/ic_play" />
-
-            <ImageButton
-                android:id="@+id/miniNext"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="2dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Weiter"
-                android:src="@drawable/ic_next" />
         </LinearLayout>
 
         <!-- Untere Leiste -->
@@ -163,7 +218,12 @@
 
             <LinearLayout android:id="@+id/navHome" style="@style/NavItem">
                 <ImageView android:id="@+id/navHomeIcon" style="@style/NavIcon" android:src="@drawable/ic_home" />
-                <TextView android:id="@+id/navHomeLabel" style="@style/NavLabel" android:text="Entdecken" />
+                <TextView android:id="@+id/navHomeLabel" style="@style/NavLabel" android:text="Start" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/navFind" style="@style/NavItem">
+                <ImageView android:id="@+id/navFindIcon" style="@style/NavIcon" android:src="@drawable/ic_search" />
+                <TextView android:id="@+id/navFindLabel" style="@style/NavLabel" android:text="Finden" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/navKids" style="@style/NavItem">
@@ -171,9 +231,9 @@
                 <TextView android:id="@+id/navKidsLabel" style="@style/NavLabel" android:text="Kinder" />
             </LinearLayout>
 
-            <LinearLayout android:id="@+id/navFav" style="@style/NavItem">
-                <ImageView android:id="@+id/navFavIcon" style="@style/NavIcon" android:src="@drawable/ic_heart_white" />
-                <TextView android:id="@+id/navFavLabel" style="@style/NavLabel" android:text="Favoriten" />
+            <LinearLayout android:id="@+id/navLib" style="@style/NavItem">
+                <ImageView android:id="@+id/navLibIcon" style="@style/NavIcon" android:src="@drawable/ic_library" />
+                <TextView android:id="@+id/navLibLabel" style="@style/NavLabel" android:text="Bibliothek" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
@@ -205,7 +265,7 @@
             android:layout_height="match_parent"
             android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:padding="22dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -215,8 +275,8 @@
 
                 <ImageButton
                     android:id="@+id/fullClose"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
                     android:background="@drawable/bg_round_btn"
                     android:contentDescription="Schließen"
                     android:src="@drawable/ic_chevron_down" />
@@ -228,14 +288,22 @@
                     android:layout_weight="1"
                     android:gravity="center"
                     android:letterSpacing="0.1"
-                    android:text="LÄUFT GERADE"
                     android:textColor="#B3FFFFFF"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
-                <View
-                    android:layout_width="48dp"
-                    android:layout_height="1dp" />
+                <TextView
+                    android:id="@+id/fullSleep"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:background="@drawable/bg_search"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="☾ Timer"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
             </LinearLayout>
 
             <View
@@ -245,14 +313,13 @@
 
             <FrameLayout
                 android:id="@+id/fullArtBox"
-                android:layout_width="290dp"
-                android:layout_height="290dp"
+                android:layout_width="280dp"
+                android:layout_height="280dp"
                 android:elevation="16dp">
 
                 <TextView
                     android:id="@+id/fullInitials"
                     style="@style/Initials"
-                    android:background="@drawable/bg_art"
                     android:textSize="84sp" />
 
                 <ImageView
@@ -265,7 +332,7 @@
                 android:id="@+id/fullBadge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="28dp"
+                android:layout_marginTop="24dp"
                 android:background="@drawable/bg_badge"
                 android:paddingStart="10dp"
                 android:paddingTop="3dp"
@@ -280,7 +347,7 @@
                 android:id="@+id/fullTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="12dp"
                 android:ellipsize="end"
                 android:fontFamily="sans-serif-black"
                 android:gravity="center"
@@ -292,22 +359,61 @@
                 android:id="@+id/fullSub"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="4dp"
                 android:ellipsize="end"
                 android:gravity="center"
                 android:maxLines="2"
                 android:textColor="#B3FFFFFF"
                 android:textSize="16sp" />
 
+            <de.gamingdoodz.radiofinder.EqualizerView
+                android:id="@+id/fullEq"
+                android:layout_width="200dp"
+                android:layout_height="44dp"
+                android:layout_marginTop="18dp" />
+
             <View
                 android:layout_width="1dp"
                 android:layout_height="0dp"
                 android:layout_weight="1" />
 
+            <SeekBar
+                android:id="@+id/fullSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:progressBackgroundTint="#33FFFFFF"
+                android:progressTint="#FFF97316"
+                android:thumbTint="#FFFFFFFF" />
+
+            <LinearLayout
+                android:id="@+id/fullTimes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
+
+                <TextView
+                    android:id="@+id/fullPos"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/fullDur"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="24dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="16dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
@@ -316,8 +422,8 @@
 
                 <ImageButton
                     android:id="@+id/fullPlay"
-                    android:layout_width="84dp"
-                    android:layout_height="84dp"
+                    android:layout_width="80dp"
+                    android:layout_height="80dp"
                     android:layout_marginStart="10dp"
                     android:layout_marginEnd="10dp"
                     android:background="@drawable/bg_play"

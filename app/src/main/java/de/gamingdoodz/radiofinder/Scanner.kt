@@ -47,6 +47,39 @@ object Scanner {
         return words.isNotEmpty() && words.all { t.contains(it) }
     }
 
+    /** Fragt bei allen Sendern ab, was gerade läuft, und meldet jeden Titel. */
+    suspend fun titles(
+        stations: List<Station>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        onTitle: (Station, String) -> Unit,
+    ) {
+        val done = AtomicInteger()
+        val total = stations.size
+        val sem = Semaphore(80)
+        val groups = stations.groupBy { serverKey(it) }
+        coroutineScope {
+            for ((key, group) in groups) {
+                launch(io) {
+                    val statusTitles: Map<String, String>? =
+                        if (key == null || key in noStatusPage) null
+                        else sem.withPermit { icecastTitles(key) }.also { if (it == null) noStatusPage.add(key) }
+
+                    for (s in group) {
+                        launch(io) {
+                            val title = statusTitles?.let { titleFor(s, it) }
+                                ?: if (s.hls) null else sem.withPermit { IcyReader.fetchTitle(s.url) }
+                            if (title != null) {
+                                LiveIndex.put(s, title)
+                                onTitle(s, title)
+                            }
+                            onProgress(done.incrementAndGet(), total)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun scan(
         stations: List<Station>,
         query: String,
@@ -57,33 +90,13 @@ object Scanner {
         val words = words(query)
         if (words.isEmpty()) return emptyList()
         val hits = Collections.synchronizedList(mutableListOf<Hit>())
-        val done = AtomicInteger()
-        val total = stations.size
-        val sem = Semaphore(56)
-        val groups = stations.groupBy { serverKey(it) }
-
         try {
-            coroutineScope {
-                for ((key, group) in groups) {
-                    launch(io) {
-                        val statusTitles: Map<String, String>? =
-                            if (key == null || key in noStatusPage) null
-                            else sem.withPermit { icecastTitles(key) }.also { if (it == null) noStatusPage.add(key) }
-
-                        for (s in group) {
-                            launch(io) {
-                                val title = statusTitles?.let { titleFor(s, it) }
-                                    ?: if (s.hls) null else sem.withPermit { IcyReader.fetchTitle(s.url) }
-                                if (title != null && matches(title, words)) {
-                                    val hit = Hit(s, title)
-                                    hits.add(hit)
-                                    onHit(hit)
-                                    if (stopAfterFirst) throw FoundException()
-                                }
-                                onProgress(done.incrementAndGet(), total)
-                            }
-                        }
-                    }
+            titles(stations, onProgress) { s, title ->
+                if (matches(title, words)) {
+                    val hit = Hit(s, title)
+                    hits.add(hit)
+                    onHit(hit)
+                    if (stopAfterFirst) throw FoundException()
                 }
             }
         } catch (_: FoundException) {

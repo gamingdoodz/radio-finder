@@ -18,6 +18,7 @@ object Jamendo {
     suspend fun search(q: String, limit: Int = 20) = tracks("search=${enc(q)}&order=relevance&limit=$limit")
     suspend fun popular(limit: Int = 25) = tracks("order=popularity_week&limit=$limit")
     suspend fun kids(limit: Int = 30) = tracks("fuzzytags=kids&order=popularity_total&limit=$limit")
+    suspend fun byTag(tag: String, limit: Int = 25) = tracks("tags=${enc(tag)}&order=popularity_week&limit=$limit")
 
     private suspend fun tracks(params: String): List<Entry> = withContext(Dispatchers.IO) {
         val text = Net.get(

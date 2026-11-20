@@ -17,11 +17,12 @@ data class Entry(
     val url: String,
     val artwork: String,
     val name: String,        // fester Name (Sendername bzw. Liedtitel) für Favoriten
+    val preview: Boolean = false, // nur 30-Sekunden-Vorschau (Charts von Deezer)
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("kind", kind.name).put("title", name)
         .put("subtitle", if (kind == Kind.STATION) "Internetradio" else subtitle)
-        .put("url", url).put("artwork", artwork).put("name", name)
+        .put("url", url).put("artwork", artwork).put("name", name).put("preview", preview)
 
     fun toMediaItem(): MediaItem {
         val uri = Uri.parse(url)
@@ -31,7 +32,7 @@ data class Entry(
             .setIsPlayable(true)
             .setIsBrowsable(false)
             .setMediaType(if (kind == Kind.STATION) MediaMetadata.MEDIA_TYPE_RADIO_STATION else MediaMetadata.MEDIA_TYPE_MUSIC)
-            .setExtras(Bundle().apply { putString("name", name) })
+            .setExtras(Bundle().apply { putString("name", name); putBoolean("preview", preview) })
         if (artwork.isNotBlank()) meta.setArtworkUri(Uri.parse(artwork))
         return MediaItem.Builder()
             .setMediaId(id)
@@ -50,6 +51,7 @@ data class Entry(
             url = o.getString("url"),
             artwork = o.optString("artwork"),
             name = o.optString("name").ifBlank { o.optString("title") },
+            preview = o.optBoolean("preview", false),
         )
 
         fun fromMediaItem(item: MediaItem): Entry? {
@@ -64,6 +66,7 @@ data class Entry(
                 url = url,
                 artwork = m.artworkUri?.toString() ?: "",
                 name = m.extras?.getString("name") ?: title,
+                preview = m.extras?.getBoolean("preview", false) ?: false,
             )
         }
     }
@@ -90,6 +93,9 @@ fun Audius.Track.toEntry() = Entry(
 )
 
 const val ROOT_ID = "root"
+const val RECENT_ID = "recent"
+const val LIVE_ID = "live"
+const val CHARTS_LIVE_ID = "chartslive"
 const val FAV_ID = "fav"
 const val HITS_ID = "hits"
 const val KIDS_ID = "kids"

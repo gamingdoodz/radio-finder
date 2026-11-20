@@ -43,6 +43,10 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class PlaybackService : MediaLibraryService() {
 
+    companion object {
+        const val CMD_SLEEP = "SLEEP_TIMER"
+    }
+
     private var session: MediaLibrarySession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val itemCache = ConcurrentHashMap<String, MediaItem>()
@@ -50,6 +54,12 @@ class PlaybackService : MediaLibraryService() {
     // Für freie Lieder: die ganze Liste merken, damit man in Android Auto weiterspringen kann
     private val listContext = ConcurrentHashMap<String, List<MediaItem>>()
     private val favCommand = SessionCommand("FAV_TOGGLE", Bundle.EMPTY)
+    private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
+    private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val sleepRunnable = Runnable {
+        session?.player?.pause()
+        Settings.setSleepEnd(this, 0L)
+    }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> updateFavButton() }
 
     @OptIn(UnstableApi::class)
@@ -73,7 +83,10 @@ class PlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         player.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = updateFavButton()
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                updateFavButton()
+                mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
+            }
         })
 
         val openApp = PendingIntent.getActivity(
@@ -94,6 +107,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        sleepHandler.removeCallbacks(sleepRunnable)
+        Settings.setSleepEnd(this, 0L)
         Favorites.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         session?.run {
             player.release()
@@ -176,7 +191,7 @@ class PlaybackService : MediaLibraryService() {
             MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                        .buildUpon().add(favCommand).build()
+                        .buildUpon().add(favCommand).add(sleepCommand).build()
                 )
                 .setCustomLayout(ImmutableList.of(favButton(currentIsFav())))
                 .build()
@@ -187,6 +202,16 @@ class PlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == CMD_SLEEP) {
+                val min = args.getInt("min", 0)
+                sleepHandler.removeCallbacks(sleepRunnable)
+                if (min > 0) {
+                    sleepHandler.postDelayed(sleepRunnable, min * 60_000L)
+                    Settings.setSleepEnd(this@PlaybackService, System.currentTimeMillis() + min * 60_000L)
+                } else {
+                    Settings.setSleepEnd(this@PlaybackService, 0L)
+                }
+            }
             if (customCommand.customAction == favCommand.customAction) {
                 session.player.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let {
                     Favorites.toggle(this@PlaybackService, it)
@@ -221,12 +246,30 @@ class PlaybackService : MediaLibraryService() {
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> listOf(
                     folderItem(FAV_ID, "⭐ Favoriten"),
-                    folderItem(HITS_ID, "🔴 Letzte Treffer"),
+                    folderItem(RECENT_ID, "🕘 Zuletzt gehört"),
+                    folderItem(LIVE_ID, "🔴 Gerade im Radio"),
+                    folderItem(CHARTS_LIVE_ID, "🔥 Charts gerade im Radio"),
                     folderItem(POPULAR_ID, "📻 Beliebte Sender"),
                     folderItem(FREE_ID, "🎵 Freie Musik"),
                     folderItem(KIDS_ID, "🧸 Kinder"),
+                    folderItem(HITS_ID, "🔎 Letzte Suche"),
                 )
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
+                RECENT_ID -> Recent.all(applicationContext).map { it.toMediaItem() }
+                LIVE_ID -> {
+                    val stations = StationRepository.load(applicationContext, big = false).take(80)
+                    withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
+                    val now = LiveIndex.fresh().associateBy { it.station.id }
+                    stations.mapNotNull { s -> now[s.id]?.let { s.toEntry(it.title).toMediaItem() } }
+                }
+                CHARTS_LIVE_ID -> {
+                    val stations = StationRepository.load(applicationContext, big = false).take(150)
+                    val charts = Deezer.topGermany()
+                    withTimeoutOrNull(20_000) { LiveIndex.refresh(stations) }
+                    charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
+                        .distinctBy { it.station.id }
+                        .map { it.station.toEntry(it.title).toMediaItem() }
+                }
                 HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
                 KIDS_ID -> kidsEntries().map { it.toMediaItem() }
                 FREE_ID -> FreeMusic.charts().map { it.toMediaItem() }

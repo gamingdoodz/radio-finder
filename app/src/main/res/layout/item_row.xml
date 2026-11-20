@@ -11,6 +11,16 @@
     android:orientation="horizontal"
     android:padding="8dp">
 
+    <TextView
+        android:id="@+id/rank"
+        android:layout_width="30dp"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-black"
+        android:gravity="center"
+        android:textColor="#B3FFFFFF"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
     <FrameLayout
         android:layout_width="60dp"
         android:layout_height="60dp">
@@ -37,7 +47,9 @@
         <TextView
             android:id="@+id/badge"
             style="@style/LiveBadge"
-            android:layout_marginBottom="3dp" />
+            android:layout_marginBottom="3dp"
+            android:ellipsize="end"
+            android:maxLines="1" />
 
         <TextView
             android:id="@+id/title"

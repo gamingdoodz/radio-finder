@@ -64,6 +64,26 @@ object StationRepository {
 
     suspend fun kids(context: Context): List<Station> = loadList(context, "kids.json", kidsQueries)
 
+    /** Welche Sender bei einer Suche durchsucht werden (WLAN: viele, mobil mit Datensparen: wenige). */
+    suspend fun scanList(context: Context): List<Station> {
+        if (Net.isUnmetered(context)) return load(context, big = true)
+        val small = load(context, big = false)
+        return if (Settings.saver(context)) small.take(150) else small
+    }
+
+    private val tagCache = HashMap<String, List<Station>>()
+
+    /** Sender zu einem Genre (erst deutsche, dann weltweit). */
+    suspend fun byTag(tag: String): List<Station> {
+        synchronized(tagCache) { tagCache[tag]?.let { return it } }
+        val t = java.net.URLEncoder.encode(tag, "UTF-8")
+        val list = withContext(Dispatchers.IO) {
+            fetchAll(listOf("tag=$t&countrycode=DE&limit=30", "tag=$t&limit=30"))
+        }
+        if (list.isNotEmpty()) synchronized(tagCache) { tagCache[tag] = list }
+        return list
+    }
+
     private suspend fun loadList(context: Context, fileName: String, queries: List<String>): List<Station> =
         mutex.withLock {
             cache[fileName]?.let { return@withLock it }

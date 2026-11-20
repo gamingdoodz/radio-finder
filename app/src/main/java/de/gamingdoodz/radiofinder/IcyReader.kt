@@ -21,8 +21,8 @@ object IcyReader {
             for (i in 0 until 4) {
                 val c = url.openConnection() as HttpURLConnection
                 c.instanceFollowRedirects = false
-                c.connectTimeout = 4000
-                c.readTimeout = 4000
+                c.connectTimeout = 3000
+                c.readTimeout = 3000
                 c.setRequestProperty("Icy-MetaData", "1")
                 c.setRequestProperty("User-Agent", "RadioFinder/1.0")
                 val code = c.responseCode
