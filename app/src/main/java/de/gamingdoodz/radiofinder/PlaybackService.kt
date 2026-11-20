@@ -45,6 +45,8 @@ class PlaybackService : MediaLibraryService() {
 
     companion object {
         const val CMD_SLEEP = "SLEEP_TIMER"
+        const val CMD_HITMIX = "HITMIX"        // args: "genre" (leer = Deutsche Charts), "stop"
+        const val CMD_NEXT = "NEXT_HIT"
     }
 
     private var session: MediaLibrarySession? = null
@@ -55,6 +57,24 @@ class PlaybackService : MediaLibraryService() {
     private val listContext = ConcurrentHashMap<String, List<MediaItem>>()
     private val favCommand = SessionCommand("FAV_TOGGLE", Bundle.EMPTY)
     private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
+    private val hitMixCommand = SessionCommand(CMD_HITMIX, Bundle.EMPTY)
+    private val nextCommand = SessionCommand(CMD_NEXT, Bundle.EMPTY)
+    private val shows = ConcurrentHashMap<String, Entry>()
+    private val posRunnable = object : Runnable {
+        override fun run() {
+            savePosition()
+            sleepHandler.postDelayed(this, 15_000)
+        }
+    }
+
+    /** Wo war man bei der Geschichte? Wird regelmäßig gespeichert. */
+    private fun savePosition() {
+        val p = session?.player ?: return
+        val id = p.currentMediaItem?.mediaId ?: return
+        Positions.save(this, id, p.currentPosition, p.duration.coerceAtLeast(0))
+    }
+
+    private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }) }
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val sleepRunnable = Runnable {
         session?.player?.pause()
@@ -89,6 +109,10 @@ class PlaybackService : MediaLibraryService() {
                 if (state == Player.STATE_READY) retries = 0
             }
 
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) savePosition()
+            }
+
             /** Fehler abfangen: Lied überspringen bzw. Sender kurz neu verbinden. */
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 val p = session?.player ?: return
@@ -114,6 +138,7 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(openApp)
             .build()
         Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        sleepHandler.postDelayed(posRunnable, 15_000)
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
         if (left > 0) sleepHandler.postDelayed(sleepRunnable, left) else Settings.setSleepEnd(this, 0L)
@@ -127,6 +152,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        savePosition()
+        sleepHandler.removeCallbacks(posRunnable)
+        hitMix.stop()
         sleepHandler.removeCallbacks(sleepRunnable)
         Settings.setSleepEnd(this, 0L)
         Favorites.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
@@ -155,16 +183,30 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
     @Suppress("DEPRECATION")
+    private fun nextButton(): CommandButton =
+        CommandButton.Builder()
+            .setDisplayName("Nächster Hit")
+            .setIconResId(R.drawable.ic_next)
+            .setSessionCommand(nextCommand)
+            .build()
+
+    private fun buttons(): ImmutableList<CommandButton> =
+        if (hitMix.isActive) ImmutableList.of(nextButton(), favButton(currentIsFav()))
+        else ImmutableList.of(favButton(currentIsFav()))
+
+    @Suppress("DEPRECATION")
     private fun updateFavButton() {
-        session?.setCustomLayout(ImmutableList.of(favButton(currentIsFav())))
+        session?.setCustomLayout(buttons())
     }
 
     // ---------- Listen ----------
 
     private fun remember(items: List<MediaItem>) {
         items.forEach { itemCache[it.mediaId] = it }
-        val tracks = items.filter { !it.mediaId.startsWith("st:") }
+        val tracks = items.filter { !it.mediaId.startsWith("st:") && !it.mediaId.startsWith("hitmix:") }
         if (tracks.size > 1) tracks.forEach { listContext[it.mediaId] = tracks }
+        val stations = items.filter { it.mediaId.startsWith("st:") }
+        if (stations.size > 1) stations.forEach { listContext[it.mediaId] = stations }
     }
 
     private suspend fun kidsEntries(): List<Entry> = coroutineScope {
@@ -226,9 +268,9 @@ class PlaybackService : MediaLibraryService() {
             MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                        .buildUpon().add(favCommand).add(sleepCommand).build()
+                        .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand).build()
                 )
-                .setCustomLayout(ImmutableList.of(favButton(currentIsFav())))
+                .setCustomLayout(buttons())
                 .build()
 
         override fun onCustomCommand(
@@ -237,6 +279,25 @@ class PlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == CMD_HITMIX) {
+                if (args.getBoolean("stop", false)) {
+                    hitMix.stop()
+                } else {
+                    val genre = args.getString("genre")?.takeIf { it.isNotBlank() }
+                    scope.launch {
+                        val item = hitMix.start(genre)
+                        val p = session?.player
+                        if (item != null && p != null) { p.setMediaItem(item); p.prepare(); p.play() }
+                        updateFavButton()
+                    }
+                }
+                updateFavButton()
+            }
+            if (customCommand.customAction == CMD_NEXT) {
+                val p = session.player
+                if (hitMix.isActive) scope.launch { hitMix.next() }
+                else if (p.hasNextMediaItem()) p.seekToNextMediaItem()
+            }
             if (customCommand.customAction == CMD_SLEEP) {
                 val min = args.getInt("min", 0)
                 sleepHandler.removeCallbacks(sleepRunnable)
@@ -280,6 +341,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> listOf(
+                    hitMixItem(null, "⚡ Hit-Mix – nur Hits"),
                     folderItem(FAV_ID, "⭐ Favoriten"),
                     folderItem(RECENT_ID, "🕘 Zuletzt gehört"),
                     folderItem(LIVE_ID, "🔴 Gerade im Radio"),
@@ -287,6 +349,7 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(POPULAR_ID, "📻 Beliebte Sender"),
                     folderItem(FREE_ID, "🎵 Freie Musik"),
                     folderItem(KIDS_ID, "🧸 Kinder"),
+                    folderItem(STORIES_ID, "📚 Geschichten & Hörspiele"),
                     folderItem(HITS_ID, "🔎 Letzte Suche"),
                 )
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
@@ -306,10 +369,22 @@ class PlaybackService : MediaLibraryService() {
                         .map { it.station.toEntry(it.title).toMediaItem() }
                 }
                 HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
-                KIDS_ID -> kidsEntries().map { it.toMediaItem() }
+                KIDS_ID -> listOf(hitMixItem("kids", "⚡ Kinder-Hit-Mix")) + kidsEntries().map { it.toMediaItem() }
                 FREE_ID -> FreeMusic.charts().map { it.toMediaItem() }
                 POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
-                else -> emptyList()
+                STORIES_ID -> Podcasts.all.map { folderItem("cat:" + it.key, (if (it.kids) "🧸 " else "") + it.name) }
+                else -> when {
+                    parentId.startsWith("cat:") -> {
+                        val cat = Podcasts.all.firstOrNull { it.key == parentId.removePrefix("cat:") }
+                        cat?.let { Podcasts.shows(it) }.orEmpty().map { show ->
+                            shows["show:" + show.id] = show
+                            folderItem("show:" + show.id, show.name)
+                        }
+                    }
+                    parentId.startsWith("show:") ->
+                        shows[parentId]?.let { Podcasts.episodes(it) }.orEmpty().map { it.toMediaItem() }
+                    else -> emptyList()
+                }
             }
             remember(items)
             LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
@@ -390,17 +465,34 @@ class PlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            // Hit-Mix gewählt?
+            val hm = mediaItems.firstOrNull { it.mediaId.startsWith("hitmix:") }
+            if (hm != null) {
+                val first = hitMix.start(hm.mediaId.removePrefix("hitmix:").ifBlank { null })
+                updateFavButton()
+                return@future MediaSession.MediaItemsWithStartPosition(
+                    listOfNotNull(first), if (first == null) C.INDEX_UNSET else 0, C.TIME_UNSET
+                )
+            }
+            // Etwas anderes gewählt: Hit-Mix beenden
+            if (hitMix.isActive) { hitMix.stop(); updateFavButton() }
             val resolved = mediaItems.mapNotNull { resolve(it) }
             // Ein einzelnes freies Lied aus einer Liste: ganze Liste laden, damit "Weiter" geht
             if (resolved.size == 1) {
                 val list = listContext[resolved[0].mediaId]
                 if (list != null) {
                     val idx = list.indexOfFirst { it.mediaId == resolved[0].mediaId }.coerceAtLeast(0)
-                    return@future MediaSession.MediaItemsWithStartPosition(list, idx, C.TIME_UNSET)
+                    val saved = Positions.get(this@PlaybackService, resolved[0].mediaId).takeIf { it > 0 } ?: C.TIME_UNSET
+                    return@future MediaSession.MediaItemsWithStartPosition(list.map { liveTitle(it) ?: it }, idx, saved)
                 }
             }
             val index = if (resolved.size == mediaItems.size) startIndex else 0
-            MediaSession.MediaItemsWithStartPosition(resolved, index, startPositionMs)
+            // Geschichten dort weiterspielen, wo man aufgehört hat
+            val startItem = resolved.getOrNull(if (index == C.INDEX_UNSET) 0 else index)
+            val pos = if (startPositionMs == C.TIME_UNSET || startPositionMs == 0L) {
+                startItem?.let { Positions.get(this@PlaybackService, it.mediaId) }?.takeIf { it > 0 } ?: startPositionMs
+            } else startPositionMs
+            MediaSession.MediaItemsWithStartPosition(resolved, index, pos)
         }
     }
 }

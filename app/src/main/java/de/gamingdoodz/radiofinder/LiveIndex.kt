@@ -8,8 +8,22 @@ import java.util.concurrent.ConcurrentHashMap
  * Damit kommen Suchergebnisse sofort, und Chart-Songs bekommen "LIVE".
  */
 object LiveIndex {
-    class Now(val station: Station, val title: String, val time: Long) {
+    /** time = zuletzt gesehen, since = seit wann dieser Titel auf dem Sender läuft. */
+    class Now(val station: Station, val title: String, val time: Long, val since: Long) {
         val normalized: String = Scanner.normalize(title)
+    }
+
+    /** Ein Song zum Wiedererkennen im Radio (Titel- und Künstlerwörter). */
+    class Song(val entry: Entry) {
+        private val titleWords = Scanner.words(
+            entry.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ").substringBefore(" - ")
+        ).filter { it.length >= 2 }
+        private val artistWords = Scanner.words(entry.subtitle).filter { it.length >= 3 }
+        val key: String = titleWords.joinToString(" ")
+
+        fun matches(normalizedRadioTitle: String): Boolean =
+            titleWords.isNotEmpty() && titleWords.all { normalizedRadioTitle.contains(it) } &&
+                (artistWords.isEmpty() || artistWords.any { normalizedRadioTitle.contains(it) })
     }
 
     private const val MAX_AGE = 4 * 60_000L
@@ -19,8 +33,13 @@ object LiveIndex {
         private set
 
     fun put(s: Station, title: String) {
-        map[s.id] = Now(s, title, System.currentTimeMillis())
+        val t = System.currentTimeMillis()
+        val old = map[s.id]
+        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) old.since else t
+        map[s.id] = Now(s, title, t, since)
     }
+
+    fun get(stationId: String): Now? = map[stationId]?.takeIf { System.currentTimeMillis() - it.time < MAX_AGE }
 
     fun isFresh(s: Station) = map[s.id]?.let { System.currentTimeMillis() - it.time < MAX_AGE } == true
 
@@ -37,20 +56,17 @@ object LiveIndex {
 
     /** Läuft dieser Song (Titel + Künstler) gerade irgendwo? */
     fun findSong(title: String, artist: String): Now? {
-        val clean = title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ").substringBefore(" - ")
-        val tw = Scanner.words(clean).filter { it.length >= 2 }
-        if (tw.isEmpty()) return null
-        val aw = Scanner.words(artist).filter { it.length >= 3 }
-        return fresh().firstOrNull { n ->
-            tw.all { n.normalized.contains(it) } && (aw.isEmpty() || aw.any { n.normalized.contains(it) })
-        }
+        val song = Song(Entry("", Kind.TRACK, title, artist, "", "", title))
+        return fresh().firstOrNull { song.matches(it.normalized) }
     }
 
     /** Aktualisiert die Liste für die angegebenen Sender (nur einmal gleichzeitig). */
-    suspend fun refresh(stations: List<Station>) {
+    suspend fun refresh(stations: List<Station>, maxAgeMs: Long = MAX_AGE, statusOnly: Boolean = false) {
         if (!refreshLock.tryLock()) return
         try {
-            Scanner.titles(stations.filter { !isFresh(it) }) { _, _ -> }
+            val t = System.currentTimeMillis()
+            val due = stations.filter { s -> map[s.id]?.let { t - it.time >= maxAgeMs } ?: true }
+            Scanner.titles(due, statusOnly = statusOnly) { _, _ -> }
             lastRefresh = System.currentTimeMillis()
         } finally {
             refreshLock.unlock()

@@ -48,6 +48,10 @@ object StationRepository {
 
     private val kidsQueries = listOf(
         "name=teddy&limit=10",
+        "name=kiraka&limit=5",
+        "name=toggo&limit=5",
+        "name=kakadu&limit=5",
+        "name=kinderradio&limit=10",
         "tag=kinder&limit=40",
         "tag=kinderlieder&limit=20",
         "tag=kids&limit=30",

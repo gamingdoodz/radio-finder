@@ -53,11 +53,12 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private enum class Tab { HOME, FIND, KIDS, LIB }
+    private enum class Tab { HOME, FIND, KIDS, STORIES, LIB }
 
     private sealed class Page {
         data class GenrePage(val genre: Genre) : Page()
         object ChartsPage : Page()
+        data class ShowPage(val show: Entry) : Page()
     }
 
     private sealed class Row {
@@ -99,6 +100,12 @@ class MainActivity : ComponentActivity() {
     private val genreSongs = HashMap<String, List<Entry>>()
     private val genreFree = HashMap<String, List<Entry>>()
     private val genreLoading = HashSet<String>()
+
+    // Geschichten
+    private val storyShows = HashMap<String, List<Entry>>()
+    private val storyLoading = HashSet<String>()
+    private val episodes = HashMap<String, List<Entry>>()
+    private var artistMix: Deezer.Artist? = null
 
     // Suche
     private var query = ""
@@ -174,15 +181,16 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.navHome).setOnClickListener { selectTab(Tab.HOME) }
         findViewById<View>(R.id.navFind).setOnClickListener { selectTab(Tab.FIND) }
         findViewById<View>(R.id.navKids).setOnClickListener { selectTab(Tab.KIDS) }
+        findViewById<View>(R.id.navStories).setOnClickListener { selectTab(Tab.STORIES) }
         findViewById<View>(R.id.navLib).setOnClickListener { selectTab(Tab.LIB) }
 
         mini.setOnClickListener { showFull(true) }
         findViewById<View>(R.id.miniPlay).setOnClickListener { togglePlay() }
-        findViewById<View>(R.id.miniNext).setOnClickListener { controller?.seekToNextMediaItem() }
+        findViewById<View>(R.id.miniNext).setOnClickListener { next() }
 
         findViewById<View>(R.id.fullClose).setOnClickListener { showFull(false) }
         findViewById<View>(R.id.fullPlay).setOnClickListener { togglePlay() }
-        findViewById<View>(R.id.fullNext).setOnClickListener { controller?.seekToNextMediaItem() }
+        findViewById<View>(R.id.fullNext).setOnClickListener { next() }
         findViewById<View>(R.id.fullPrev).setOnClickListener { controller?.seekToPreviousMediaItem() }
         findViewById<View>(R.id.fullStop).setOnClickListener {
             controller?.stop()
@@ -219,7 +227,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        listOf(Favorites.prefs(this), WatchService.prefs(this), Recent.prefs(this), Settings.prefs(this))
+        listOf(Favorites.prefs(this), WatchService.prefs(this), Recent.prefs(this), Settings.prefs(this), HitMix.prefs(this))
             .forEach { it.registerOnSharedPreferenceChangeListener(prefsListener) }
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
@@ -238,7 +246,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        listOf(Favorites.prefs(this), WatchService.prefs(this), Recent.prefs(this), Settings.prefs(this))
+        listOf(Favorites.prefs(this), WatchService.prefs(this), Recent.prefs(this), Settings.prefs(this), HitMix.prefs(this))
             .forEach { it.unregisterOnSharedPreferenceChangeListener(prefsListener) }
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
@@ -304,6 +312,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadStories(cats: List<Podcasts.Category>) {
+        cats.filter { !storyShows.containsKey(it.key) && storyLoading.add(it.key) }.forEach { cat ->
+            lifecycleScope.launch {
+                storyShows[cat.key] = Podcasts.shows(cat)
+                storyLoading.remove(cat.key)
+                render()
+            }
+        }
+    }
+
+    private fun loadEpisodes(show: Entry) {
+        if (episodes.containsKey(show.url)) return
+        lifecycleScope.launch {
+            episodes[show.url] = Podcasts.episodes(show)
+            render()
+        }
+    }
+
     private fun loadGenre(g: Genre) {
         if (genreStations.containsKey(g.key) || !genreLoading.add(g.key)) return
         lifecycleScope.launch {
@@ -333,13 +359,15 @@ class MainActivity : ComponentActivity() {
             Triple(Tab.HOME, R.id.navHomeIcon, R.id.navHomeLabel),
             Triple(Tab.FIND, R.id.navFindIcon, R.id.navFindLabel),
             Triple(Tab.KIDS, R.id.navKidsIcon, R.id.navKidsLabel),
+            Triple(Tab.STORIES, R.id.navStoriesIcon, R.id.navStoriesLabel),
             Triple(Tab.LIB, R.id.navLibIcon, R.id.navLibLabel),
         ).forEach { (key, icon, label) ->
             val color = if (key == t) accent else dim
             findViewById<ImageView>(icon).imageTintList = ColorStateList.valueOf(color)
             findViewById<TextView>(label).setTextColor(color)
         }
-        if (t == Tab.KIDS) loadKids()
+        if (t == Tab.KIDS) { loadKids(); loadStories(Podcasts.kidsCategories) }
+        if (t == Tab.STORIES) loadStories(Podcasts.all)
         render()
         recycler.scrollToPosition(0)
     }
@@ -347,6 +375,7 @@ class MainActivity : ComponentActivity() {
     private fun openPage(p: Page) {
         page = p
         if (p is Page.GenrePage) loadGenre(p.genre)
+        if (p is Page.ShowPage) loadEpisodes(p.show)
         render()
         recycler.scrollToPosition(0)
     }
@@ -354,7 +383,7 @@ class MainActivity : ComponentActivity() {
     private fun updateBack() {
         back.visibility = if (page != null) View.VISIBLE else View.GONE
         findViewById<View>(R.id.brand).visibility = if (page == null && tab == Tab.HOME) View.VISIBLE else View.GONE
-        searchBox.visibility = if (tab == Tab.FIND && page == null) View.VISIBLE else View.GONE
+        searchBox.visibility = if ((tab == Tab.FIND || tab == Tab.HOME) && page == null) View.VISIBLE else View.GONE
         val chip = findViewById<TextView>(R.id.liveChip)
         val n = LiveIndex.fresh().size
         chip.visibility = if (page == null && tab == Tab.HOME && n > 0) View.VISIBLE else View.GONE
@@ -363,10 +392,12 @@ class MainActivity : ComponentActivity() {
         pageTitle.text = when (val p = page) {
             is Page.GenrePage -> p.genre.name
             Page.ChartsPage -> "Deutsche Charts"
+            is Page.ShowPage -> p.show.name
             null -> when (tab) {
                 Tab.HOME -> "Radio Finder"
                 Tab.FIND -> "Finden"
                 Tab.KIDS -> "Für Kinder"
+                Tab.STORIES -> "Geschichten"
                 Tab.LIB -> "Bibliothek"
             }
         }
@@ -384,6 +415,7 @@ class MainActivity : ComponentActivity() {
         val myId = ++searchId
         query = q
         songHits = emptyList()
+        artistMix = null
         radioHits.clear()
         stationHits = emptyList()
         freeHits = emptyList()
@@ -404,8 +436,16 @@ class MainActivity : ComponentActivity() {
 
         searchJob = lifecycleScope.launch {
             launch {
+                val a = Deezer.artist(q)
+                if (myId == searchId) { artistMix = a; render() }
+            }
+            launch {
                 val songs = Deezer.search(q)
                 if (myId == searchId) { songHits = songs; songLoading = false; render() }
+            }
+            launch {
+                val st = Podcasts.search(q, limit = 12)
+                if (myId == searchId) { storyShows["search"] = st; render() }
             }
             launch {
                 val free = FreeMusic.search(q)
@@ -449,10 +489,12 @@ class MainActivity : ComponentActivity() {
         when (val p = page) {
             is Page.GenrePage -> renderGenre(p.genre)
             Page.ChartsPage -> renderCharts()
+            is Page.ShowPage -> renderShow(p.show)
             null -> when (tab) {
                 Tab.HOME -> renderHome()
                 Tab.FIND -> if (query.isEmpty()) renderFind() else renderSearch()
                 Tab.KIDS -> renderKids()
+                Tab.STORIES -> renderStories()
                 Tab.LIB -> renderLib()
             }
         }
@@ -462,9 +504,43 @@ class MainActivity : ComponentActivity() {
 
     private fun watchRow(): Row? {
         val q = WatchService.activeQuery(this) ?: return null
-        return Row.Action("Wächter sucht „$q“", WatchService.status(this) + " · Tippen zum Beenden", dark = true) {
-            WatchService.stop(this)
+        return Row.Action("🔔 Wächter: „$q“", WatchService.status(this) + " · Tippen zum Verwalten", dark = true) {
+            watchSheet()
         }
+    }
+
+    private fun watchSheet() {
+        val wishes = WatchService.queries(this)
+        val options = wishes.map { q -> Option(R.drawable.ic_close, q, "Tippen zum Entfernen") { WatchService.remove(this, q) } } +
+            Option(R.drawable.ic_stop, "Wächter beenden", "Alle Wunschlieder entfernen") { WatchService.stop(this) }
+        sheet("Wunschliste", WatchService.status(this), null, "", false,
+            "Das erste Lied, das irgendwo läuft, wird sofort abgespielt.", options)
+    }
+
+    private fun startHitMix(key: String?, label: String) {
+        val c = controller ?: run {
+            Toast.makeText(this, "Player startet noch, bitte nochmal tippen", Toast.LENGTH_SHORT).show(); return
+        }
+        c.setMediaItem(hitMixItem(key, "⚡ Hit-Mix $label"))
+        c.prepare()
+        c.play()
+        Toast.makeText(this, "Hit-Mix sucht einen Sender mit einem Hit…", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopHitMix() {
+        controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_HITMIX, Bundle.EMPTY), Bundle().apply { putBoolean("stop", true) })
+    }
+
+    private fun hitMixRow(key: String?, label: String, sub: String): Row {
+        val active = HitMix.activeName(this)
+        return if (active != null) Row.Action("⚡ Hit-Mix läuft: $active", (HitMix.nowPlaying(this) ?: "") + " · Tippen zum Beenden", dark = true) { stopHitMix() }
+        else Row.Action("⚡ Hit-Mix $label", sub, dark = false) { startHitMix(key, label) }
+    }
+
+    private fun next() {
+        val c = controller ?: return
+        if (HitMix.activeName(this) != null) c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
+        else c.seekToNextMediaItem()
     }
 
     private fun liveEntries(stations: List<Station>): List<Entry> {
@@ -491,6 +567,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderHome() {
+        rows.add(hitMixRow(null, "starten", "Nur aktuelle Hits aus dem Radio – springt automatisch zum nächsten Hit"))
         val live = liveEntries(popular.take(60))
         rows.add(Row.Header("Gerade im Radio", "Was jetzt auf beliebten Sendern läuft"))
         if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.take(25), live = true))
@@ -552,6 +629,13 @@ class MainActivity : ComponentActivity() {
             })
         }
 
+        artistMix?.let { a ->
+            if (HitMix.activeName(this) == null) {
+                rows.add(Row.Action("⚡ ${a.name}-Mix", "Nur Lieder von ${a.name} – springt zwischen Radios, die gerade ${a.name} spielen", dark = false) {
+                    startHitMix("artist:${a.id}:${a.name}", "– ${a.name}")
+                })
+            }
+        }
         rows.add(Row.Header("Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
         when {
             songLoading -> rows.add(Row.Empty("Suche…"))
@@ -564,6 +648,10 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.Carousel(stationHits))
         }
 
+        storyShows["search"]?.takeIf { it.isNotEmpty() }?.let {
+            rows.add(Row.Header("Geschichten & Podcasts"))
+            rows.add(Row.Carousel(it))
+        }
         rows.add(Row.Header("Freie Musik", "Jamendo · Audius · Internet Archive"))
         when {
             freeLoading -> rows.add(Row.Empty("Suche…"))
@@ -574,6 +662,7 @@ class MainActivity : ComponentActivity() {
 
     private fun renderGenre(g: Genre) {
         rows.add(Row.Hero(g, "Radio live · Top-Songs · Freie Musik"))
+        if (g.key != "schlager" && g.key != "chill") rows.add(hitMixRow(g.key, g.name, "Nur ${g.name}-Hits aus dem Radio"))
         val stations = genreStations[g.key]
         rows.add(Row.Header("Sender", "● LIVE zeigt, was gerade läuft"))
         when {
@@ -597,13 +686,49 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun renderStories() {
+        rows.add(Row.Header("Für Kinder", "Gute-Nacht-Geschichten, Märchen, Hörspiele"))
+        Podcasts.kidsCategories.forEach { addCategory(it) }
+        rows.add(Row.Header("Für Erwachsene", "Krimis, Hörbücher, Grusel, Comedy"))
+        Podcasts.adultCategories.forEach { addCategory(it) }
+    }
+
+    private fun addCategory(cat: Podcasts.Category) {
+        val list = storyShows[cat.key]
+        rows.add(Row.Empty(cat.name.uppercase()))
+        when {
+            list == null -> rows.add(Row.Empty("Lade…"))
+            list.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
+            else -> rows.add(Row.Carousel(list))
+        }
+    }
+
+    private fun renderShow(show: Entry) {
+        val list = episodes[show.url]
+        rows.add(Row.Item(show, emptyList()))
+        rows.add(Row.Header("Folgen", "Neueste zuerst · weiterhören, wo du aufgehört hast"))
+        when {
+            list == null -> rows.add(Row.Empty("Lade Folgen…"))
+            list.isEmpty() -> rows.add(Row.Empty("Keine Folgen gefunden."))
+            else -> list.forEach { e ->
+                val pos = Positions.get(this, e.id)
+                rows.add(Row.Item(e, list, if (pos > 0) "▶ weiter bei ${fmt(pos)}" else null))
+            }
+        }
+    }
+
     private fun renderCharts() {
         rows.add(Row.Hero(Genres.all.first(), "Die Top 100 in Deutschland"))
         if (topDe.isEmpty()) rows.add(Row.Empty("Lade…")) else addSongs(topDe, ranked = true)
     }
 
     private fun renderKids() {
-        rows.add(Row.Hero(Genres.all.last(), "Kinderradios · Kinder-Hits · Kinderlieder"))
+        rows.add(Row.Hero(Genres.all.last(), "Radios · Lieder · Geschichten"))
+        rows.add(hitMixRow("kids", "für Kinder", "Bekannte Kinderlieder aus Kinderradios"))
+        Podcasts.kidsCategories.forEach { cat ->
+            val list = storyShows[cat.key]
+            if (!list.isNullOrEmpty()) { rows.add(Row.Header(cat.name)); rows.add(Row.Carousel(list)) }
+        }
         rows.add(Row.Header("Kinderradios", "Rund um die Uhr Kindermusik"))
         when {
             kidStations.isNotEmpty() -> {
@@ -629,6 +754,11 @@ class MainActivity : ComponentActivity() {
         val favs = Favorites.all(this)
         val stations = favs.filter { it.kind == Kind.STATION }
         val tracks = favs.filter { it.kind == Kind.TRACK }
+        val showsFav = favs.filter { it.kind == Kind.SHOW }
+        if (showsFav.isNotEmpty()) {
+            rows.add(Row.Header("Lieblingsgeschichten"))
+            rows.add(Row.Carousel(showsFav))
+        }
         rows.add(Row.Header("Lieblingssender"))
         if (stations.isEmpty()) rows.add(Row.Empty("Tipp bei einem Sender auf ♥ (bei Kacheln lange drücken).")) else rows.add(Row.Carousel(stations))
         rows.add(Row.Header("Lieblingslieder"))
@@ -664,6 +794,7 @@ class MainActivity : ComponentActivity() {
     // ================= Abspielen =================
 
     private fun onEntryTap(e: Entry, section: List<Entry>) {
+        if (e.kind == Kind.SHOW) { if ((page as? Page.ShowPage)?.show?.id != e.id) openPage(Page.ShowPage(e)); return }
         if (!e.preview) { play(e, section); return }
         val live = LiveIndex.findSong(e.title, e.subtitle)
         if (live != null) {
@@ -746,6 +877,12 @@ class MainActivity : ComponentActivity() {
             val tracks = section.filter { it.kind == Kind.TRACK && !it.preview }
             val idx = tracks.indexOfFirst { it.id == entry.id }
             if (idx >= 0) c.setMediaItems(tracks.map { it.toMediaItem() }, idx, 0L) else c.setMediaItem(entry.toMediaItem())
+        } else if (entry.kind == Kind.STATION) {
+            // Ganze Senderliste laden: "Weiter" springt zum nächsten Sender
+            val stations = section.filter { it.kind == Kind.STATION }
+            val idx = stations.indexOfFirst { it.id == entry.id }
+            if (idx >= 0 && stations.size > 1) c.setMediaItems(stations.map { it.toMediaItem() }, idx, 0L)
+            else c.setMediaItem(entry.toMediaItem())
         } else {
             c.setMediaItem(entry.toMediaItem())
         }
@@ -816,7 +953,8 @@ class MainActivity : ComponentActivity() {
         findViewById<TextView>(R.id.miniSub).text = sub
         findViewById<ImageButton>(R.id.miniPlay).setImageResource(playIcon)
         findViewById<EqualizerView>(R.id.miniEq).playing = c.isPlaying
-        findViewById<View>(R.id.miniNext).visibility = if (c.hasNextMediaItem()) View.VISIBLE else View.GONE
+        val canNext = c.hasNextMediaItem() || HitMix.activeName(this) != null
+        findViewById<View>(R.id.miniNext).visibility = if (canNext) View.VISIBLE else View.GONE
         findViewById<View>(R.id.miniProgress).visibility = if (isStation) View.INVISIBLE else View.VISIBLE
         bindArt(findViewById(R.id.miniArt), findViewById(R.id.miniInitials), art, name, isStation, 12f)
 
@@ -831,7 +969,7 @@ class MainActivity : ComponentActivity() {
             findViewById<View>(R.id.fullBadge).visibility = if (isStation) View.VISIBLE else View.GONE
             findViewById<ImageButton>(R.id.fullPlay).setImageResource(playIcon)
             findViewById<ImageButton>(R.id.fullFav).setImageResource(if (isFav) R.drawable.ic_heart else R.drawable.ic_heart_outline)
-            findViewById<View>(R.id.fullNext).visibility = if (c.hasNextMediaItem()) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.fullNext).visibility = if (canNext) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullPrev).visibility = if (c.hasPreviousMediaItem()) View.VISIBLE else View.GONE
             findViewById<EqualizerView>(R.id.fullEq).apply { bars = 9; this.playing = c.isPlaying }
             findViewById<View>(R.id.fullSeek).visibility = if (isStation) View.INVISIBLE else View.VISIBLE

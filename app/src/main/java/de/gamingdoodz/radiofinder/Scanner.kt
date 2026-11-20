@@ -51,6 +51,7 @@ object Scanner {
     suspend fun titles(
         stations: List<Station>,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        statusOnly: Boolean = false,
         onTitle: (Station, String) -> Unit,
     ) {
         val done = AtomicInteger()
@@ -67,7 +68,7 @@ object Scanner {
                     for (s in group) {
                         launch(io) {
                             val title = statusTitles?.let { titleFor(s, it) }
-                                ?: if (s.hls) null else sem.withPermit { IcyReader.fetchTitle(s.url) }
+                                ?: if (s.hls || statusOnly) null else sem.withPermit { IcyReader.fetchTitle(s.url) }
                             if (title != null) {
                                 LiveIndex.put(s, title)
                                 onTitle(s, title)

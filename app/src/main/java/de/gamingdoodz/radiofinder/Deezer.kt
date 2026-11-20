@@ -29,6 +29,25 @@ object Deezer {
             .distinctBy { it.id }
     }
 
+    data class Artist(val id: Long, val name: String, val picture: String)
+
+    /** Passender Künstler zur Suche (nur wenn der Name wirklich passt). */
+    suspend fun artist(q: String): Artist? = withContext(Dispatchers.IO) {
+        val text = Net.get("https://api.deezer.com/search/artist?limit=1&q=" + URLEncoder.encode(q, "UTF-8")) ?: return@withContext null
+        try {
+            val o = JSONObject(text).optJSONArray("data")?.optJSONObject(0) ?: return@withContext null
+            val name = o.optString("name")
+            val nq = Scanner.normalize(q)
+            val nn = Scanner.normalize(name)
+            if (nn.isEmpty() || !(nq.contains(nn) || nn.contains(nq))) return@withContext null
+            Artist(o.optLong("id"), name, o.optString("picture_big"))
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun artistTop(id: Long): List<Entry> = cached("a$id") { load("artist/$id/top?limit=50") }
+
     suspend fun search(q: String, limit: Int = 25): List<Entry> =
         load("search?q=${URLEncoder.encode(q, "UTF-8")}&limit=$limit")
 

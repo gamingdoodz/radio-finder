@@ -6,7 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import org.json.JSONObject
 
-enum class Kind { STATION, TRACK }
+enum class Kind { STATION, TRACK, SHOW }
 
 /** Ein Eintrag in den Listen: ein Radiosender oder ein freies Lied. */
 data class Entry(
@@ -22,6 +22,7 @@ data class Entry(
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("kind", kind.name).put("title", name)
         .put("subtitle", if (kind == Kind.STATION) "Internetradio" else subtitle)
+        .put("feed", if (kind == Kind.SHOW) url else "")
         .put("url", url).put("artwork", artwork).put("name", name).put("preview", preview)
 
     fun toMediaItem(): MediaItem {
@@ -45,7 +46,7 @@ data class Entry(
     companion object {
         fun fromJson(o: JSONObject) = Entry(
             id = o.getString("id"),
-            kind = if (o.optString("kind") == "TRACK") Kind.TRACK else Kind.STATION,
+            kind = try { Kind.valueOf(o.optString("kind")) } catch (_: Exception) { Kind.STATION },
             title = o.optString("title"),
             subtitle = o.optString("subtitle"),
             url = o.getString("url"),
@@ -94,6 +95,7 @@ fun Audius.Track.toEntry() = Entry(
 
 const val ROOT_ID = "root"
 const val RECENT_ID = "recent"
+const val STORIES_ID = "stories"
 const val LIVE_ID = "live"
 const val CHARTS_LIVE_ID = "chartslive"
 const val FAV_ID = "fav"
@@ -111,6 +113,21 @@ fun folderItem(id: String, title: String): MediaItem =
                 .setIsBrowsable(true)
                 .setIsPlayable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                .build()
+        )
+        .build()
+
+/** Abspielbarer Eintrag, der den Hit-Mix startet (genreKey = null: Deutsche Charts). */
+fun hitMixItem(genreKey: String?, title: String): MediaItem =
+    MediaItem.Builder()
+        .setMediaId("hitmix:" + (genreKey ?: ""))
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist("Nur Hits aus dem Radio")
+                .setIsPlayable(true)
+                .setIsBrowsable(false)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
                 .build()
         )
         .build()

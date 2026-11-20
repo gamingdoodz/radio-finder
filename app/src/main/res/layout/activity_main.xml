@@ -253,6 +253,11 @@
                 <TextView android:id="@+id/navKidsLabel" style="@style/NavLabel" android:text="Kinder" />
             </LinearLayout>
 
+            <LinearLayout android:id="@+id/navStories" style="@style/NavItem">
+                <ImageView android:id="@+id/navStoriesIcon" style="@style/NavIcon" android:src="@drawable/ic_book" />
+                <TextView android:id="@+id/navStoriesLabel" style="@style/NavLabel" android:text="Geschichten" />
+            </LinearLayout>
+
             <LinearLayout android:id="@+id/navLib" style="@style/NavItem">
                 <ImageView android:id="@+id/navLibIcon" style="@style/NavIcon" android:src="@drawable/ic_library" />
                 <TextView android:id="@+id/navLibLabel" style="@style/NavLabel" android:text="Bibliothek" />
