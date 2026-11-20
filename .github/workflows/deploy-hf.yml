@@ -1,0 +1,27 @@
+name: Server zu Hugging Face
+
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/deploy-hf.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Erst aktiv, wenn die Variable HF_SPACE gesetzt ist (z. B. "gamingdoodz/radar")
+    if: ${{ vars.HF_SPACE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Server-Ordner zum Space übertragen
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          git config user.name "deploy"
+          git config user.email "deploy@users.noreply.github.com"
+          git subtree split --prefix server -b space
+          USER_NAME="${HF_SPACE%%/*}"
+          git push --force "https://${USER_NAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" space:main
