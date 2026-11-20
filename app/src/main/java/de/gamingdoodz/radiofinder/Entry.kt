@@ -96,6 +96,7 @@ fun Audius.Track.toEntry() = Entry(
 const val ROOT_ID = "root"
 const val RECENT_ID = "recent"
 const val STORIES_ID = "stories"
+const val MOMENTS_ID = "moments"
 const val LIVE_ID = "live"
 const val CHARTS_LIVE_ID = "chartslive"
 const val FAV_ID = "fav"

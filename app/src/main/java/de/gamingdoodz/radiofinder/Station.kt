@@ -32,6 +32,8 @@ object StationRepository {
         "tag=dance&limit=50",
         "tag=remix&limit=30",
         "tag=kinder&limit=20",
+        "tag=hits&limit=60",
+        "tag=christmas&countrycode=DE&limit=20",
     )
 
     // Im WLAN: mehrere tausend Sender
@@ -44,6 +46,15 @@ object StationRepository {
         "tag=remix&limit=120",
         "tag=charts&limit=150",
         "tag=kinder&limit=50",
+        "tag=hits&limit=250",
+        "tag=top 40&limit=150",
+        "tag=christmas&limit=150",
+        "tag=80s&limit=120",
+        "tag=90s&limit=120",
+        "tag=schlager&limit=120",
+        "tag=party&limit=80",
+        "countrycode=GB&limit=150",
+        "countrycode=US&limit=150",
     )
 
     private val kidsQueries = listOf(

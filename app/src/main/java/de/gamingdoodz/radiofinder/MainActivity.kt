@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
         data class Item(val entry: Entry, val section: List<Entry>, val liveText: String? = null, val rank: Int? = null) : Row()
         data class Status(val text: String, val done: Int, val total: Int) : Row()
         data class Action(val title: String, val sub: String, val dark: Boolean, val icon: Int = R.drawable.ic_bell, val onClick: () -> Unit) : Row()
+        data class Moments(val list: List<de.gamingdoodz.radiofinder.Moments.Moment>) : Row()
         data class Chips(val labels: List<String>, val selected: Int, val onSelect: (Int) -> Unit) : Row()
         data class Empty(val text: String) : Row()
         data class Tiles(val g1: Genre, val g2: Genre?) : Row()
@@ -590,49 +591,44 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderHome() {
-        rows.add(hitMixRow(null, "starten", "Nur aktuelle Hits aus dem Radio – springt automatisch zum nächsten Hit"))
-        val live = liveEntries(popular.take(60))
-        rows.add(Row.Header("Gerade im Radio", "Was jetzt auf beliebten Sendern läuft"))
-        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.take(25), live = true))
+        rows.add(Row.Header(Moments.greeting(), "Für dich jetzt"))
+        rows.add(Row.Moments(Moments.now()))
+        if (HitMix.activeName(this) != null) rows.add(hitMixRow(null, "", ""))
 
-        rows.add(Row.Header("Deutsche Charts", "● LIVE = läuft gerade im Radio, komplett hören", "ALLE 100") { openPage(Page.ChartsPage) })
-        if (topDe.isEmpty()) rows.add(Row.Empty("Lade Charts…")) else {
-            addSongs(topDe.take(10), ranked = true)
-            rows.add(Row.More("Alle 100 Charts anzeigen") { openPage(Page.ChartsPage) })
+        val recent = Recent.all(this)
+        val favs = Favorites.all(this)
+        val again = (favs + recent).distinctBy { it.id }.take(20)
+        if (again.isNotEmpty()) {
+            rows.add(Row.Header("Weiterhören", "Deine Favoriten und zuletzt gehört"))
+            rows.add(Row.Carousel(again))
         }
 
         val chartsLive = dedupe(topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
             .distinctBy { it.station.id }.map { it.station.toEntry(it.title) })
         if (chartsLive.isNotEmpty()) {
-            rows.add(Row.Header("Charts gerade im Radio", "Diese Hits laufen jetzt – komplett hören"))
+            rows.add(Row.Header("Hits gerade im Radio", "Komplett hören – jetzt live"))
             rows.add(Row.Carousel(chartsLive, live = true))
         }
 
-        val recent = Recent.all(this)
-        if (recent.isNotEmpty()) {
-            rows.add(Row.Header("Zuletzt gehört"))
-            rows.add(Row.Carousel(recent))
-        }
-        val favs = Favorites.all(this)
-        if (favs.isNotEmpty()) {
-            rows.add(Row.Header("Deine Favoriten"))
-            rows.add(Row.Carousel(favs))
-        }
-        rows.add(Row.Header("Freie Musik", "Komplett hören, beliebig weiterspringen"))
-        if (freeCharts.isEmpty()) rows.add(Row.Empty("Lade Musik…")) else rows.add(Row.Carousel(freeCharts))
+        val live = liveEntries(popular.take(60))
+        rows.add(Row.Header("Gerade im Radio", "Was jetzt auf beliebten Sendern läuft"))
+        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.take(25), live = true))
 
-        rows.add(Row.Header("Beliebte Sender"))
-        if (popular.isEmpty()) rows.add(Row.Empty("Lade Sender…")) else rows.add(Row.Carousel(popular.take(30).map { it.toEntry() }))
+        rows.add(Row.Header("Deutsche Charts", "● LIVE = läuft gerade im Radio", "ALLE 100") { openPage(Page.ChartsPage) })
+        if (topDe.isEmpty()) rows.add(Row.Empty("Lade Charts…")) else {
+            addSongs(topDe.take(5), ranked = true)
+            rows.add(Row.More("Alle 100 Charts anzeigen") { openPage(Page.ChartsPage) })
+        }
     }
 
     private fun renderFind() {
-        rows.add(Row.Header("Musik nach Genre"))
-        Genres.all.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
-        rows.add(Row.Header("So funktioniert die Suche"))
-        rows.add(Row.Empty(
-            "Gib oben ein Lied ein. Du siehst sofort den Song, ob er gerade im Radio läuft, und freie Musik dazu. " +
-                "Läuft er nirgends, startest du den Wächter. Er spielt das Lied ab, sobald es irgendwo kommt."
-        ))
+        rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
+        rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix"))
+        Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
+        rows.add(Row.Header("Freie Musik", "Komplett hören, beliebig weiterspringen"))
+        if (freeCharts.isEmpty()) rows.add(Row.Empty("Lade Musik…")) else rows.add(Row.Carousel(freeCharts))
+        rows.add(Row.Header("Beliebte Sender"))
+        if (popular.isEmpty()) rows.add(Row.Empty("Lade Sender…")) else rows.add(Row.Carousel(popular.take(30).map { it.toEntry() }))
     }
 
     private fun renderSearch() {
@@ -810,6 +806,16 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.Header("Zuletzt gehört"))
             recent.forEach { rows.add(Row.Item(it, recent.filter { r -> r.kind == Kind.TRACK })) }
         }
+        val heard = Heard.all(this).take(30)
+        if (heard.isNotEmpty()) {
+            rows.add(Row.Header("Im Radio gehört", "Wie hieß das Lied? Tippen für Wächter & mehr"))
+            val list = heard.map { h ->
+                val artist = h.title.substringBefore(" - ").substringBefore(" – ").trim()
+                val title = h.title.substringAfter(" - ").substringAfter(" – ").trim()
+                Entry("hd:" + h.title.hashCode().toString(16), Kind.TRACK, title, artist, "", "", title, preview = true)
+            }
+            list.forEach { e -> rows.add(Row.Item(e, list, liveText(e))) }
+        }
         rows.add(Row.Header("Einstellungen"))
         val saver = Settings.saver(this)
         rows.add(Row.Action(
@@ -896,7 +902,7 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
                     render()
                 },
-                Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) },
+                *(if (e.url.isNotBlank()) arrayOf(Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) }) else emptyArray<Option>()),
                 Option(R.drawable.ic_radar, "Alle Radios durchsuchen", "Auch weniger bekannte Sender") { startSearch(clean) },
                 Option(R.drawable.ic_note, "In Amazon Music öffnen", "Mit Prime im Zufallsmodus") {
                     try {
@@ -1154,12 +1160,13 @@ class MainActivity : ComponentActivity() {
             is Row.Hero -> 7
             is Row.More -> 8
             is Row.Chips -> 9
+            is Row.Moments -> 10
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
             val layout = when (viewType) {
                 0 -> R.layout.item_header
-                1 -> R.layout.item_carousel
+                1, 10 -> R.layout.item_carousel
                 2 -> R.layout.item_row
                 3 -> R.layout.item_status
                 4 -> R.layout.item_action
@@ -1170,6 +1177,12 @@ class MainActivity : ComponentActivity() {
                 else -> R.layout.item_empty
             }
             val v = LayoutInflater.from(parent.context).inflate(layout, parent, false)
+            if (viewType == 10) {
+                val rv = v as RecyclerView
+                rv.layoutManager = LinearLayoutManager(parent.context, LinearLayoutManager.HORIZONTAL, false)
+                rv.adapter = MomentAdapter()
+                rv.itemAnimator = null
+            }
             if (viewType == 1) {
                 val rv = v as RecyclerView
                 rv.layoutManager = LinearLayoutManager(parent.context, LinearLayoutManager.HORIZONTAL, false)
@@ -1241,6 +1254,10 @@ class MainActivity : ComponentActivity() {
                     (v as TextView).text = row.text
                     v.setOnClickListener { row.onClick() }
                 }
+                is Row.Moments -> {
+                    val ma = (v as RecyclerView).adapter as MomentAdapter
+                    if (ma.list != row.list) { ma.list = row.list; ma.notifyDataSetChanged() }
+                }
                 is Row.Chips -> {
                     val box = v.findViewById<ViewGroup>(R.id.chipBox)
                     box.removeAllViews()
@@ -1280,7 +1297,8 @@ class MainActivity : ComponentActivity() {
             val e = row.entry
             bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION, 12f)
             v.findViewById<TextView>(R.id.title).text = e.title
-            v.findViewById<TextView>(R.id.subtitle).text = if (e.preview && row.liveText == null) "${e.subtitle} · Vorschau" else e.subtitle
+            v.findViewById<TextView>(R.id.subtitle).text =
+                if (e.preview && row.liveText == null && e.url.isNotBlank()) "${e.subtitle} · Vorschau" else e.subtitle
             val badge = v.findViewById<TextView>(R.id.badge)
             badge.visibility = if (row.liveText != null) View.VISIBLE else View.GONE
             badge.text = row.liveText ?: ""
@@ -1292,6 +1310,34 @@ class MainActivity : ComponentActivity() {
             fav.setImageResource(if (Favorites.isFav(this@MainActivity, e.id)) R.drawable.ic_heart else R.drawable.ic_heart_outline)
             fav.setOnClickListener { Favorites.toggle(this@MainActivity, e) }
             v.setOnClickListener { onEntryTap(e, row.section) }
+        }
+    }
+
+    private inner class MomentAdapter : RecyclerView.Adapter<VH>() {
+        var list: List<Moments.Moment> = emptyList()
+        override fun getItemCount() = list.size
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
+            VH(LayoutInflater.from(parent.context).inflate(R.layout.item_moment, parent, false))
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            val v = holder.itemView
+            val m = list[position]
+            v.background = gradient(m.color1, m.color2, 20f)
+            v.clipToOutline = true
+            v.findViewById<View>(R.id.momentGlow).background = glow("#FFFFFFFF")
+            v.findViewById<View>(R.id.momentGlow).alpha = 0.25f
+            v.findViewById<ImageView>(R.id.momentIcon).setImageResource(m.icon)
+            v.findViewById<TextView>(R.id.momentTitle).text = m.title
+            v.findViewById<TextView>(R.id.momentSub).text = m.sub
+            v.setOnClickListener { openMoment(m) }
+        }
+    }
+
+    private fun openMoment(m: Moments.Moment) {
+        when (m.action) {
+            Moments.Action.HITMIX -> startHitMix(m.genreKey, "– ${m.title}")
+            Moments.Action.KIDS_STORIES -> { kidsSection = 1; selectTab(Tab.KIDS) }
+            Moments.Action.ADULT_STORIES -> { storySection = m.storyIndex; selectTab(Tab.STORIES) }
         }
     }
 

@@ -124,6 +124,16 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
 
+            override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                val p = session?.player ?: return
+                val item = p.currentMediaItem ?: return
+                if (!item.mediaId.startsWith("st:")) return
+                val t = mediaMetadata.title?.toString()?.trim().orEmpty()
+                if (t.contains(" - ") || t.contains(" – ")) {
+                    Heard.add(this@PlaybackService, t, item.mediaMetadata.artist?.toString().orEmpty())
+                }
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateFavButton()
                 mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
@@ -348,6 +358,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> listOf(
+                    folderItem(MOMENTS_ID, "✨ Für dich jetzt"),
                     hitMixItem(null, "⚡ Hit-Mix – nur Hits"),
                     folderItem(FAV_ID, "⭐ Favoriten"),
                     folderItem(RECENT_ID, "🕘 Zuletzt gehört"),
@@ -360,6 +371,8 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(HITS_ID, "🔎 Letzte Suche"),
                 )
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
+                MOMENTS_ID -> Moments.now().filter { it.action == Moments.Action.HITMIX }
+                    .map { hitMixItem(it.genreKey, "⚡ " + it.title) }
                 RECENT_ID -> Recent.all(applicationContext).map { it.toMediaItem() }
                 LIVE_ID -> {
                     val stations = StationRepository.load(applicationContext, big = false).take(80)
