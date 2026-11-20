@@ -199,7 +199,10 @@ class HitMix(
         val fromAny = if (anyMusic) pool.map { it to it.normalized }.filter { (_, k) -> ok(k) } else emptyList()
 
         val best = listOf(fromList, fromGenre, fromArtist, fromAny).firstOrNull { it.isNotEmpty() }
-            ?.minByOrNull { (n, _) -> t - n.since } ?: return null
+            ?.minByOrNull { (n, _) ->
+                // Sender mit bekannter Vorab-Werbung rutschen nach hinten
+                (t - n.since) + if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L
+            } ?: return null
         val (n, key) = best
         currentStationId = n.station.id
         currentSongKey = key

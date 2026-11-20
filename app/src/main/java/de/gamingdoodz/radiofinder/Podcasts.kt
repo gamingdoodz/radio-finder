@@ -58,7 +58,9 @@ object Podcasts {
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
                 val feed = o.optString("feedUrl")
                 if (!feed.startsWith("http")) return@mapNotNull null
-                if (kidsOnly && o.optString("collectionExplicitness") == "explicit") return@mapNotNull null
+                if (o.optString("collectionExplicitness") == "explicit") return@mapNotNull null
+                val nameCheck = o.optString("collectionName") + " " + o.optString("artistName")
+                if (Regex("(?i)\\bsex|erotik|erotisch|porn|18\\+|nsfw").containsMatchIn(nameCheck)) return@mapNotNull null
                 val name = o.optString("collectionName").ifBlank { o.optString("trackName") }
                 Entry(
                     id = "pd:" + o.optLong("collectionId"),

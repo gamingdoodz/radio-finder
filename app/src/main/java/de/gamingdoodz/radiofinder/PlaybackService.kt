@@ -80,6 +80,10 @@ class PlaybackService : MediaLibraryService() {
     private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }) }
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bedtime = false
+    // Werbung am Senderanfang messen
+    private var stationStart = 0L
+    private var musicSeen = false
+    private var nonMusicSeen = false
     private var exo: ExoPlayer? = null
     private var dynamics: DynamicsProcessing? = null
 
@@ -203,10 +207,6 @@ class PlaybackService : MediaLibraryService() {
                 RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying)
             }
 
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying) savePosition()
-            }
-
             /** Fehler abfangen: Lied überspringen bzw. Sender kurz neu verbinden. */
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 val p = session?.player ?: return
@@ -223,12 +223,32 @@ class PlaybackService : MediaLibraryService() {
                 val item = p.currentMediaItem ?: return
                 if (!item.mediaId.startsWith("st:")) return
                 val t = mediaMetadata.title?.toString()?.trim().orEmpty()
+                val id = item.mediaId.removePrefix("st:")
+                if (!musicSeen && stationStart > 0) {
+                    if (LiveIndex.isMusic(t) && !Ads.isAd(t)) {
+                        musicSeen = true
+                        val took = System.currentTimeMillis() - stationStart
+                        // Erst nach >10 s Musik und vorher Werbung/Ansage: das war Vorab-Werbung
+                        if (took > 10_000 && (nonMusicSeen || Ads.isAd(t))) Ads.record(this@PlaybackService, id, took)
+                        else if (took < 6_000) Ads.clear(this@PlaybackService, id)
+                    } else if (t.isNotEmpty()) {
+                        nonMusicSeen = true
+                    }
+                }
                 if (t.contains(" - ") || t.contains(" – ")) {
                     Heard.add(this@PlaybackService, t, item.mediaMetadata.artist?.toString().orEmpty())
                 }
             }
 
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) savePosition()
+                if (isPlaying && stationStart == 0L && session?.player?.currentMediaItem?.mediaId?.startsWith("st:") == true) {
+                    stationStart = System.currentTimeMillis()
+                }
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                stationStart = 0L; musicSeen = false; nonMusicSeen = false
                 updateFavButton()
                 mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
             }

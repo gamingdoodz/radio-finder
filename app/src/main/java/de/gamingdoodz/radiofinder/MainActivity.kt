@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
     private sealed class Page {
         data class GenrePage(val genre: Genre) : Page()
         object ChartsPage : Page()
+        object GenresPage : Page()
         data class ShowPage(val show: Entry) : Page()
     }
 
@@ -68,6 +69,8 @@ class MainActivity : ComponentActivity() {
         data class Status(val text: String, val done: Int, val total: Int) : Row()
         data class Action(val title: String, val sub: String, val dark: Boolean, val icon: Int = R.drawable.ic_bell, val onClick: () -> Unit) : Row()
         data class Moments(val list: List<de.gamingdoodz.radiofinder.Moments.Moment>) : Row()
+        data class Segment(val labels: List<String>, val selected: Int, val onSelect: (Int) -> Unit) : Row()
+        data class Top(val entry: Entry, val label: String, val sub: String, val onClick: () -> Unit) : Row()
         data class Chips(val labels: List<String>, val selected: Int, val onSelect: (Int) -> Unit) : Row()
         data class Empty(val text: String) : Row()
         data class Tiles(val g1: Genre, val g2: Genre?) : Row()
@@ -175,6 +178,8 @@ class MainActivity : ComponentActivity() {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 clear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+                typing.removeCallbacks(typeSearch)
+                if ((s?.trim()?.length ?: 0) >= 3 && input.hasFocus()) typing.postDelayed(typeSearch, 700)
             }
         })
         clear.setOnClickListener { input.setText(""); startSearch() }
@@ -429,6 +434,7 @@ class MainActivity : ComponentActivity() {
         pageTitle.text = when (val p = page) {
             is Page.GenrePage -> p.genre.name
             Page.ChartsPage -> "Deutsche Charts"
+            Page.GenresPage -> "Alle Genres"
             is Page.ShowPage -> p.show.name
             null -> when (tab) {
                 Tab.HOME -> "Radio Finder"
@@ -442,12 +448,22 @@ class MainActivity : ComponentActivity() {
 
     // ================= Suche =================
 
-    private fun startSearch(text: String? = null) {
+    private val typing = Handler(Looper.getMainLooper())
+    private val typeSearch = Runnable { startSearch(deep = false) }
+    private var deepSearch = false
+
+    /** deep = auch alle Radios durchsuchen (beim Tippen nur die schnellen Teile). */
+    private fun startSearch(text: String? = null, deep: Boolean = true) {
         if (text != null) input.setText(text)
+        typing.removeCallbacks(typeSearch)
         val q = input.text.toString().trim()
-        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-            .hideSoftInputFromWindow(input.windowToken, 0)
-        input.clearFocus()
+        if (deep) {
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                .hideSoftInputFromWindow(input.windowToken, 0)
+            input.clearFocus()
+        }
+        deepSearch = deep
+        expanded.clear()
         searchJob?.cancel()
         val myId = ++searchId
         query = q
@@ -459,10 +475,10 @@ class MainActivity : ComponentActivity() {
         scanning = false
         songLoading = false
         freeLoading = false
-        if (tab != Tab.FIND) selectTab(Tab.FIND) else { page = null; render() }
+        if (tab != Tab.FIND) { selectTab(Tab.FIND); if (!deep) input.requestFocus() } else { page = null; render() }
         if (q.isEmpty()) return
 
-        scanning = true
+        scanning = deep
         songLoading = true
         freeLoading = true
         scanDone = 0
@@ -490,6 +506,12 @@ class MainActivity : ComponentActivity() {
             }
             val all = try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }
             if (myId != searchId) return@launch
+            if (!deep) {
+                val words = Scanner.words(q)
+                stationHits = all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() }
+                render()
+                return@launch
+            }
             val words = Scanner.words(q)
             stationHits = all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() }
             val toScan = all.filter { !LiveIndex.isFresh(it) }
@@ -528,11 +550,12 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.Action("Kinder-Modus", "Nur Kinderinhalte · Tippen und PIN eingeben zum Beenden", dark = true, icon = R.drawable.ic_kids) { exitKidsMode() })
         } else {
             updateRow?.let { rows.add(it) }
-            watchRow()?.let { rows.add(it) }
         }
+        updateStrip()
         when (val p = page) {
             is Page.GenrePage -> renderGenre(p.genre)
             Page.ChartsPage -> renderCharts()
+            Page.GenresPage -> Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
             is Page.ShowPage -> renderShow(p.show)
             null -> when (tab) {
                 Tab.HOME -> renderHome()
@@ -709,6 +732,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Schmaler Balken über dem Player: was gerade im Hintergrund läuft. */
+    private fun updateStrip() {
+        val strip = findViewById<View>(R.id.strip)
+        val icon = findViewById<ImageView>(R.id.stripIcon)
+        val text = findViewById<TextView>(R.id.stripText)
+        val close = findViewById<View>(R.id.stripClose)
+        val wish = WatchService.activeQuery(this)
+        val mix = HitMix.activeName(this)
+        when {
+            wish != null && !kids() -> {
+                strip.visibility = View.VISIBLE
+                icon.setImageResource(R.drawable.ic_bell)
+                text.text = "Wächter: $wish · ${WatchService.status(this)}"
+                strip.setOnClickListener { watchSheet() }
+                close.setOnClickListener { WatchService.stop(this) }
+            }
+            mix != null -> {
+                strip.visibility = View.VISIBLE
+                icon.setImageResource(R.drawable.ic_bolt)
+                text.text = "Hit-Mix: $mix" + (HitMix.nowPlaying(this)?.let { " · $it" } ?: "")
+                strip.setOnClickListener { showFull(true) }
+                close.setOnClickListener { stopHitMix() }
+            }
+            else -> strip.visibility = View.GONE
+        }
+    }
+
     private fun watchSheet() {
         val wishes = WatchService.queries(this)
         val options = wishes.map { q -> Option(R.drawable.ic_close, q, "Tippen zum Entfernen") { WatchService.remove(this, q) } } +
@@ -780,7 +830,6 @@ class MainActivity : ComponentActivity() {
             moments.add(1.coerceAtMost(moments.size), Moments.Moment("mine", "Mein Mix", "Lieder, die dir gefallen – aus dem Radio", Moments.Action.HITMIX, "mine", "#FF2EE6A8", "#FF6366F1", R.drawable.ic_heart_white))
         }
         rows.add(Row.Moments(moments))
-        if (HitMix.activeName(this) != null) rows.add(hitMixRow(null, "", ""))
 
         val recent = Recent.all(this)
         val favs = Favorites.all(this)
@@ -811,14 +860,16 @@ class MainActivity : ComponentActivity() {
     private var musicAudience = 0 // 0 = Erwachsene, 1 = Kinder
 
     private fun audienceChips(selected: Int, onSelect: (Int) -> Unit) =
-        Row.Chips(listOf("Für Erwachsene", "Für Kinder"), selected, onSelect)
+        Row.Segment(listOf("Für Erwachsene", "Für Kinder"), selected, onSelect)
 
     private fun renderFind() {
         if (!kids()) rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
         if (musicAudience == 1) { renderKidsMusic(); return }
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
-        rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix"))
-        Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
+        val genres = Genres.all.filter { it.key != "kids" }
+        rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix", "ALLE ${genres.size}") { openPage(Page.GenresPage) })
+        genres.take(6).chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
+        rows.add(Row.More("Alle ${genres.size} Genres anzeigen") { openPage(Page.GenresPage) })
         rows.add(Row.Header("Freie Musik", "Über 600.000 Lieder – komplett hören, beliebig weiterspringen"))
         rows.add(Row.Chips(freeTags.map { it.first }, freeTag) { freeTag = it; loadFreeTag(); render() })
         val tag = freeTags[freeTag].second
@@ -833,15 +884,48 @@ class MainActivity : ComponentActivity() {
         if (popular.isEmpty()) rows.add(Row.Empty("Lade Sender…")) else rows.add(Row.Carousel(popular.take(30).map { it.toEntry() }))
     }
 
+    private val expanded = HashSet<String>()
+
+    private fun <T> limited(key: String, list: List<T>, n: Int, add: (T) -> Unit) {
+        val show = if (key in expanded) list else list.take(n)
+        show.forEach(add)
+        if (list.size > n && key !in expanded) rows.add(Row.More("${list.size - n} weitere anzeigen") { expanded.add(key); render() })
+    }
+
+    /** Der eine beste Treffer ganz oben. */
+    private fun topRow(): Row? {
+        radioHits.firstOrNull()?.let { e ->
+            return Row.Top(e, "LÄUFT GERADE LIVE", "${e.subtitle} · tippen und komplett hören") { play(e, radioHits.toList()) }
+        }
+        val nq = Scanner.normalize(query)
+        stationHits.firstOrNull { Scanner.normalize(it.name).startsWith(nq) }?.let { e ->
+            return Row.Top(e, "SENDER", "Jetzt einschalten") { play(e, stationHits) }
+        }
+        artistMix?.let { a ->
+            val e = Entry("ar:${a.id}", Kind.TRACK, a.name, "Künstler", "", a.picture, a.name)
+            return Row.Top(e, "KÜNSTLER", "${a.name}-Mix: nur ${a.name} aus dem Radio") { startHitMix("artist:${a.id}:${a.name}", "– ${a.name}") }
+        }
+        songHits.firstOrNull()?.let { e ->
+            return Row.Top(e, "SONG", "${e.subtitle} · im Radio suchen, Vorschau oder Wächter") { onEntryTap(e, songHits) }
+        }
+        return null
+    }
+
     private fun renderSearch() {
+        topRow()?.let { rows.add(it) }
         if (scanning) rows.add(Row.Status(statusText(), scanDone, scanTotal))
+        else if (!deepSearch) rows.add(Row.More("📻 Alle Radios nach „$query“ durchsuchen") { startSearch() })
 
         rows.add(Row.Header("Läuft gerade im Radio", "Komplett hören"))
         if (radioHits.isEmpty()) {
-            rows.add(Row.Empty(if (scanning) "Suche läuft…" else "„$query“ läuft gerade auf keinem der Sender."))
+            rows.add(Row.Empty(when {
+                scanning -> "Suche läuft…"
+                deepSearch -> "„$query“ läuft gerade auf keinem der Sender."
+                else -> "Noch nicht durchsucht."
+            }))
         } else {
             val list = dedupe(radioHits.toList())
-            list.forEach { rows.add(Row.Item(it, list, "● LIVE")) }
+            limited("radio", list, 5) { rows.add(Row.Item(it, list, "● LIVE")) }
         }
         if (WatchService.activeQuery(this) == null) {
             rows.add(Row.Action("Wächter starten", "Ich spiele „$query“ ab, sobald es irgendwo im Radio läuft.", dark = radioHits.isNotEmpty()) {
@@ -870,7 +954,7 @@ class MainActivity : ComponentActivity() {
         when {
             songLoading -> rows.add(Row.Empty("Suche…"))
             songHits.isEmpty() -> rows.add(Row.Empty("Keine Songs gefunden."))
-            else -> addSongs(songHits.take(10), ranked = false)
+            else -> limited("songs", songHits, 5) { e -> rows.add(Row.Item(e, songHits, liveText(e))) }
         }
 
         if (stationHits.isNotEmpty()) {
@@ -886,7 +970,7 @@ class MainActivity : ComponentActivity() {
         when {
             freeLoading -> rows.add(Row.Empty("Suche…"))
             freeHits.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
-            else -> freeHits.forEach { rows.add(Row.Item(it, freeHits)) }
+            else -> limited("free", freeHits, 5) { rows.add(Row.Item(it, freeHits)) }
         }
     }
 
@@ -1268,8 +1352,10 @@ class MainActivity : ComponentActivity() {
         val indexTitle = if (isStation) LiveIndex.fresh().firstOrNull { "st:" + it.station.id == item.mediaId }?.title else null
         val title = live ?: indexTitle ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
         if (isStation && live == null) checkStationTitle(item.mediaId, entry)
+        val adLeft = adRemaining(c, item.mediaId, live)
         val sub = when {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
+            adLeft != null -> if (adLeft > 0) "Werbung · noch ca. ${fmt(adLeft)}" else "Werbung oder Ansage – gleich geht's los"
             c.playerError != null -> "Nicht erreichbar – tippe auf Play"
             isStation -> entry?.name ?: (m.artist?.toString() ?: "")
             entry?.preview == true -> "${m.artist ?: ""} · Vorschau"
@@ -1312,6 +1398,20 @@ class MainActivity : ComponentActivity() {
         updateProgress()
     }
 
+    /**
+     * Läuft gerade Werbung am Senderanfang? Gibt die geschätzte Restzeit zurück
+     * (0 = Dauer unbekannt) oder null, wenn keine Werbung erkannt wird.
+     */
+    private fun adRemaining(c: MediaController, mediaId: String, live: String?): Long? {
+        if (!mediaId.startsWith("st:") || !c.isPlaying) return null
+        val known = Ads.duration(this, mediaId.removePrefix("st:"))
+        val elapsed = c.currentPosition
+        if (Ads.isAd(live)) return (known - elapsed).coerceAtLeast(0)
+        val musicNow = live != null && LiveIndex.isMusic(live)
+        if (!musicNow && known > 0 && elapsed < known) return known - elapsed
+        return null
+    }
+
     private var lastTitleCheck = 0L
 
     /** Wenn ein Sender selbst keinen Titel mitschickt: alle 30 Sekunden selbst nachsehen. */
@@ -1330,6 +1430,14 @@ class MainActivity : ComponentActivity() {
         val c = controller ?: return
         val item = c.currentMediaItem ?: return
         val isStation = item.mediaId.startsWith("st:")
+        if (isStation) {
+            val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
+            adRemaining(c, item.mediaId, live)?.let { left ->
+                val t = if (left > 0) "Werbung · noch ca. ${fmt(left)}" else "Werbung oder Ansage – gleich geht's los"
+                findViewById<TextView>(R.id.miniSub).text = t
+                findViewById<TextView>(R.id.fullSub).text = t
+            }
+        }
         val pos = c.currentPosition.coerceAtLeast(0)
         val dur = c.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
 
@@ -1445,6 +1553,8 @@ class MainActivity : ComponentActivity() {
             is Row.More -> 8
             is Row.Chips -> 9
             is Row.Moments -> 10
+            is Row.Segment -> 11
+            is Row.Top -> 12
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -1458,6 +1568,8 @@ class MainActivity : ComponentActivity() {
                 7 -> R.layout.item_hero
                 8 -> R.layout.item_more
                 9 -> R.layout.item_chips
+                11 -> R.layout.item_segment
+                12 -> R.layout.item_top
                 else -> R.layout.item_empty
             }
             val v = LayoutInflater.from(parent.context).inflate(layout, parent, false)
@@ -1538,6 +1650,31 @@ class MainActivity : ComponentActivity() {
                     (v as TextView).text = row.text
                     v.setOnClickListener { row.onClick() }
                 }
+                is Row.Segment -> {
+                    val box = v.findViewById<ViewGroup>(R.id.segBox)
+                    box.removeAllViews()
+                    row.labels.forEachIndexed { i, label ->
+                        val t = TextView(this@MainActivity)
+                        t.text = label
+                        t.gravity = android.view.Gravity.CENTER
+                        t.textSize = 15f
+                        t.setTypeface(t.typeface, android.graphics.Typeface.BOLD)
+                        val on = i == row.selected
+                        t.setTextColor(if (on) Color.parseColor("#FF2EE6A8") else Color.parseColor("#99FFFFFF"))
+                        if (on) t.setBackgroundResource(R.drawable.bg_segment_on) else t.background = null
+                        t.layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                        t.setOnClickListener { row.onSelect(i) }
+                        box.addView(t)
+                    }
+                }
+                is Row.Top -> {
+                    val e = row.entry
+                    bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION, 14f)
+                    v.findViewById<TextView>(R.id.label).text = row.label
+                    v.findViewById<TextView>(R.id.title).text = e.title
+                    v.findViewById<TextView>(R.id.subtitle).text = row.sub
+                    v.setOnClickListener { row.onClick() }
+                }
                 is Row.Moments -> {
                     val ma = (v as RecyclerView).adapter as MomentAdapter
                     if (ma.list != row.list) { ma.list = row.list; ma.notifyDataSetChanged() }
@@ -1551,8 +1688,8 @@ class MainActivity : ComponentActivity() {
                         chip.textSize = 14f
                         chip.setTypeface(chip.typeface, android.graphics.Typeface.BOLD)
                         val on = i == row.selected
-                        chip.setTextColor(if (on) Color.parseColor("#FF08131C") else Color.WHITE)
-                        chip.setBackgroundResource(if (on) R.drawable.bg_chip_on else R.drawable.bg_chip_off)
+                        chip.setTextColor(if (on) Color.parseColor("#FF2EE6A8") else Color.parseColor("#CCFFFFFF"))
+                        chip.setBackgroundResource(if (on) R.drawable.bg_chip_sel else R.drawable.bg_chip_off)
                         val ph = dp(16f).toInt(); val pv = dp(9f).toInt()
                         chip.setPadding(ph, pv, ph, pv)
                         val lp = ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
