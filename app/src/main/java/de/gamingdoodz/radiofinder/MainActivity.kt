@@ -155,6 +155,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Radar.init(this)
+        lifecycleScope.launch { if (Radar.sync(force = true)) render() }
         setContentView(R.layout.activity_main)
         onBackPressedDispatcher.addCallback(this, backCallback)
 

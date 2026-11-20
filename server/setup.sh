@@ -54,6 +54,18 @@ echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo deb
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 
+# Automatische Updates: stündlich neuen Server-Code holen und bei Änderung neu starten
+sudo tee /usr/local/bin/radar-update > /dev/null <<UPD
+#!/bin/bash
+cd $HOME/radio-finder || exit 0
+OLD=\$(git rev-parse HEAD)
+git pull -q || exit 0
+[ "\$OLD" != "\$(git rev-parse HEAD)" ] && ! git diff --quiet \$OLD HEAD -- server/ && systemctl restart radar
+exit 0
+UPD
+sudo chmod +x /usr/local/bin/radar-update
+echo "17 * * * * root /usr/local/bin/radar-update" | sudo tee /etc/cron.d/radar-update > /dev/null
+
 sleep 5
 echo
 echo "=============================================="

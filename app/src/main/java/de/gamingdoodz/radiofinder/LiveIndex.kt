@@ -39,6 +39,15 @@ object LiveIndex {
         map[s.id] = Now(s, title, t, since)
     }
 
+    /** Vom Server: since = seit wann der Titel dort läuft. */
+    fun putRemote(s: Station, title: String, sinceMs: Long) {
+        val t = System.currentTimeMillis()
+        val old = map[s.id]
+        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) minOf(old.since, sinceMs)
+        else if (sinceMs in 1..t) sinceMs else t
+        map[s.id] = Now(old?.station ?: s, title, t, since)
+    }
+
     private val talkWords = Regex("(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|magazin|sendung|moderation|gewinnspiel")
 
     /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen, Nachrichten, Werbung nicht. */
@@ -68,6 +77,9 @@ object LiveIndex {
 
     /** Aktualisiert die Liste für die angegebenen Sender (nur einmal gleichzeitig). */
     suspend fun refresh(stations: List<Station>, maxAgeMs: Long = MAX_AGE, statusOnly: Boolean = false) {
+        // Server zuerst. Läuft er, nur noch bei "sofort frisch" (z. B. Weiter-Taste) selbst nachfragen
+        Radar.sync()
+        if (Radar.ok && maxAgeMs !in 1L..14_999L) { lastRefresh = System.currentTimeMillis(); return }
         if (!refreshLock.tryLock()) return
         try {
             val t = System.currentTimeMillis()

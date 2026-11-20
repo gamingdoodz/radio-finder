@@ -111,6 +111,7 @@ class WatchService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Radar.init(this)
         createChannels()
         when (intent?.action) {
             ACTION_STOP -> { job?.cancel(); finish(); return START_NOT_STICKY }
@@ -134,10 +135,28 @@ class WatchService : Service() {
             if (wishes.isEmpty()) break
             round++
             setStatus("Suche läuft… (Runde $round)", true)
-            val stations = try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }
             val matchers = wishes.map { it to Scanner.words(it) }
             var found: Pair<String, Scanner.Hit>? = null
-            try {
+            // Erst den Server fragen (tausende Sender, kaum Daten)
+            var serverOk = true
+            if (matchers.size > 8) {
+                // Viele Wünsche: einmal alles holen und hier vergleichen
+                serverOk = Radar.sync(force = true)
+                if (serverOk) {
+                    val live = LiveIndex.fresh()
+                    found = matchers.firstNotNullOfOrNull { (q, w) ->
+                        live.firstOrNull { Scanner.matches(it.title, w) }?.let { q to Scanner.Hit(it.station, it.title) }
+                    }
+                }
+            } else for ((q, w) in matchers) {
+                val remote = Radar.search(q)
+                if (remote == null) { serverOk = false; break }
+                remote.firstOrNull { Scanner.matches(it.title, w) }?.let { found = q to it }
+                if (found != null) break
+            }
+            val stations = if (found != null || serverOk) emptyList()
+            else try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }
+            if (stations.isNotEmpty()) try {
                 Scanner.titles(stations) { s, title ->
                     if (found == null) {
                         matchers.firstOrNull { (_, w) -> Scanner.matches(title, w) }?.let { (q, _) ->

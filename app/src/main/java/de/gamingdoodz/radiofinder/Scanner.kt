@@ -90,6 +90,14 @@ object Scanner {
     ): List<Hit> {
         val words = words(query)
         if (words.isEmpty()) return emptyList()
+        // Server fragen: der kennt tausende Sender und antwortet sofort
+        Radar.search(query)?.let { remote ->
+            val found = remote.filter { matches(it.title, words) }
+            if (stopAfterFirst) return found.take(1).onEach(onHit)
+            found.forEach(onHit)
+            onProgress(stations.size, stations.size)
+            return found
+        }
         val hits = Collections.synchronizedList(mutableListOf<Hit>())
         try {
             titles(stations, onProgress) { s, title ->

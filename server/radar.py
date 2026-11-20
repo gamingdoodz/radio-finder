@@ -200,6 +200,12 @@ def item(st, n):
             "title": n["title"], "since": int(n["since"])}
 
 
+def gz(resp):
+    # Komprimiert senden: spart Daten in der App und Traffic am Server
+    resp.enable_compression()
+    return resp
+
+
 async def h_health(_):
     return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()), "round": last_round})
 
@@ -211,7 +217,7 @@ async def h_search(req):
     ids = by_id()
     hits = [item(ids[sid], n) for sid, n in fresh() if sid in ids and all(w in n["norm"] for w in words)]
     hits.sort(key=lambda h: -h["since"])
-    return web.json_response(hits[:200])
+    return gz(web.json_response(hits[:200]))
 
 
 async def h_now(req):
@@ -219,7 +225,7 @@ async def h_now(req):
     ids = by_id()
     out = [item(ids[sid], n) for sid, n in fresh() if sid in ids]
     out.sort(key=lambda h: -h["since"])
-    return web.json_response(out[:limit])
+    return gz(web.json_response(out[:limit]))
 
 
 async def main():

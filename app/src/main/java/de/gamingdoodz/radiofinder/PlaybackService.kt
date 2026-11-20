@@ -174,6 +174,7 @@ class PlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
+        Radar.init(this)
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent("Hitradar/1.0")
             .setAllowCrossProtocolRedirects(true)
