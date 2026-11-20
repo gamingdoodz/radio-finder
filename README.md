@@ -1,4 +1,4 @@
-# Radio Finder
+# Hitradar
 
 **Entwickelt von gamingdoodz**
 

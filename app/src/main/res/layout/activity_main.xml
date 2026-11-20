@@ -51,7 +51,7 @@
                     android:ellipsize="end"
                     android:fontFamily="sans-serif-black"
                     android:maxLines="1"
-                    android:text="Radio Finder"
+                    android:text="Hitradar"
                     android:textColor="#FFFFFFFF"
                     android:textSize="28sp" />
 

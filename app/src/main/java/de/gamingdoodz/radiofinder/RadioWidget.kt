@@ -36,7 +36,7 @@ class RadioWidget : AppWidgetProvider() {
         private fun views(context: Context): RemoteViews {
             val p = prefs(context)
             val v = RemoteViews(context.packageName, R.layout.widget_player)
-            v.setTextViewText(R.id.wTitle, p.getString("title", null) ?: "Radio Finder")
+            v.setTextViewText(R.id.wTitle, p.getString("title", null) ?: "Hitradar")
             v.setTextViewText(R.id.wSub, p.getString("sub", null) ?: "Tippe auf ⚡ für den Hit-Mix")
             v.setImageViewResource(R.id.wPlay, if (p.getBoolean("playing", false)) R.drawable.ic_pause else R.drawable.ic_play)
             v.setOnClickPendingIntent(R.id.wPlay, action(context, ACTION_PLAY, 1))

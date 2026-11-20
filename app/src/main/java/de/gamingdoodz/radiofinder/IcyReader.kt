@@ -24,7 +24,7 @@ object IcyReader {
                 c.connectTimeout = 3000
                 c.readTimeout = 3000
                 c.setRequestProperty("Icy-MetaData", "1")
-                c.setRequestProperty("User-Agent", "RadioFinder/1.0")
+                c.setRequestProperty("User-Agent", "Hitradar/1.0")
                 val code = c.responseCode
                 if (code in 300..399) {
                     val loc = c.getHeaderField("Location")

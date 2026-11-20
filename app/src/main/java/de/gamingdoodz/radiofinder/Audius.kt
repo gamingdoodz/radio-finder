@@ -21,7 +21,7 @@ object Audius {
         val streamUrl: String,
     )
 
-    private const val APP = "RadioFinder"
+    private const val APP = "Hitradar"
     @Volatile private var host: String? = null
 
     suspend fun search(query: String, limit: Int = 25): List<Track> = withContext(Dispatchers.IO) {
@@ -91,7 +91,7 @@ object Audius {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 8000
         c.readTimeout = 12000
-        c.setRequestProperty("User-Agent", "RadioFinder/1.0")
+        c.setRequestProperty("User-Agent", "Hitradar/1.0")
         try {
             if (c.responseCode == 200) c.inputStream.bufferedReader().readText() else null
         } finally {

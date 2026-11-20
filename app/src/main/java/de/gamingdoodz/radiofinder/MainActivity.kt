@@ -435,7 +435,7 @@ class MainActivity : ComponentActivity() {
             Page.GenresPage -> "Alle Genres"
             is Page.ShowPage -> p.show.name
             null -> when (tab) {
-                Tab.HOME -> "Radio Finder"
+                Tab.HOME -> "Hitradar"
                 Tab.FIND -> if (kids()) "Kinder-Musik" else "Musik"
                 Tab.STORIES -> if (kids()) "Kinder-Geschichten" else "Hörspiele"
                 Tab.LIB -> "Bibliothek"
@@ -685,7 +685,19 @@ class MainActivity : ComponentActivity() {
 
     // ---------- Radio-Wecker ----------
 
+    /** Android 12+: Erlaubnis für pünktliche Wecker holen (einmalig). */
+    private fun ensureExactAlarm() {
+        if (Build.VERSION.SDK_INT < 31) return
+        val am = getSystemService(android.app.AlarmManager::class.java)
+        if (am.canScheduleExactAlarms()) return
+        Toast.makeText(this, "Bitte „Wecker und Erinnerungen“ für Hitradar erlauben", Toast.LENGTH_LONG).show()
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
+        } catch (_: Exception) {}
+    }
+
     private fun alarmSheet() {
+        if (Settings.alarmOn(this)) ensureExactAlarm()
         val on = Settings.alarmOn(this)
         sheet("Radio-Wecker", if (on) "Klingelt um %02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this)) else "Aus", null, "", false,
             "Die Musik startet leise und wird in einer Minute lauter.",
@@ -693,6 +705,7 @@ class MainActivity : ComponentActivity() {
                 Option(R.drawable.ic_bell, "Uhrzeit wählen", "%02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this))) {
                     android.app.TimePickerDialog(this, android.R.style.Theme_Material_Dialog_Alert, { _, h, m ->
                         Settings.setAlarm(this, on = true, hour = h, minute = m)
+                        ensureExactAlarm()
                         Toast.makeText(this, "Wecker gestellt: %02d:%02d Uhr".format(h, m), Toast.LENGTH_SHORT).show()
                     }, Settings.alarmHour(this), Settings.alarmMinute(this), true).show()
                 },
@@ -1177,7 +1190,7 @@ class MainActivity : ComponentActivity() {
         ) { Settings.setNormalize(this, !norm) })
         rows.add(Row.Action(
             "Im Auto automatisch starten",
-            "In den Android-Auto-Einstellungen „Musik automatisch starten“ einschalten. Dann spielt Radio Finder beim Einsteigen weiter, wo du warst.",
+            "In den Android-Auto-Einstellungen „Musik automatisch starten“ einschalten. Dann spielt Hitradar beim Einsteigen weiter, wo du warst.",
             dark = true, icon = R.drawable.ic_play
         ) {})
         val saver = Settings.saver(this)
@@ -1196,7 +1209,7 @@ class MainActivity : ComponentActivity() {
 
         rows.add(Row.Header("Über die App"))
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" }
-        rows.add(Row.Action("Radio Finder $version", "Entwickelt von gamingdoodz", dark = true, icon = R.drawable.ic_radar) {
+        rows.add(Row.Action("Hitradar $version", "Entwickelt von gamingdoodz", dark = true, icon = R.drawable.ic_radar) {
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder"))) } catch (_: Exception) {}
         })
         rows.add(Row.Empty(

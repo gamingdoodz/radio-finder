@@ -175,7 +175,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         val http = DefaultHttpDataSource.Factory()
-            .setUserAgent("RadioFinder/1.0")
+            .setUserAgent("Hitradar/1.0")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(10_000)
             .setReadTimeoutMs(15_000)
@@ -220,7 +220,7 @@ class PlaybackService : MediaLibraryService() {
                 val item = player.currentMediaItem
                 val m = item?.mediaMetadata
                 val title = player.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
-                    ?: m?.title?.toString()?.takeIf { it.isNotBlank() } ?: m?.artist?.toString() ?: "Radio Finder"
+                    ?: m?.title?.toString()?.takeIf { it.isNotBlank() } ?: m?.artist?.toString() ?: "Hitradar"
                 val sub = HitMix.activeName(this@PlaybackService)?.let { "⚡ Hit-Mix · $it" } ?: m?.artist?.toString().orEmpty()
                 RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying)
             }
@@ -490,7 +490,7 @@ class PlaybackService : MediaLibraryService() {
                 putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT", 2)  // Sender/Lieder als Kacheln
             }
             val out = LibraryParams.Builder().setExtras(extras).build()
-            return Futures.immediateFuture(LibraryResult.ofItem(folderItem(ROOT_ID, "Radio Finder"), out))
+            return Futures.immediateFuture(LibraryResult.ofItem(folderItem(ROOT_ID, "Hitradar"), out))
         }
 
         override fun onGetChildren(

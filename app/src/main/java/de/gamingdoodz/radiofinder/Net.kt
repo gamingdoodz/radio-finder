@@ -12,7 +12,7 @@ object Net {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = connectMs
         c.readTimeout = readMs
-        c.setRequestProperty("User-Agent", "RadioFinder/1.0")
+        c.setRequestProperty("User-Agent", "Hitradar/1.0")
         try {
             if (c.responseCode != 200) null else {
                 val out = ByteArrayOutputStream()

@@ -7,12 +7,12 @@ val buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 
 android {
     namespace = "de.gamingdoodz.radiofinder"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "de.gamingdoodz.radiofinder"
+        applicationId = "de.gamingdoodz.hitradar"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
     }
@@ -25,12 +25,22 @@ android {
             keyAlias = "radiofinder"
             keyPassword = "radiofinder"
         }
+        // Geheimer Upload-Schlüssel für Google Play (kommt aus GitHub-Secrets)
+        val upload = System.getenv("UPLOAD_KEYSTORE_FILE")
+        if (upload != null) {
+            create("upload") {
+                storeFile = file(upload)
+                storePassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")
+                keyAlias = "upload"
+                keyPassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("fixed")
+            signingConfig = signingConfigs.findByName("upload") ?: signingConfigs.getByName("fixed")
         }
         debug {
             signingConfig = signingConfigs.getByName("fixed")

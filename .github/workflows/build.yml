@@ -24,16 +24,31 @@ jobs:
         with:
           gradle-version: "8.14.3"
 
-      - name: APK bauen
-        run: gradle assembleRelease --no-daemon --stacktrace
+      - name: Upload-Schlüssel bereitstellen (falls hinterlegt)
+        env:
+          KS: ${{ secrets.UPLOAD_KEYSTORE_B64 }}
+          PW: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            echo "UPLOAD_KEYSTORE_FILE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+            echo "UPLOAD_KEYSTORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+          fi
 
-      - name: APK umbenennen
-        run: cp app/build/outputs/apk/release/app-release.apk RadioFinder.apk
+      - name: APK und Store-Paket bauen
+        run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
+
+      - name: Dateien umbenennen
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Hitradar.apk
+          cp app/build/outputs/bundle/release/app-release.aab Hitradar-PlayStore.aab
 
       - name: Als Download veröffentlichen
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Radio Finder ${{ github.run_number }}
-          files: RadioFinder.apk
+          name: Hitradar ${{ github.run_number }}
+          files: |
+            Hitradar.apk
+            Hitradar-PlayStore.aab
           make_latest: true

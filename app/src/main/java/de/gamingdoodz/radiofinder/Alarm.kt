@@ -41,8 +41,10 @@ object AlarmScheduler {
             context, 101, Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val exactAllowed = android.os.Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
         try {
-            am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), pi)
+            if (exactAllowed) am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), pi)
+            else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
         } catch (_: SecurityException) {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
         }
