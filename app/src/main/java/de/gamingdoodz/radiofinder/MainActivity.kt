@@ -746,7 +746,9 @@ class MainActivity : ComponentActivity() {
             try {
                 val o = org.json.JSONObject(text)
                 val latest = o.optString("tag_name").removePrefix("build-").toLongOrNull() ?: return@launch
-                val url = o.optJSONArray("assets")?.optJSONObject(0)?.optString("browser_download_url") ?: return@launch
+                val assets = o.optJSONArray("assets") ?: return@launch
+                val url = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
+                    .firstOrNull { it.optString("name").endsWith(".apk") }?.optString("browser_download_url") ?: return@launch
                 val info = packageManager.getPackageInfo(packageName, 0)
                 val mine = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
                 if (latest > mine) {
