@@ -590,7 +590,32 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
-    /** Bekannte Hörspiele sind nicht frei – mit einem Tipp in Amazon Music öffnen. */
+    /** In einer Musik-/Hörbuch-App öffnen: eigene Dienste, bei nur einem direkt. */
+    private fun openIn(query: String, stories: Boolean) {
+        val list = Services.forUse(this, stories)
+        fun go(sv: Services.Service) {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Services.url(sv, query)))) }
+            catch (_: Exception) { Toast.makeText(this, "${sv.name} konnte nicht geöffnet werden", Toast.LENGTH_SHORT).show() }
+        }
+        if (list.size == 1) { go(list[0]); return }
+        sheet("Öffnen in …", query, null, "", false,
+            if (Services.mine(this).isEmpty()) "Tipp: Unter Mehr → Meine Musik-Dienste wählst du deine Apps aus." else null,
+            list.map { sv -> Option(R.drawable.ic_note, sv.name, null) { go(sv) } })
+    }
+
+    private fun servicesSheet() {
+        val mine = Services.mine(this)
+        sheet("Meine Musik-Dienste", "Welche Apps hast du?", null, "", false,
+            "Antippen zum An- und Abwählen. Die App zeigt dir dann nur diese an.",
+            Services.all.map { sv ->
+                Option(if (sv.key in mine) R.drawable.ic_heart else R.drawable.ic_heart_outline, sv.name,
+                    if (sv.key in mine) "Ausgewählt" else null) {
+                    Services.toggle(this, sv.key); servicesSheet(); render()
+                }
+            })
+    }
+
+    /** Bekannte Hörspiele sind nicht frei – mit einem Tipp in der eigenen App öffnen. */
     private fun famousSheet(kidsList: Boolean) {
         val titles = if (kidsList) listOf(
             "Bibi Blocksberg", "Bibi & Tina", "Benjamin Blümchen", "Paw Patrol", "Conni",
@@ -599,17 +624,9 @@ class MainActivity : ComponentActivity() {
             "Die drei ???", "TKKG", "Harry Potter Hörbuch", "Der Herr der Ringe Hörspiel", "Sherlock Holmes Hörspiel",
             "John Sinclair", "Point Whitmark", "Gruselkabinett"
         )
-        sheet("Bekannte Serien", "Öffnet die Suche in Amazon Music", null, "", false,
-            "Diese Hörspiele sind nicht frei. Mit Prime ist vieles davon in Amazon Music dabei.",
-            titles.map { t ->
-                Option(R.drawable.ic_book, t, null) {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.amazon.de/search/" + Uri.encode(t))))
-                    } catch (_: Exception) {
-                        Toast.makeText(this, "Amazon Music nicht gefunden", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            })
+        sheet("Bekannte Serien", "Öffnet die Suche in deiner Musik- oder Hörbuch-App", null, "", false,
+            "Diese Hörspiele sind nicht frei, du findest sie z. B. in Spotify, Amazon Music, Apple Music oder Audible.",
+            titles.map { t -> Option(R.drawable.ic_book, t, null) { openIn(t, stories = true) } })
     }
 
     private fun startKidsMode() {
@@ -1138,6 +1155,9 @@ class MainActivity : ComponentActivity() {
         rows.add(Row.Action("Audioqualität: $qName",
             "Gilt für freie Musik (Hoch ≈ 192 kbit/s). Radiosender senden in ihrer eigenen Qualität. Tippen zum Ändern",
             dark = true, icon = R.drawable.ic_eq) { qualitySheet() })
+        val mineNames = Services.all.filter { it.key in Services.mine(this) }.joinToString(", ") { it.name }
+        rows.add(Row.Action("Meine Musik-Dienste", if (mineNames.isEmpty()) "Noch keine gewählt – tippen und deine Apps auswählen" else mineNames,
+            dark = true, icon = R.drawable.ic_note) { servicesSheet() })
         rows.add(Row.Header("Radio-Wecker"))
         val alarmOn = Settings.alarmOn(this)
         rows.add(Row.Action(
@@ -1277,12 +1297,8 @@ class MainActivity : ComponentActivity() {
                 },
                 if (e.url.isNotBlank()) Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) } else null,
                 Option(R.drawable.ic_radar, "Alle Radios durchsuchen", "Auch weniger bekannte Sender") { startSearch(clean) },
-                if (kids()) null else Option(R.drawable.ic_note, "In Amazon Music öffnen", "Mit Prime im Zufallsmodus") {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.amazon.de/search/" + Uri.encode("$clean $firstArtist"))))
-                    } catch (_: Exception) {
-                        Toast.makeText(this, "Amazon Music nicht gefunden", Toast.LENGTH_SHORT).show()
-                    }
+                if (kids()) null else Option(R.drawable.ic_note, "In deiner Musik-App öffnen", "Spotify, Amazon Music, YouTube Music …") {
+                    openIn("$clean $firstArtist", stories = false)
                 },
             )
         )
