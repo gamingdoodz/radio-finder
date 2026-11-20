@@ -27,34 +27,49 @@ object StationRepository {
         "de2.api.radio-browser.info",
     )
 
-    // Welche Sender durchsucht werden: deutsche, weltweit beliebte und Dance/Remix
-    private val queries = listOf(
+    // Welche Sender durchsucht werden: deutsche, weltweit beliebte, Dance/Remix und Kinder
+    private val mainQueries = listOf(
         "countrycode=DE&limit=250",
         "limit=150",
         "tag=dance&limit=50",
         "tag=remix&limit=30",
+        "tag=kinder&limit=20",
+    )
+
+    private val kidsQueries = listOf(
+        "name=teddy&limit=10",
+        "tag=kinder&limit=40",
+        "tag=kinderlieder&limit=20",
+        "tag=kids&limit=30",
+        "tag=children&limit=20",
     )
 
     private const val MAX_AGE_MS = 24L * 60 * 60 * 1000
     private val mutex = Mutex()
-    @Volatile private var cached: List<Station>? = null
+    private val cache = HashMap<String, List<Station>>()
 
-    suspend fun load(context: Context): List<Station> = mutex.withLock {
-        cached?.let { return@withLock it }
-        withContext(Dispatchers.IO) {
-            val file = File(context.filesDir, "stations.json")
-            val fresh = file.exists() && System.currentTimeMillis() - file.lastModified() < MAX_AGE_MS
-            var list = if (fresh) readFile(file) else emptyList()
-            if (list.isEmpty()) {
-                list = fetchAll()
-                if (list.isNotEmpty()) writeFile(file, list) else if (file.exists()) list = readFile(file)
+    suspend fun load(context: Context): List<Station> = loadList(context, "stations.json", mainQueries)
+
+    suspend fun kids(context: Context): List<Station> = loadList(context, "kids.json", kidsQueries)
+
+    private suspend fun loadList(context: Context, fileName: String, queries: List<String>): List<Station> =
+        mutex.withLock {
+            cache[fileName]?.let { return@withLock it }
+            val list = withContext(Dispatchers.IO) {
+                val file = File(context.filesDir, fileName)
+                val fresh = file.exists() && System.currentTimeMillis() - file.lastModified() < MAX_AGE_MS
+                var l = if (fresh) readFile(file) else emptyList()
+                if (l.isEmpty()) {
+                    l = fetchAll(queries)
+                    if (l.isNotEmpty()) writeFile(file, l) else if (file.exists()) l = readFile(file)
+                }
+                l
             }
-            if (list.isNotEmpty()) cached = list
+            if (list.isNotEmpty()) cache[fileName] = list
             list
         }
-    }
 
-    private fun fetchAll(): List<Station> {
+    private fun fetchAll(queries: List<String>): List<Station> {
         val map = LinkedHashMap<String, Station>()
         for (q in queries) {
             val arr = fetchJson("json/stations/search?$q&order=clickcount&reverse=true&hidebroken=true") ?: continue

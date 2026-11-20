@@ -2,35 +2,44 @@ package de.gamingdoodz.radiofinder
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.SharedPreferences
+import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Spielt das Radio im Hintergrund ab (auch bei gesperrtem Bildschirm)
- * und liefert die Listen und die Suche für Android Auto.
+ * Spielt im Hintergrund ab (auch bei gesperrtem Bildschirm)
+ * und liefert Listen, Suche und Favoriten-Knopf für Android Auto.
  */
 class PlaybackService : MediaLibraryService() {
 
@@ -38,6 +47,10 @@ class PlaybackService : MediaLibraryService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val itemCache = ConcurrentHashMap<String, MediaItem>()
     private val searchResults = ConcurrentHashMap<String, List<MediaItem>>()
+    // Für freie Lieder: die ganze Liste merken, damit man in Android Auto weiterspringen kann
+    private val listContext = ConcurrentHashMap<String, List<MediaItem>>()
+    private val favCommand = SessionCommand("FAV_TOGGLE", Bundle.EMPTY)
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> updateFavButton() }
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -59,6 +72,9 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = updateFavButton()
+        })
 
         val openApp = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -67,6 +83,7 @@ class PlaybackService : MediaLibraryService() {
         session = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setSessionActivity(openApp)
             .build()
+        Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -77,6 +94,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        Favorites.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         session?.run {
             player.release()
             release()
@@ -86,28 +104,111 @@ class PlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    private fun remember(items: List<MediaItem>) {
-        items.forEach { itemCache[it.mediaId] = it }
+    // ---------- Favoriten-Knopf (Benachrichtigung und Android Auto) ----------
+
+    private fun currentIsFav(): Boolean {
+        val id = session?.player?.currentMediaItem?.mediaId ?: return false
+        return Favorites.isFav(this, id)
     }
 
-    /** Findet für "spiel X" einen passenden Sender: erst nach Sendername, dann nach laufendem Lied. */
+    @Suppress("DEPRECATION")
+    private fun favButton(isFav: Boolean): CommandButton =
+        CommandButton.Builder()
+            .setDisplayName(if (isFav) "Aus Favoriten entfernen" else "Zu Favoriten")
+            .setIconResId(if (isFav) R.drawable.ic_heart else R.drawable.ic_heart_outline)
+            .setSessionCommand(favCommand)
+            .build()
+
+    @Suppress("DEPRECATION")
+    private fun updateFavButton() {
+        session?.setCustomLayout(ImmutableList.of(favButton(currentIsFav())))
+    }
+
+    // ---------- Listen ----------
+
+    private fun remember(items: List<MediaItem>) {
+        items.forEach { itemCache[it.mediaId] = it }
+        val tracks = items.filter { it.mediaId.startsWith("au:") }
+        if (tracks.size > 1) tracks.forEach { listContext[it.mediaId] = tracks }
+    }
+
+    private suspend fun kidsEntries(): List<Entry> = coroutineScope {
+        val stations = async { StationRepository.kids(applicationContext) }
+        val songs = async { Audius.search("kinderlieder", 30) }
+        stations.await().map { it.toEntry() } + songs.await().map { it.toEntry() }
+    }
+
+    /** "Spiel X": erst Sendername, dann Radio wo es gerade läuft, dann freie Musik. */
     private suspend fun findForVoice(query: String): MediaItem? {
         val stations = StationRepository.load(applicationContext)
         val words = Scanner.words(query)
-        stations.firstOrNull { Scanner.matches(it.name, words) }?.let { return it.toMediaItem() }
-        val hit = Scanner.scan(stations, query, stopAfterFirst = true).firstOrNull() ?: return null
-        Scanner.lastHits = listOf(hit)
-        return hit.station.toMediaItem(hit.title)
+        stations.firstOrNull { Scanner.matches(it.name, words) }?.let { return it.toEntry().toMediaItem() }
+        val hit = withTimeoutOrNull(20_000) {
+            Scanner.scan(stations, query, stopAfterFirst = true).firstOrNull()
+        }
+        if (hit != null) {
+            Scanner.lastHits = listOf(hit)
+            return hit.station.toEntry(hit.title).toMediaItem()
+        }
+        val tracks = Audius.search(query, 20).map { it.toEntry().toMediaItem() }
+        remember(tracks)
+        return tracks.firstOrNull()
+    }
+
+    private suspend fun resolve(item: MediaItem): MediaItem? {
+        val query = item.requestMetadata.searchQuery
+        val uri = item.requestMetadata.mediaUri
+        return when {
+            !query.isNullOrBlank() -> findForVoice(query)
+            item.localConfiguration != null -> item
+            uri != null -> item.buildUpon().setUri(uri).build()
+            else -> itemCache[item.mediaId]
+        }
     }
 
     private inner class LibraryCallback : MediaLibrarySession.Callback {
+
+        @Suppress("DEPRECATION")
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult =
+            MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                        .buildUpon().add(favCommand).build()
+                )
+                .setCustomLayout(ImmutableList.of(favButton(currentIsFav())))
+                .build()
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == favCommand.customAction) {
+                session.player.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let {
+                    Favorites.toggle(this@PlaybackService, it)
+                }
+                updateFavButton()
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?
-        ): ListenableFuture<LibraryResult<MediaItem>> =
-            Futures.immediateFuture(LibraryResult.ofItem(folderItem(ROOT_ID, "Radio Finder"), params))
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val extras = Bundle().apply {
+                putBoolean("android.media.browse.SEARCH_SUPPORTED", true)
+                putInt("android.media.browse.CONTENT_STYLE_BROWSABLE_HINT", 1) // Ordner als Liste
+                putInt("android.media.browse.CONTENT_STYLE_PLAYABLE_HINT", 2)  // Sender/Lieder als Kacheln
+            }
+            val out = LibraryParams.Builder().setExtras(extras).build()
+            return Futures.immediateFuture(LibraryResult.ofItem(folderItem(ROOT_ID, "Radio Finder"), out))
+        }
 
         override fun onGetChildren(
             session: MediaLibrarySession,
@@ -119,11 +220,17 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> listOf(
+                    folderItem(FAV_ID, "♥ Favoriten"),
                     folderItem(HITS_ID, "Letzte Treffer"),
+                    folderItem(KIDS_ID, "Kinder"),
+                    folderItem(FREE_ID, "Freie Musik"),
                     folderItem(POPULAR_ID, "Beliebte Sender"),
                 )
-                HITS_ID -> Scanner.lastHits.map { it.station.toMediaItem(it.title) }
-                POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toMediaItem() }
+                FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
+                HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
+                KIDS_ID -> kidsEntries().map { it.toMediaItem() }
+                FREE_ID -> Audius.trending(40).map { it.toEntry().toMediaItem() }
+                POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
                 else -> emptyList()
             }
             remember(items)
@@ -136,6 +243,7 @@ class PlaybackService : MediaLibraryService() {
             mediaId: String
         ): ListenableFuture<LibraryResult<MediaItem>> {
             val item = itemCache[mediaId]
+            @Suppress("DEPRECATION")
             val result: LibraryResult<MediaItem> =
                 if (item != null) LibraryResult.ofItem(item, null)
                 else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
@@ -152,19 +260,24 @@ class PlaybackService : MediaLibraryService() {
             scope.launch {
                 val stations = StationRepository.load(applicationContext)
                 val words = Scanner.words(query)
-                val found = Collections.synchronizedList(mutableListOf<MediaItem>())
-                // Sender, deren Name passt, gleich anzeigen
-                stations.filter { Scanner.matches(it.name, words) }.take(10)
-                    .forEach { found.add(it.toMediaItem()) }
+                val radioHits = Collections.synchronizedList(mutableListOf<MediaItem>())
+                val named = stations.filter { Scanner.matches(it.name, words) }.take(10)
+                    .map { it.toEntry().toMediaItem() }
+                var free: List<MediaItem> = emptyList()
+
                 fun publish() {
-                    val snapshot = synchronized(found) { found.toList() }
-                    remember(snapshot)
-                    searchResults[query] = snapshot
-                    session.notifySearchResultChanged(browser, query, snapshot.size, params)
+                    val all = synchronized(radioHits) { radioHits.toList() } + named + free
+                    remember(all)
+                    searchResults[query] = all
+                    session.notifySearchResultChanged(browser, query, all.size, params)
                 }
                 publish()
+                launch {
+                    free = Audius.search(query, 20).map { it.toEntry().toMediaItem() }
+                    publish()
+                }
                 val hits = Scanner.scan(stations, query) { hit ->
-                    found.add(0, hit.station.toMediaItem(hit.title))
+                    radioHits.add(hit.station.toEntry(hit.title).toMediaItem())
                     scope.launch { publish() }
                 }
                 Scanner.lastHits = hits
@@ -189,18 +302,27 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
-            val resolved = mutableListOf<MediaItem>()
-            for (item in mediaItems) {
-                val query = item.requestMetadata.searchQuery
-                val uri = item.requestMetadata.mediaUri
-                val r = when {
-                    !query.isNullOrBlank() -> findForVoice(query)
-                    uri != null -> item.buildUpon().setUri(uri).build()
-                    else -> itemCache[item.mediaId]
+            mediaItems.mapNotNull { resolve(it) }.toMutableList()
+        }
+
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            val resolved = mediaItems.mapNotNull { resolve(it) }
+            // Ein einzelnes freies Lied aus einer Liste: ganze Liste laden, damit "Weiter" geht
+            if (resolved.size == 1) {
+                val list = listContext[resolved[0].mediaId]
+                if (list != null) {
+                    val idx = list.indexOfFirst { it.mediaId == resolved[0].mediaId }.coerceAtLeast(0)
+                    return@future MediaSession.MediaItemsWithStartPosition(list, idx, C.TIME_UNSET)
                 }
-                if (r != null) resolved.add(r)
             }
-            resolved
+            val index = if (resolved.size == mediaItems.size) startIndex else 0
+            MediaSession.MediaItemsWithStartPosition(resolved, index, startPositionMs)
         }
     }
 }
