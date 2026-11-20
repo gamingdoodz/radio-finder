@@ -31,9 +31,9 @@ gcloud services enable compute.googleapis.com
 
 cat > /tmp/radar-start.sh <<'EOF'
 #!/bin/bash
-[ -f /var/radar-ok ] && exit 0
+# Bei jedem Start: neueste Version holen und einrichten (macht nichts doppelt)
 export HOME=/root USER=root
-curl -fsSL https://raw.githubusercontent.com/gamingdoodz/radio-finder/main/server/setup.sh | bash && touch /var/radar-ok
+curl -fsSL https://raw.githubusercontent.com/gamingdoodz/radio-finder/main/server/setup.sh | bash
 EOF
 
 if ! gcloud compute instances describe radar --zone=$ZONE >/dev/null 2>&1; then
@@ -45,6 +45,10 @@ if ! gcloud compute instances describe radar --zone=$ZONE >/dev/null 2>&1; then
     --boot-disk-size=30GB --boot-disk-type=pd-standard \
     --tags=http-server \
     --metadata-from-file=startup-script=/tmp/radar-start.sh
+else
+  echo "Server gibt es schon – wird aktualisiert und neu gestartet…"
+  gcloud compute instances add-metadata radar --zone=$ZONE --metadata-from-file=startup-script=/tmp/radar-start.sh
+  gcloud compute instances reset radar --zone=$ZONE
 fi
 
 gcloud compute firewall-rules describe allow-radar-http >/dev/null 2>&1 || \
