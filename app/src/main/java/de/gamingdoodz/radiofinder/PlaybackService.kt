@@ -170,6 +170,7 @@ class PlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         exo = player
+        Jamendo.highQuality = Settings.quality(this) >= 2
         setupNormalizer(player.audioSessionId)
         player.addListener(object : Player.Listener {
             private var retries = 0

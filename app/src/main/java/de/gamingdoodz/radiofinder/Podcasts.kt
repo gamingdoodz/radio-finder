@@ -22,11 +22,13 @@ object Podcasts {
         Category("maerchen", "Märchen", "Märchen für Kinder", true),
         Category("kinderhoerspiel", "Hörspiele für Kinder", "Kinderhörspiel", true),
         Category("kinderwissen", "Wissen für Kinder", "Wissen für Kinder", true),
+        Category("maerchenfrei", "Märchen-Hörbücher", "librivox:märchen OR grimm OR andersen OR kinder", true),
     )
 
     val adultCategories = listOf(
         Category("krimi", "Krimi & Hörspiel", "Krimi Hörspiel", false),
-        Category("hoerbuch", "Hörbücher", "Hörbuch", false),
+        Category("klassiker", "Klassiker (frei)", "librivox:", false),
+        Category("hoerbuch", "Hörbuch-Podcasts", "Hörbuch", false),
         Category("grusel", "Gruselgeschichten", "Gruselgeschichten", false),
         Category("truecrime", "True Crime", "True Crime deutsch", false),
         Category("comedy", "Comedy", "Comedy Podcast deutsch", false),
@@ -40,7 +42,8 @@ object Podcasts {
     /** Shows zu einer Kategorie (bei Kindern ohne als "explicit" markierte). */
     suspend fun shows(cat: Category): List<Entry> {
         synchronized(showCache) { showCache[cat.key]?.let { return it } }
-        val list = search(cat.term, cat.kids)
+        val list = if (cat.term.startsWith("librivox:")) Archive.librivox(cat.term.removePrefix("librivox:"))
+        else search(cat.term, cat.kids)
         if (list.isNotEmpty()) synchronized(showCache) { showCache[cat.key] = list }
         return list
     }
@@ -73,7 +76,10 @@ object Podcasts {
     }
 
     /** Folgen einer Show in Erscheinungs-Reihenfolge: Folge 1 zuerst. */
-    suspend fun episodes(show: Entry): List<Entry> = withContext(Dispatchers.IO) {
+    suspend fun episodes(show: Entry): List<Entry> =
+        if (show.url.startsWith("ia:")) Archive.chapters(show) else feedEpisodes(show)
+
+    private suspend fun feedEpisodes(show: Entry): List<Entry> = withContext(Dispatchers.IO) {
         synchronized(episodeCache) {
             episodeCache[show.url]?.let { (t, l) -> if (System.currentTimeMillis() - t < 30 * 60_000L) return@withContext l }
         }

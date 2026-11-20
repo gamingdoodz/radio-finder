@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private enum class Tab { HOME, FIND, STORIES, LIB }
+    private enum class Tab { HOME, FIND, STORIES, LIB, SETTINGS }
 
     private sealed class Page {
         data class GenrePage(val genre: Genre) : Page()
@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.navFind).setOnClickListener { selectTab(Tab.FIND) }
         findViewById<View>(R.id.navStories).setOnClickListener { selectTab(Tab.STORIES) }
         findViewById<View>(R.id.navLib).setOnClickListener { selectTab(Tab.LIB) }
+        findViewById<View>(R.id.navSettings).setOnClickListener { selectTab(Tab.SETTINGS) }
 
         mini.setOnClickListener { showFull(true) }
         findViewById<View>(R.id.miniPlay).setOnClickListener { togglePlay() }
@@ -242,6 +243,7 @@ class MainActivity : ComponentActivity() {
             updatePlayer()
         }, ContextCompat.getMainExecutor(this))
         ticker.post(tick)
+        Jamendo.highQuality = Settings.quality(this) >= 2
         startLiveRefresh()
         checkUpdate()
         // Wunschliste vorhanden, aber Wächter läuft nicht mehr (z. B. nach Neustart): weitermachen
@@ -319,6 +321,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val freeTags = listOf(
+        "Pop" to "pop", "Rock" to "rock", "Elektro" to "electronic", "Hip-Hop" to "hiphop",
+        "Chill" to "lounge", "Akustik" to "acoustic", "Jazz" to "jazz", "Klassik" to "classical", "Weihnachten" to "christmas",
+    )
+    private var freeTag = 0
+    private val freeByTag = HashMap<String, List<Entry>>()
+
+    private fun loadFreeTag() {
+        val tag = freeTags[freeTag].second
+        if (freeByTag.containsKey(tag)) return
+        freeByTag[tag] = emptyList()
+        lifecycleScope.launch {
+            freeByTag[tag] = Jamendo.many(tag)
+            render()
+        }
+    }
+
     private fun loadStories(cats: List<Podcasts.Category>) {
         cats.filter { !storyShows.containsKey(it.key) && storyLoading.add(it.key) }.forEach { cat ->
             lifecycleScope.launch {
@@ -373,15 +392,17 @@ class MainActivity : ComponentActivity() {
             Triple(Tab.FIND, R.id.navFindIcon, R.id.navFindLabel),
             Triple(Tab.STORIES, R.id.navStoriesIcon, R.id.navStoriesLabel),
             Triple(Tab.LIB, R.id.navLibIcon, R.id.navLibLabel),
+            Triple(Tab.SETTINGS, R.id.navSettingsIcon, R.id.navSettingsLabel),
         ).forEach { (key, icon, label) ->
             val color = if (key == t) accent else dim
             findViewById<ImageView>(icon).imageTintList = ColorStateList.valueOf(color)
             findViewById<TextView>(label).setTextColor(color)
         }
-        if (kids() && (t == Tab.HOME || t == Tab.LIB)) { selectTab(Tab.FIND); return }
+        if (kids() && (t == Tab.HOME || t == Tab.LIB || t == Tab.SETTINGS)) { selectTab(Tab.FIND); return }
         if (kids()) { musicAudience = 1; storyAudience = 1 }
         findViewById<View>(R.id.navHome).visibility = if (kids()) View.GONE else View.VISIBLE
         findViewById<View>(R.id.navLib).visibility = if (kids()) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.navSettings).visibility = if (kids()) View.GONE else View.VISIBLE
         if (t == Tab.FIND && musicAudience == 1) loadKids()
         if (t == Tab.STORIES) loadStories(Podcasts.all)
         render()
@@ -414,6 +435,7 @@ class MainActivity : ComponentActivity() {
                 Tab.FIND -> if (kids()) "Kinder-Musik" else "Musik"
                 Tab.STORIES -> if (kids()) "Kinder-Geschichten" else "Hörspiele"
                 Tab.LIB -> "Bibliothek"
+                Tab.SETTINGS -> "Einstellungen"
             }
         }
     }
@@ -517,6 +539,7 @@ class MainActivity : ComponentActivity() {
                 Tab.FIND -> if (query.isEmpty()) renderFind() else renderSearch()
                 Tab.STORIES -> renderStories()
                 Tab.LIB -> renderLib()
+                Tab.SETTINGS -> renderSettings()
             }
         }
         updateBack()
@@ -544,6 +567,28 @@ class MainActivity : ComponentActivity() {
             .setPositiveButton("OK") { _, _ -> onPin(et.text.toString().trim()) }
             .setNegativeButton("Abbrechen", null)
             .show()
+    }
+
+    /** Bekannte Hörspiele sind nicht frei – mit einem Tipp in Amazon Music öffnen. */
+    private fun famousSheet(kidsList: Boolean) {
+        val titles = if (kidsList) listOf(
+            "Bibi Blocksberg", "Bibi & Tina", "Benjamin Blümchen", "Paw Patrol", "Conni",
+            "Die Schule der magischen Tiere", "Peppa Wutz", "Feuerwehrmann Sam", "Die Olchis", "TKKG Junior"
+        ) else listOf(
+            "Die drei ???", "TKKG", "Harry Potter Hörbuch", "Der Herr der Ringe Hörspiel", "Sherlock Holmes Hörspiel",
+            "John Sinclair", "Point Whitmark", "Gruselkabinett"
+        )
+        sheet("Bekannte Serien", "Öffnet die Suche in Amazon Music", null, "", false,
+            "Diese Hörspiele sind nicht frei. Mit Prime ist vieles davon in Amazon Music dabei.",
+            titles.map { t ->
+                Option(R.drawable.ic_book, t, null) {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.amazon.de/search/" + Uri.encode(t))))
+                    } catch (_: Exception) {
+                        Toast.makeText(this, "Amazon Music nicht gefunden", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
     }
 
     private fun startKidsMode() {
@@ -774,8 +819,16 @@ class MainActivity : ComponentActivity() {
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix"))
         Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
-        rows.add(Row.Header("Freie Musik", "Komplett hören, beliebig weiterspringen"))
-        if (freeCharts.isEmpty()) rows.add(Row.Empty("Lade Musik…")) else rows.add(Row.Carousel(freeCharts))
+        rows.add(Row.Header("Freie Musik", "Über 600.000 Lieder – komplett hören, beliebig weiterspringen"))
+        rows.add(Row.Chips(freeTags.map { it.first }, freeTag) { freeTag = it; loadFreeTag(); render() })
+        val tag = freeTags[freeTag].second
+        val list = freeByTag[tag]
+        if (list == null) { loadFreeTag(); rows.add(Row.Empty("Lade Musik…")) } else if (list.isNotEmpty()) {
+            rows.add(Row.Action("${freeTags[freeTag].first}: ${list.size} Lieder abspielen", "Gemischt, mit Weiter und Zurück", dark = false, icon = R.drawable.ic_play) {
+                play(list.first(), list)
+            })
+            rows.add(Row.Carousel(list.take(25)))
+        }
         rows.add(Row.Header("Beliebte Sender"))
         if (popular.isEmpty()) rows.add(Row.Empty("Lade Sender…")) else rows.add(Row.Carousel(popular.take(30).map { it.toEntry() }))
     }
@@ -869,6 +922,9 @@ class MainActivity : ComponentActivity() {
     private fun renderStories() {
         if (!kids()) rows.add(audienceChips(storyAudience) { storyAudience = it; storySection = 0; render() })
         val cats = if (storyAudience == 1) Podcasts.kidsCategories else Podcasts.adultCategories
+        rows.add(Row.Action("Bekannte Serien",
+            if (storyAudience == 1) "Bibi Blocksberg, Paw Patrol & Co. – mit Prime in Amazon Music" else "Die drei ???, Harry Potter & Co. – in Amazon Music",
+            dark = true, icon = R.drawable.ic_star) { famousSheet(storyAudience == 1) })
         if (storyAudience == 1) {
             rows.add(Row.Action("Einschlaf-Modus", "Gute-Nacht-Geschichte, danach leise Schlaflieder – nach 45 Minuten aus", dark = false, icon = R.drawable.ic_sun) { bedtimeSheet() })
         }
@@ -984,6 +1040,15 @@ class MainActivity : ComponentActivity() {
             }
             list.forEach { e -> rows.add(Row.Item(e, list, liveText(e))) }
         }
+    }
+
+    private fun renderSettings() {
+        rows.add(Row.Header("Wiedergabe"))
+        val q = Settings.quality(this)
+        val qName = listOf("Datensparend", "Normal", "Hoch")[q.coerceIn(0, 2)]
+        rows.add(Row.Action("Audioqualität: $qName",
+            "Gilt für freie Musik (Hoch ≈ 192 kbit/s). Radiosender senden in ihrer eigenen Qualität. Tippen zum Ändern",
+            dark = true, icon = R.drawable.ic_eq) { qualitySheet() })
         rows.add(Row.Header("Radio-Wecker"))
         val alarmOn = Settings.alarmOn(this)
         rows.add(Row.Action(
@@ -993,7 +1058,7 @@ class MainActivity : ComponentActivity() {
             dark = true, icon = R.drawable.ic_bell
         ) { alarmSheet() })
 
-        rows.add(Row.Header("Einstellungen"))
+        rows.add(Row.Header("Kinder & Daten"))
         rows.add(Row.Action("Kinder-Modus starten", "Zeigt nur Kinderinhalte – Beenden nur mit PIN", dark = true, icon = R.drawable.ic_kids) { startKidsMode() })
         val norm = Settings.normalize(this)
         rows.add(Row.Action(
@@ -1013,6 +1078,36 @@ class MainActivity : ComponentActivity() {
             else "Mobil werden rund 500 Sender durchsucht (mehr Daten). Tippen zum Einschalten.",
             dark = true
         ) { Settings.setSaver(this, !saver) })
+        rows.add(Row.Action("Senderlisten neu laden", "Falls Sender fehlen oder nicht mehr gehen", dark = true, icon = R.drawable.ic_radar) {
+            StationRepository.clear(this)
+            popular = emptyList()
+            loadHome()
+            Toast.makeText(this, "Senderlisten werden neu geladen", Toast.LENGTH_SHORT).show()
+        })
+
+        rows.add(Row.Header("Über die App"))
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" }
+        rows.add(Row.Action("Radio Finder $version", "Entwickelt von gamingdoodz · mit Claude von Anthropic", dark = false, icon = R.drawable.ic_radar) {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder"))) } catch (_: Exception) {}
+        })
+        rows.add(Row.Empty(
+            "Daten und Musik von: radio-browser.info (Senderliste), Deezer (Charts & Vorschauen), Jamendo, Audius und " +
+                "Internet Archive / LibriVox (freie Musik und Hörbücher), Apple Podcasts (Podcast-Verzeichnis). " +
+                "Alle Rechte an Sendern, Liedern und Hörspielen liegen bei ihren Eigentümern."
+        ))
+    }
+
+    private fun qualitySheet() {
+        val names = listOf("Datensparend" to "96 kbit/s – ideal unterwegs", "Normal" to "96 kbit/s, Standard", "Hoch" to "≈ 192 kbit/s – beste Qualität, mehr Daten")
+        sheet("Audioqualität", "Für freie Musik", null, "", false, null,
+            names.mapIndexed { i, (n, sub) ->
+                Option(if (i == Settings.quality(this)) R.drawable.ic_play else R.drawable.ic_eq, n, sub) {
+                    Settings.setQuality(this, i)
+                    Jamendo.highQuality = i >= 2
+                    if (i == 0) Settings.setSaver(this, true)
+                    render()
+                }
+            })
     }
 
     private fun statusText() =

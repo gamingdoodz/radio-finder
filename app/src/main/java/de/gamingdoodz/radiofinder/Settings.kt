@@ -15,6 +15,10 @@ object Settings {
     fun sleepEnd(context: Context) = prefs(context).getLong("sleepEnd", 0L)
     fun setSleepEnd(context: Context, end: Long) = prefs(context).edit().putLong("sleepEnd", end).apply()
 
+    /** Audioqualität: 0 = Datensparend, 1 = Normal, 2 = Hoch. */
+    fun quality(context: Context) = prefs(context).getInt("quality", 1)
+    fun setQuality(context: Context, q: Int) = prefs(context).edit().putInt("quality", q).apply()
+
     /** Lautstärke zwischen Sendern angleichen. */
     fun normalize(context: Context) = prefs(context).getBoolean("normalize", true)
     fun setNormalize(context: Context, on: Boolean) = prefs(context).edit().putBoolean("normalize", on).apply()

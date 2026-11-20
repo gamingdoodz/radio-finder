@@ -15,14 +15,20 @@ private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 object Jamendo {
     private const val CLIENT_ID = "2ecf94df"
 
+    /** Hohe Qualität (VBR ~192 kbit/s) oder sparsam (96 kbit/s). */
+    @Volatile var highQuality = false
+
     suspend fun search(q: String, limit: Int = 20) = tracks("search=${enc(q)}&order=relevance&limit=$limit")
     suspend fun popular(limit: Int = 25) = tracks("order=popularity_week&limit=$limit")
     suspend fun kids(limit: Int = 30) = tracks("fuzzytags=kids&order=popularity_total&limit=$limit")
     suspend fun byTag(tag: String, limit: Int = 25) = tracks("tags=${enc(tag)}&order=popularity_week&limit=$limit")
 
+    /** Sehr viele Lieder eines Genres (bis 200), gut gemischt. */
+    suspend fun many(tag: String) = tracks("tags=${enc(tag)}&order=popularity_total&limit=200").shuffled()
+
     private suspend fun tracks(params: String): List<Entry> = withContext(Dispatchers.IO) {
         val text = Net.get(
-            "https://api.jamendo.com/v3.0/tracks/?client_id=$CLIENT_ID&format=json&audioformat=mp32&imagesize=300&$params"
+            "https://api.jamendo.com/v3.0/tracks/?client_id=$CLIENT_ID&format=json&audioformat=${if (highQuality) "mp32" else "mp31"}&imagesize=300&$params"
         ) ?: return@withContext emptyList()
         try {
             val arr = JSONObject(text).optJSONArray("results") ?: return@withContext emptyList()
@@ -97,6 +103,47 @@ object Archive {
                         name = title,
                     )
                 }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Freie Hörbücher von LibriVox (deutsch), als "Shows" mit Kapiteln. */
+    suspend fun librivox(extra: String, rows: Int = 30): List<Entry> = withContext(Dispatchers.IO) {
+        val q = "collection:(librivoxaudio) AND language:(German OR Deutsch OR ger)" + if (extra.isNotBlank()) " AND ($extra)" else ""
+        val text = Net.get(
+            "https://archive.org/advancedsearch.php?q=${enc(q)}&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&sort%5B%5D=downloads+desc&rows=$rows&page=1&output=json"
+        ) ?: return@withContext emptyList()
+        try {
+            val docs = JSONObject(text).optJSONObject("response")?.optJSONArray("docs") ?: return@withContext emptyList()
+            (0 until docs.length()).mapNotNull { i ->
+                val o = docs.optJSONObject(i) ?: return@mapNotNull null
+                val id = o.optString("identifier")
+                if (id.isBlank()) return@mapNotNull null
+                val title = o.optString("title").substringBefore(" (LibriVox").trim()
+                Entry("lv:$id", Kind.SHOW, title, firstString(o.opt("creator")).ifBlank { "LibriVox" } + " · Hörbuch", "ia:$id",
+                    "https://archive.org/services/img/$id", title)
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Kapitel eines Archiv-Hörbuchs. */
+    suspend fun chapters(show: Entry): List<Entry> = withContext(Dispatchers.IO) {
+        val id = show.url.removePrefix("ia:")
+        val text = Net.get("https://archive.org/metadata/$id", maxBytes = 5_000_000) ?: return@withContext emptyList()
+        try {
+            val files = JSONObject(text).optJSONArray("files") ?: return@withContext emptyList()
+            val mp3 = (0 until files.length()).mapNotNull { files.optJSONObject(it) }
+                .filter { it.optString("name").endsWith(".mp3", ignoreCase = true) }
+            val small = mp3.filter { it.optString("name").contains("_64kb") }
+            (small.ifEmpty { mp3 }).sortedBy { it.optString("name") }.map { f ->
+                val name = f.optString("name")
+                val title = f.optString("title").ifBlank { name.substringAfterLast('/').removeSuffix(".mp3").replace('_', ' ') }
+                val path = name.split("/").joinToString("/") { enc(it).replace("+", "%20") }
+                Entry("ia:$id/$name", Kind.TRACK, title, show.name, "https://archive.org/download/$id/$path", show.artwork, title)
+            }
         } catch (_: Exception) {
             emptyList()
         }

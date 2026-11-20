@@ -1,5 +1,7 @@
 # Radio Finder
 
+**Entwickelt von gamingdoodz**
+
 Android-App: Lied eingeben, die App schaut bei ein paar hundert Internetradios nach, wo es **gerade läuft**, und spielt den Sender ab. Läuft im Hintergrund und in Android Auto.
 
 ## Installieren

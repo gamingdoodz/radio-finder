@@ -79,6 +79,13 @@ object StationRepository {
 
     suspend fun kids(context: Context): List<Station> = loadList(context, "kids.json", kidsQueries)
 
+    /** Gespeicherte Senderlisten löschen (werden neu geladen). */
+    fun clear(context: Context) {
+        synchronized(cache) { cache.clear() }
+        synchronized(tagCache) { tagCache.clear() }
+        listOf("stations.json", "stations_big.json", "kids.json").forEach { File(context.filesDir, it).delete() }
+    }
+
     /** Welche Sender bei einer Suche durchsucht werden (WLAN: viele, mobil mit Datensparen: wenige). */
     suspend fun scanList(context: Context): List<Station> {
         if (Net.isUnmetered(context)) return load(context, big = true)
