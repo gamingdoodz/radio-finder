@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity() {
         kidsState = 1
         lifecycleScope.launch {
             val st = async { try { StationRepository.kids(applicationContext) } catch (_: Exception) { emptyList() } }
-            val ch = async { Deezer.genreChart(95, 30) }
+            val ch = async { Deezer.kidsHits() }
             val songs = async { FreeMusic.kids() }
             val stations = st.await()
             kidStations = stations.map { it.toEntry() }
@@ -327,7 +327,7 @@ class MainActivity : ComponentActivity() {
     private fun selectTab(t: Tab) {
         tab = t
         page = null
-        val accent = Color.parseColor("#FFF97316")
+        val accent = Color.parseColor("#FF2EE6A8")
         val dim = Color.parseColor("#80FFFFFF")
         listOf(
             Triple(Tab.HOME, R.id.navHomeIcon, R.id.navHomeLabel),
@@ -339,7 +339,6 @@ class MainActivity : ComponentActivity() {
             findViewById<ImageView>(icon).imageTintList = ColorStateList.valueOf(color)
             findViewById<TextView>(label).setTextColor(color)
         }
-        searchBox.visibility = if (t == Tab.FIND) View.VISIBLE else View.GONE
         if (t == Tab.KIDS) loadKids()
         render()
         recycler.scrollToPosition(0)
@@ -354,6 +353,12 @@ class MainActivity : ComponentActivity() {
 
     private fun updateBack() {
         back.visibility = if (page != null) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.brand).visibility = if (page == null && tab == Tab.HOME) View.VISIBLE else View.GONE
+        searchBox.visibility = if (tab == Tab.FIND && page == null) View.VISIBLE else View.GONE
+        val chip = findViewById<TextView>(R.id.liveChip)
+        val n = LiveIndex.fresh().size
+        chip.visibility = if (page == null && tab == Tab.HOME && n > 0) View.VISIBLE else View.GONE
+        chip.text = "● $n live"
         backCallback.isEnabled = page != null || full.visibility == View.VISIBLE
         pageTitle.text = when (val p = page) {
             is Page.GenrePage -> p.genre.name
@@ -462,8 +467,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun liveEntries(stations: List<Station>): List<Entry> =
-        stations.mapNotNull { s -> LiveIndex.fresh().firstOrNull { it.station.id == s.id }?.let { s.toEntry(it.title) } }
+    private fun liveEntries(stations: List<Station>): List<Entry> {
+        val now = LiveIndex.fresh().associateBy { it.station.id }
+        return dedupe(stations.mapNotNull { s -> now[s.id]?.let { s.toEntry(it.title) } })
+    }
+
+    /**
+     * Viele Sender gehören zum selben Netzwerk und spielen dasselbe.
+     * Gleiche Songs werden zu einem Eintrag zusammengefasst ("SWR3 + 3 weitere").
+     */
+    private fun dedupe(list: List<Entry>): List<Entry> =
+        list.groupBy { if (it.kind == Kind.STATION && it.subtitle != "Internetradio") Scanner.normalize(it.title) else it.id }
+            .values.map { group ->
+                val first = group.first()
+                if (group.size == 1) first else first.copy(subtitle = "${first.subtitle} + ${group.size - 1} weitere")
+            }
 
     private fun liveText(e: Entry): String? =
         if (e.preview) LiveIndex.findSong(e.title, e.subtitle)?.let { "● LIVE auf ${it.station.name}" } else null
@@ -483,8 +501,8 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.More("Alle 100 Charts anzeigen") { openPage(Page.ChartsPage) })
         }
 
-        val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
-            .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
+        val chartsLive = dedupe(topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
+            .distinctBy { it.station.id }.map { it.station.toEntry(it.title) })
         if (chartsLive.isNotEmpty()) {
             rows.add(Row.Header("Charts gerade im Radio", "Diese Hits laufen jetzt – komplett hören"))
             rows.add(Row.Carousel(chartsLive, live = true))
@@ -524,7 +542,7 @@ class MainActivity : ComponentActivity() {
         if (radioHits.isEmpty()) {
             rows.add(Row.Empty(if (scanning) "Suche läuft…" else "„$query“ läuft gerade auf keinem der Sender."))
         } else {
-            val list = radioHits.toList()
+            val list = dedupe(radioHits.toList())
             list.forEach { rows.add(Row.Item(it, list, "● LIVE")) }
         }
         if (WatchService.activeQuery(this) == null) {
@@ -563,7 +581,7 @@ class MainActivity : ComponentActivity() {
             stations.isEmpty() -> rows.add(Row.Empty("Keine Sender gefunden."))
             else -> {
                 val now = LiveIndex.fresh().associateBy { it.station.id }
-                val list = stations.take(30).map { s -> now[s.id]?.let { s.toEntry(it.title) } ?: s.toEntry() }
+                val list = dedupe(stations.take(30).map { s -> now[s.id]?.let { s.toEntry(it.title) } ?: s.toEntry() })
                 list.forEach { e -> rows.add(Row.Item(e, list, if (e.subtitle != "Internetradio") "● LIVE" else null)) }
             }
         }
@@ -596,8 +614,8 @@ class MainActivity : ComponentActivity() {
             else -> rows.add(Row.Empty("Keine Kinderradios gefunden."))
         }
         if (kidCharts.isNotEmpty()) {
-            rows.add(Row.Header("Kinder-Hits", "Bekannte Kinderlieder"))
-            addSongs(kidCharts.take(15), ranked = true)
+            rows.add(Row.Header("Bekannte Kinderlieder", "Rolf Zuckowski, Bibi Blocksberg & Co."))
+            addSongs(kidCharts.take(20), ranked = false)
         }
         rows.add(Row.Header("Kinderlieder zum Durchhören", "Freie Lieder, komplett"))
         when {
@@ -656,34 +674,66 @@ class MainActivity : ComponentActivity() {
         songDialog(e)
     }
 
+    private class Option(val icon: Int, val label: String, val sub: String?, val action: () -> Unit)
+
+    /** Eigenes Auswahlfenster, das von unten hereinfährt. */
+    private fun sheet(title: String, sub: String, art: String?, name: String, station: Boolean, hint: String?, options: List<Option>) {
+        val v = layoutInflater.inflate(R.layout.dialog_sheet, null)
+        val d = android.app.Dialog(this)
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        d.setContentView(v)
+        v.findViewById<TextView>(R.id.sheetTitle).text = title
+        v.findViewById<TextView>(R.id.sheetSub).text = sub
+        val hintView = v.findViewById<TextView>(R.id.sheetHint)
+        hintView.text = hint ?: ""
+        hintView.visibility = if (hint == null) View.GONE else View.VISIBLE
+        val artBox = v.findViewById<View>(R.id.sheetArtBox)
+        if (art == null) artBox.visibility = View.GONE
+        else bindArt(v.findViewById(R.id.sheetArt), v.findViewById(R.id.sheetInitials), art, name, station, 14f)
+        val box = v.findViewById<ViewGroup>(R.id.sheetOptions)
+        options.forEach { o ->
+            val ov = layoutInflater.inflate(R.layout.item_option, box, false)
+            ov.findViewById<ImageView>(R.id.optIcon).setImageResource(o.icon)
+            ov.findViewById<TextView>(R.id.optLabel).text = o.label
+            val os = ov.findViewById<TextView>(R.id.optSub)
+            os.text = o.sub ?: ""
+            os.visibility = if (o.sub == null) View.GONE else View.VISIBLE
+            ov.setOnClickListener { d.dismiss(); o.action() }
+            box.addView(ov)
+        }
+        d.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.BOTTOM)
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+            setDimAmount(0.6f)
+        }
+        d.show()
+    }
+
     private fun songDialog(e: Entry) {
         val clean = e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim()
-        val firstArtist = e.subtitle.split(Regex("[,&]| feat")).first().trim()
-        val options = arrayOf(
-            "▶   30-Sekunden-Vorschau",
-            "🔔   Wächter: abspielen, sobald es im Radio läuft",
-            "📻   Jetzt alle Radios durchsuchen",
-            "🎵   In Amazon Music öffnen",
-        )
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("$clean – ${e.subtitle}")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> play(e, emptyList())
-                    1 -> {
-                        WatchService.start(this, "$clean $firstArtist")
-                        Toast.makeText(this, "Wächter läuft – ich spiele es ab, sobald es kommt", Toast.LENGTH_LONG).show()
-                        render()
-                    }
-                    2 -> startSearch(clean)
-                    3 -> try {
+        val firstArtist = e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
+        sheet(
+            clean, e.subtitle, e.artwork, e.name, false,
+            "Läuft gerade auf keinem bekannten Sender.",
+            listOf(
+                Option(R.drawable.ic_bell, "Wächter starten", "Spielt das Lied komplett ab, sobald es im Radio kommt") {
+                    WatchService.start(this, "$clean $firstArtist")
+                    Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
+                    render()
+                },
+                Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) },
+                Option(R.drawable.ic_radar, "Alle Radios durchsuchen", "Auch weniger bekannte Sender") { startSearch(clean) },
+                Option(R.drawable.ic_note, "In Amazon Music öffnen", "Mit Prime im Zufallsmodus") {
+                    try {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.amazon.de/search/" + Uri.encode("$clean $firstArtist"))))
                     } catch (_: Exception) {
                         Toast.makeText(this, "Amazon Music nicht gefunden", Toast.LENGTH_SHORT).show()
                     }
-                }
-            }
-            .show()
+                },
+            )
+        )
     }
 
     private fun play(entry: Entry, section: List<Entry>) {
@@ -713,16 +763,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sleepDialog() {
-        val minutes = intArrayOf(0, 15, 30, 45, 60, 90)
-        val labels = arrayOf("Aus", "15 Minuten", "30 Minuten", "45 Minuten", "1 Stunde", "1,5 Stunden")
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Schlaf-Timer")
-            .setItems(labels) { _, which ->
-                val args = Bundle().apply { putInt("min", minutes[which]) }
-                controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_SLEEP, Bundle.EMPTY), args)
-                Toast.makeText(this, if (minutes[which] == 0) "Timer aus" else "Musik stoppt in ${labels[which]}", Toast.LENGTH_SHORT).show()
-            }
-            .show()
+        val choices = listOf(15 to "15 Minuten", 30 to "30 Minuten", 45 to "45 Minuten", 60 to "1 Stunde", 90 to "1,5 Stunden")
+        fun set(min: Int, label: String) {
+            val args = Bundle().apply { putInt("min", min) }
+            controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_SLEEP, Bundle.EMPTY), args)
+            Toast.makeText(this, if (min == 0) "Schlaf-Timer aus" else "Musik stoppt in $label", Toast.LENGTH_SHORT).show()
+        }
+        val running = Settings.sleepEnd(this) > System.currentTimeMillis()
+        val options = choices.map { (m, l) -> Option(R.drawable.ic_sun, l, null) { set(m, l) } }.toMutableList()
+        if (running) options.add(0, Option(R.drawable.ic_close, "Timer ausschalten", null) { set(0, "") })
+        sheet("Schlaf-Timer", "Die Musik geht danach automatisch aus", null, "", false, null, options)
     }
 
     private fun showFull(show: Boolean) {
@@ -746,7 +796,9 @@ class MainActivity : ComponentActivity() {
         val entry = Entry.fromMediaItem(item)
         val isStation = item.mediaId.startsWith("st:")
         val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
-        val title = live ?: m.title?.toString() ?: ""
+        val indexTitle = if (isStation) LiveIndex.fresh().firstOrNull { "st:" + it.station.id == item.mediaId }?.title else null
+        val title = live ?: indexTitle ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
+        if (isStation && live == null) checkStationTitle(item.mediaId, entry)
         val sub = when {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
             c.playerError != null -> "Nicht erreichbar – tippe auf Play"
@@ -788,6 +840,19 @@ class MainActivity : ComponentActivity() {
             if (art.isNotBlank()) bg.load(art) { crossfade(true) } else bg.setImageDrawable(null)
         }
         updateProgress()
+    }
+
+    private var lastTitleCheck = 0L
+
+    /** Wenn ein Sender selbst keinen Titel mitschickt: alle 30 Sekunden selbst nachsehen. */
+    private fun checkStationTitle(mediaId: String, entry: Entry?) {
+        if (entry == null || System.currentTimeMillis() - lastTitleCheck < 30_000) return
+        lastTitleCheck = System.currentTimeMillis()
+        val station = Station(mediaId.removePrefix("st:"), entry.name, entry.url, entry.artwork, false)
+        lifecycleScope.launch {
+            Scanner.titles(listOf(station)) { _, _ -> }
+            updatePlayer()
+        }
     }
 
     /** Laufleiste und Zeiten, alle halbe Sekunde. */
@@ -844,6 +909,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun dp(v: Float) = v * resources.displayMetrics.density
+
+    /** Weicher farbiger Lichtschein für Kacheln. */
+    private fun glow(color: String) = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        gradientType = GradientDrawable.RADIAL_GRADIENT
+        gradientRadius = dp(65f)
+        val c = Color.parseColor(color)
+        colors = intArrayOf(Color.argb(150, Color.red(c), Color.green(c), Color.blue(c)), Color.argb(0, Color.red(c), Color.green(c), Color.blue(c)))
+    }
 
     private fun gradient(c1: String, c2: String, radiusDp: Float) =
         GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.parseColor(c1), Color.parseColor(c2)))
@@ -956,6 +1030,11 @@ class MainActivity : ComponentActivity() {
                     v.findViewById<TextView>(R.id.title).text = row.title
                     v.findViewById<TextView>(R.id.sub).text = row.sub
                     v.setBackgroundResource(if (row.dark) R.drawable.bg_action_dark else R.drawable.bg_action)
+                    val fg = if (row.dark) Color.WHITE else Color.parseColor("#FF08131C")
+                    v.findViewById<TextView>(R.id.title).setTextColor(fg)
+                    v.findViewById<TextView>(R.id.sub).setTextColor(if (row.dark) Color.parseColor("#B3FFFFFF") else Color.parseColor("#CC08131C"))
+                    v.findViewById<ImageView>(R.id.icon).imageTintList =
+                        ColorStateList.valueOf(if (row.dark) Color.parseColor("#FF2EE6A8") else Color.parseColor("#FF08131C"))
                     v.setOnClickListener { row.onClick() }
                 }
                 is Row.Empty -> (v as TextView).text = row.text
@@ -965,8 +1044,13 @@ class MainActivity : ComponentActivity() {
                     if (row.g2 != null) { t2.visibility = View.VISIBLE; bindTile(t2, row.g2) } else t2.visibility = View.INVISIBLE
                 }
                 is Row.Hero -> {
-                    v.background = gradient(row.genre.color1, row.genre.color2, 22f)
-                    v.findViewById<ImageView>(R.id.heroIcon).setImageResource(row.genre.icon)
+                    v.clipToOutline = true
+                    v.findViewById<View>(R.id.heroGlow).background = glow(row.genre.color1)
+                    v.findViewById<View>(R.id.heroLine).background = GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.parseColor(row.genre.color1), Color.parseColor(row.genre.color2)))
+                    val hi = v.findViewById<ImageView>(R.id.heroIcon)
+                    hi.setImageResource(row.genre.icon)
+                    hi.imageTintList = ColorStateList.valueOf(Color.parseColor(row.genre.color1))
                     v.findViewById<TextView>(R.id.heroTitle).text = row.genre.name
                     v.findViewById<TextView>(R.id.heroSub).text = row.sub
                 }
@@ -978,9 +1062,13 @@ class MainActivity : ComponentActivity() {
         }
 
         private fun bindTile(t: View, g: Genre) {
-            t.background = gradient(g.color1, g.color2, 16f)
             t.clipToOutline = true
-            t.findViewById<ImageView>(R.id.tileIcon).setImageResource(g.icon)
+            t.findViewById<View>(R.id.tileGlow).background = glow(g.color1)
+            t.findViewById<View>(R.id.tileLine).background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.parseColor(g.color1), Color.parseColor(g.color2)))
+            val icon = t.findViewById<ImageView>(R.id.tileIcon)
+            icon.setImageResource(g.icon)
+            icon.imageTintList = ColorStateList.valueOf(Color.parseColor(g.color1))
             t.findViewById<TextView>(R.id.tileName).text = g.name
             t.setOnClickListener { openPage(Page.GenrePage(g)) }
         }

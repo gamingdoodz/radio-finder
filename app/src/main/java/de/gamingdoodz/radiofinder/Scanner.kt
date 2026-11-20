@@ -117,7 +117,9 @@ object Scanner {
 
     private fun titleFor(s: Station, map: Map<String, String>): String? {
         val path = try { URL(s.url).path.ifEmpty { "/" } } catch (_: Exception) { return null }
-        return map[path] ?: map[path.trimEnd('/')] ?: if (map.size == 1) map.values.first() else null
+        // Nur exakte Zuordnung über den Stream-Pfad, sonst lieber selbst nachfragen
+        val p = path.trimEnd('/').substringBefore(';')
+        return map[path] ?: map[p] ?: map["$p/"]
     }
 
     /** Liest die Icecast-Statusseite: Mount-Pfad -> laufender Titel. */

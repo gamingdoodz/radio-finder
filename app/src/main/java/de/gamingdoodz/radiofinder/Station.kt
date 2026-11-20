@@ -127,11 +127,21 @@ object StationRepository {
         if (id.isBlank() || url.isBlank()) return null
         return Station(
             id = id,
-            name = o.optString("name").trim().ifBlank { "Unbekannter Sender" },
+            name = cleanName(o.optString("name")),
             url = url,
             favicon = o.optString("favicon").trim(),
             hls = o.optInt("hls", 0) == 1,
         )
+    }
+
+    /** Macht Sendernamen lesbar: "_DEEJAY REMIXE_ Your Radio" -> "DEEJAY REMIXE Your Radio". */
+    fun cleanName(raw: String): String {
+        val n = raw.replace(Regex("[_#*|~=]+"), " ")
+            .replace(Regex("-{2,}>?"), " ")
+            .replace(Regex("^[^\\p{L}\\p{N}]+"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return n.ifBlank { "Unbekannter Sender" }
     }
 
     private fun readFile(file: File): List<Station> = try {

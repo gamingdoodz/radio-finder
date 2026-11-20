@@ -83,6 +83,23 @@ class PlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         player.addListener(object : Player.Listener {
+            private var retries = 0
+
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) retries = 0
+            }
+
+            /** Fehler abfangen: Lied überspringen bzw. Sender kurz neu verbinden. */
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val p = session?.player ?: return
+                if (p.hasNextMediaItem()) {
+                    p.seekToNextMediaItem(); p.prepare(); p.play()
+                } else if (retries < 2 && p.currentMediaItem?.mediaId?.startsWith("st:") == true) {
+                    retries++
+                    sleepHandler.postDelayed({ p.prepare(); p.play() }, 3000)
+                }
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateFavButton()
                 mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
@@ -97,6 +114,9 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(openApp)
             .build()
         Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
+        val left = Settings.sleepEnd(this) - System.currentTimeMillis()
+        if (left > 0) sleepHandler.postDelayed(sleepRunnable, left) else Settings.setSleepEnd(this, 0L)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -170,7 +190,22 @@ class PlaybackService : MediaLibraryService() {
         return tracks.firstOrNull()
     }
 
-    private suspend fun resolve(item: MediaItem): MediaItem? {
+    /**
+     * Bei Radiosendern den Songtitel weglassen: Sonst bliebe der Titel stehen,
+     * der beim Antippen lief. So kommt der Titel live aus dem Stream.
+     */
+    private fun liveTitle(item: MediaItem?): MediaItem? {
+        if (item == null || !item.mediaId.startsWith("st:")) return item
+        val m = item.mediaMetadata
+        val name = m.extras?.getString("name") ?: m.artist?.toString() ?: m.title?.toString()
+        return item.buildUpon()
+            .setMediaMetadata(m.buildUpon().setTitle(null).setDisplayTitle(null).setArtist(name).build())
+            .build()
+    }
+
+    private suspend fun resolve(item: MediaItem): MediaItem? = liveTitle(resolveRaw(item))
+
+    private suspend fun resolveRaw(item: MediaItem): MediaItem? {
         val query = item.requestMetadata.searchQuery
         val uri = item.requestMetadata.mediaUri
         return when {

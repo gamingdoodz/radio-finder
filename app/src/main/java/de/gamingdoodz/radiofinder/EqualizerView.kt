@@ -31,7 +31,7 @@ class EqualizerView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         paint.shader = LinearGradient(0f, h.toFloat(), 0f, 0f,
-            0xFFF97316.toInt(), 0xFFEC4899.toInt(), Shader.TileMode.CLAMP)
+            0xFF2EE6A8.toInt(), 0xFF19B6D2.toInt(), Shader.TileMode.CLAMP)
     }
 
     override fun onDraw(canvas: Canvas) {

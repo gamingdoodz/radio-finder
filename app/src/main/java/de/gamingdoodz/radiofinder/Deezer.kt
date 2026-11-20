@@ -22,6 +22,13 @@ object Deezer {
     suspend fun genreChart(genreId: Int, limit: Int = 50): List<Entry> =
         cached("g$genreId") { load("chart/$genreId/tracks?limit=$limit") }
 
+    /** Bekannte Kinderlieder (über gezielte Suchen, damit keine Erwachsenen-Hits drin sind). */
+    suspend fun kidsHits(): List<Entry> = cached("kids") {
+        listOf("kinderlieder", "Rolf Zuckowski", "Simone Sommerland", "Bibi Blocksberg", "Volker Rosin")
+            .flatMap { load("search?q=${URLEncoder.encode(it, "UTF-8")}&limit=8") }
+            .distinctBy { it.id }
+    }
+
     suspend fun search(q: String, limit: Int = 25): List<Entry> =
         load("search?q=${URLEncoder.encode(q, "UTF-8")}&limit=$limit")
 
