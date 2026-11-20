@@ -54,6 +54,16 @@ class WatchService : Service() {
             )
         }
 
+        /** Viele Wunschlieder auf einmal (z. B. die ganzen Charts). */
+        fun startMany(context: Context, list: List<String>) {
+            if (list.isEmpty()) return
+            val all = (queries(context) + list).distinctBy { it.lowercase() }
+            saveQueries(context, all)
+            ContextCompat.startForegroundService(
+                context, Intent(context, WatchService::class.java).putExtra(EXTRA_QUERY, list.first())
+            )
+        }
+
         fun remove(context: Context, query: String) {
             val list = queries(context).filter { it != query }
             saveQueries(context, list)

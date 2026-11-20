@@ -243,6 +243,7 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
         ticker.post(tick)
         startLiveRefresh()
+        checkUpdate()
         // Wunschliste vorhanden, aber Wächter läuft nicht mehr (z. B. nach Neustart): weitermachen
         val wishes = WatchService.queries(this)
         if (wishes.isNotEmpty() && WatchService.status(this).isEmpty()) {
@@ -377,6 +378,10 @@ class MainActivity : ComponentActivity() {
             findViewById<ImageView>(icon).imageTintList = ColorStateList.valueOf(color)
             findViewById<TextView>(label).setTextColor(color)
         }
+        if (kids() && (t == Tab.HOME || t == Tab.LIB)) { selectTab(Tab.FIND); return }
+        if (kids()) { musicAudience = 1; storyAudience = 1 }
+        findViewById<View>(R.id.navHome).visibility = if (kids()) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.navLib).visibility = if (kids()) View.GONE else View.VISIBLE
         if (t == Tab.FIND && musicAudience == 1) loadKids()
         if (t == Tab.STORIES) loadStories(Podcasts.all)
         render()
@@ -394,7 +399,7 @@ class MainActivity : ComponentActivity() {
     private fun updateBack() {
         back.visibility = if (page != null) View.VISIBLE else View.GONE
         findViewById<View>(R.id.brand).visibility = if (page == null && tab == Tab.HOME) View.VISIBLE else View.GONE
-        searchBox.visibility = if ((tab == Tab.FIND || tab == Tab.HOME) && page == null) View.VISIBLE else View.GONE
+        searchBox.visibility = if ((tab == Tab.FIND || tab == Tab.HOME) && page == null && !kids()) View.VISIBLE else View.GONE
         val chip = findViewById<TextView>(R.id.liveChip)
         val n = LiveIndex.fresh().size
         chip.visibility = if (page == null && tab == Tab.HOME && n > 0) View.VISIBLE else View.GONE
@@ -406,8 +411,8 @@ class MainActivity : ComponentActivity() {
             is Page.ShowPage -> p.show.name
             null -> when (tab) {
                 Tab.HOME -> "Radio Finder"
-                Tab.FIND -> "Musik"
-                Tab.STORIES -> "Hörspiele"
+                Tab.FIND -> if (kids()) "Kinder-Musik" else "Musik"
+                Tab.STORIES -> if (kids()) "Kinder-Geschichten" else "Hörspiele"
                 Tab.LIB -> "Bibliothek"
             }
         }
@@ -493,9 +498,16 @@ class MainActivity : ComponentActivity() {
 
     // ================= Anzeige =================
 
+    private fun kids() = Settings.kidsMode(this)
+
     private fun render() {
         rows.clear()
-        watchRow()?.let { rows.add(it) }
+        if (kids()) {
+            rows.add(Row.Action("Kinder-Modus", "Nur Kinderinhalte · Tippen und PIN eingeben zum Beenden", dark = true, icon = R.drawable.ic_kids) { exitKidsMode() })
+        } else {
+            updateRow?.let { rows.add(it) }
+            watchRow()?.let { rows.add(it) }
+        }
         when (val p = page) {
             is Page.GenrePage -> renderGenre(p.genre)
             Page.ChartsPage -> renderCharts()
@@ -515,6 +527,139 @@ class MainActivity : ComponentActivity() {
         val q = WatchService.activeQuery(this) ?: return null
         return Row.Action("Wächter: „$q“", WatchService.status(this) + " · Tippen zum Verwalten", dark = true) {
             watchSheet()
+        }
+    }
+
+    // ---------- Kinder-Modus ----------
+
+    private fun pinDialog(title: String, onPin: (String) -> Unit) {
+        val et = EditText(this)
+        et.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        et.hint = "4 Ziffern"
+        et.textSize = 22f
+        et.gravity = android.view.Gravity.CENTER
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle(title)
+            .setView(et)
+            .setPositiveButton("OK") { _, _ -> onPin(et.text.toString().trim()) }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
+    private fun startKidsMode() {
+        pinDialog("PIN für den Kinder-Modus festlegen") { pin ->
+            if (pin.length < 4) {
+                Toast.makeText(this, "Bitte 4 Ziffern eingeben", Toast.LENGTH_SHORT).show(); return@pinDialog
+            }
+            Settings.setPin(this, pin)
+            Settings.setKidsMode(this, true)
+            musicAudience = 1; storyAudience = 1; storySection = 0
+            query = ""; input.setText("")
+            selectTab(Tab.FIND)
+        }
+    }
+
+    private fun exitKidsMode() {
+        pinDialog("PIN eingeben") { pin ->
+            if (pin == Settings.pin(this)) {
+                Settings.setKidsMode(this, false)
+                musicAudience = 0; storyAudience = 0
+                selectTab(Tab.HOME)
+            } else {
+                Toast.makeText(this, "Falsche PIN", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // ---------- Einschlaf-Modus ----------
+
+    private fun bedtimeSheet() {
+        val cat = Podcasts.kidsCategories.first()
+        val shows = storyShows[cat.key].orEmpty().take(6)
+        if (shows.isEmpty()) {
+            loadStories(listOf(cat))
+            Toast.makeText(this, "Lade Geschichten, bitte gleich nochmal tippen", Toast.LENGTH_SHORT).show(); return
+        }
+        sheet("Einschlaf-Modus", "Welche Geschichte?", null, "", false,
+            "Danach leise Schlaflieder, nach 45 Minuten wird es still.",
+            shows.map { show -> Option(R.drawable.ic_book, show.name, show.subtitle) { startBedtime(show) } })
+    }
+
+    private fun startBedtime(show: Entry) {
+        lifecycleScope.launch {
+            val eps = Podcasts.episodes(show)
+            val c = controller ?: return@launch
+            if (eps.isEmpty()) { Toast.makeText(this@MainActivity, "Keine Folgen gefunden", Toast.LENGTH_SHORT).show(); return@launch }
+            // Neueste Folge, danach Schlaflieder
+            c.setMediaItem(eps.last().toMediaItem(), 0L)
+            c.prepare()
+            c.play()
+            c.sendCustomCommand(SessionCommand(PlaybackService.CMD_BEDTIME, Bundle.EMPTY), Bundle().apply { putInt("min", 45) })
+            Toast.makeText(this@MainActivity, "Gute Nacht! 🌙", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ---------- Radio-Wecker ----------
+
+    private fun alarmSheet() {
+        val on = Settings.alarmOn(this)
+        sheet("Radio-Wecker", if (on) "Klingelt um %02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this)) else "Aus", null, "", false,
+            "Die Musik startet leise und wird in einer Minute lauter.",
+            listOfNotNull(
+                Option(R.drawable.ic_bell, "Uhrzeit wählen", "%02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this))) {
+                    android.app.TimePickerDialog(this, android.R.style.Theme_Material_Dialog_Alert, { _, h, m ->
+                        Settings.setAlarm(this, on = true, hour = h, minute = m)
+                        Toast.makeText(this, "Wecker gestellt: %02d:%02d Uhr".format(h, m), Toast.LENGTH_SHORT).show()
+                    }, Settings.alarmHour(this), Settings.alarmMinute(this), true).show()
+                },
+                Option(R.drawable.ic_radio, "Was soll spielen?", Settings.alarmLabel(this)) { alarmSourceSheet() },
+                Option(R.drawable.ic_sun, if (Settings.alarmWeekdays(this)) "Nur Mo–Fr (tippen für jeden Tag)" else "Jeden Tag (tippen für nur Mo–Fr)", null) {
+                    Settings.setAlarm(this, weekdays = !Settings.alarmWeekdays(this))
+                },
+                if (on) Option(R.drawable.ic_close, "Wecker ausschalten", null) { Settings.setAlarm(this, on = false) }
+                else Option(R.drawable.ic_play, "Wecker einschalten", null) { Settings.setAlarm(this, on = true) },
+            )
+        )
+    }
+
+    private fun alarmSourceSheet() {
+        val opts = mutableListOf(
+            Option(R.drawable.ic_sun, "Guten-Morgen-Mix", "Gute-Laune-Hits") { Settings.setAlarm(this, source = "hitmix:pop", label = "Guten-Morgen-Mix") },
+            Option(R.drawable.ic_star, "Charts-Mix", "Aktuelle Hits") { Settings.setAlarm(this, source = "hitmix:", label = "Charts-Mix") },
+        )
+        (Favorites.all(this) + Recent.all(this)).filter { it.kind == Kind.STATION }.distinctBy { it.id }.take(6).forEach { st ->
+            opts.add(Option(R.drawable.ic_radio, st.name, "Sender") { Settings.setAlarm(this, source = st.toJson().toString(), label = st.name) })
+        }
+        sheet("Was soll spielen?", "Beim Wecken", null, "", false, null, opts)
+    }
+
+    // ---------- Updates ----------
+
+    private var updateRow: Row? = null
+    private var updateChecked = false
+
+    /** Schaut auf GitHub nach einer neueren Version. */
+    private fun checkUpdate() {
+        if (updateChecked) return
+        updateChecked = true
+        lifecycleScope.launch {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                Net.get("https://api.github.com/repos/gamingdoodz/radio-finder/releases/latest")
+            } ?: return@launch
+            try {
+                val o = org.json.JSONObject(text)
+                val latest = o.optString("tag_name").removePrefix("build-").toLongOrNull() ?: return@launch
+                val url = o.optJSONArray("assets")?.optJSONObject(0)?.optString("browser_download_url") ?: return@launch
+                val info = packageManager.getPackageInfo(packageName, 0)
+                val mine = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
+                if (latest > mine) {
+                    updateRow = Row.Action("Neue Version verfügbar", "Tippen zum Herunterladen – danach einfach installieren", dark = false, icon = R.drawable.ic_star) {
+                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
+                    }
+                    render()
+                }
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -588,7 +733,11 @@ class MainActivity : ComponentActivity() {
 
     private fun renderHome() {
         rows.add(Row.Header(Moments.greeting(), "Für dich jetzt"))
-        rows.add(Row.Moments(Moments.now()))
+        val moments = Moments.now().toMutableList()
+        if (Heard.all(this).size >= 3 || Favorites.all(this).any { it.kind == Kind.TRACK }) {
+            moments.add(1.coerceAtMost(moments.size), Moments.Moment("mine", "Mein Mix", "Lieder, die dir gefallen – aus dem Radio", Moments.Action.HITMIX, "mine", "#FF2EE6A8", "#FF6366F1", R.drawable.ic_heart_white))
+        }
+        rows.add(Row.Moments(moments))
         if (HitMix.activeName(this) != null) rows.add(hitMixRow(null, "", ""))
 
         val recent = Recent.all(this)
@@ -623,7 +772,7 @@ class MainActivity : ComponentActivity() {
         Row.Chips(listOf("Für Erwachsene", "Für Kinder"), selected, onSelect)
 
     private fun renderFind() {
-        rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
+        if (!kids()) rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
         if (musicAudience == 1) { renderKidsMusic(); return }
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix"))
@@ -721,8 +870,11 @@ class MainActivity : ComponentActivity() {
     private var storyAudience = 0 // 0 = Erwachsene, 1 = Kinder
 
     private fun renderStories() {
-        rows.add(audienceChips(storyAudience) { storyAudience = it; storySection = 0; render() })
+        if (!kids()) rows.add(audienceChips(storyAudience) { storyAudience = it; storySection = 0; render() })
         val cats = if (storyAudience == 1) Podcasts.kidsCategories else Podcasts.adultCategories
+        if (storyAudience == 1) {
+            rows.add(Row.Action("Einschlaf-Modus", "Gute-Nacht-Geschichte, danach leise Schlaflieder – nach 45 Minuten aus", dark = false, icon = R.drawable.ic_sun) { bedtimeSheet() })
+        }
         rows.add(Row.Chips(cats.map { it.name }, storySection) { storySection = it; render() })
         val cat = cats[storySection.coerceIn(0, cats.size - 1)]
         val list = storyShows[cat.key]
@@ -759,6 +911,15 @@ class MainActivity : ComponentActivity() {
 
     private fun renderCharts() {
         rows.add(Row.Hero(Genres.all.first { it.key == "charts" }, "Die Top 100 in Deutschland"))
+        if (topDe.isNotEmpty()) {
+            rows.add(Row.Action("Alle 100 auf die Wunschliste", "Der Wächter spielt jeden dieser Hits, sobald er irgendwo im Radio kommt", dark = false) {
+                WatchService.startMany(this, topDe.map { e ->
+                    e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
+                })
+                Toast.makeText(this, "100 Hits auf der Wunschliste – der Wächter sucht", Toast.LENGTH_LONG).show()
+                render()
+            })
+        }
         if (topDe.isEmpty()) rows.add(Row.Empty("Lade…")) else addSongs(topDe, ranked = true)
     }
 
@@ -813,7 +974,28 @@ class MainActivity : ComponentActivity() {
             }
             list.forEach { e -> rows.add(Row.Item(e, list, liveText(e))) }
         }
+        rows.add(Row.Header("Radio-Wecker"))
+        val alarmOn = Settings.alarmOn(this)
+        rows.add(Row.Action(
+            if (alarmOn) "Wecker: %02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this)) else "Wecker: aus",
+            if (alarmOn) "${if (Settings.alarmWeekdays(this)) "Mo–Fr" else "Jeden Tag"} · ${Settings.alarmLabel(this)} · startet leise · Tippen zum Ändern"
+            else "Mit Radio oder Hit-Mix sanft aufwachen · Tippen zum Einstellen",
+            dark = true, icon = R.drawable.ic_bell
+        ) { alarmSheet() })
+
         rows.add(Row.Header("Einstellungen"))
+        rows.add(Row.Action("Kinder-Modus starten", "Zeigt nur Kinderinhalte – Beenden nur mit PIN", dark = true, icon = R.drawable.ic_kids) { startKidsMode() })
+        val norm = Settings.normalize(this)
+        rows.add(Row.Action(
+            "Lautstärke angleichen: " + if (norm) "AN" else "AUS",
+            "Leise und laute Sender klingen ähnlich laut · Tippen zum Umschalten",
+            dark = true, icon = R.drawable.ic_eq
+        ) { Settings.setNormalize(this, !norm) })
+        rows.add(Row.Action(
+            "Im Auto automatisch starten",
+            "In den Android-Auto-Einstellungen „Musik automatisch starten“ einschalten. Dann spielt Radio Finder beim Einsteigen weiter, wo du warst.",
+            dark = true, icon = R.drawable.ic_play
+        ) {})
         val saver = Settings.saver(this)
         rows.add(Row.Action(
             "Datensparen unterwegs: " + if (saver) "AN" else "AUS",
@@ -893,15 +1075,15 @@ class MainActivity : ComponentActivity() {
         sheet(
             clean, e.subtitle, e.artwork, e.name, false,
             "Läuft gerade auf keinem bekannten Sender.",
-            listOf(
+            listOfNotNull(
                 Option(R.drawable.ic_bell, "Wächter starten", "Spielt das Lied komplett ab, sobald es im Radio kommt") {
                     WatchService.start(this, "$clean $firstArtist")
                     Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
                     render()
                 },
-                *(if (e.url.isNotBlank()) arrayOf(Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) }) else emptyArray<Option>()),
+                if (e.url.isNotBlank()) Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) } else null,
                 Option(R.drawable.ic_radar, "Alle Radios durchsuchen", "Auch weniger bekannte Sender") { startSearch(clean) },
-                Option(R.drawable.ic_note, "In Amazon Music öffnen", "Mit Prime im Zufallsmodus") {
+                if (kids()) null else Option(R.drawable.ic_note, "In Amazon Music öffnen", "Mit Prime im Zufallsmodus") {
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.amazon.de/search/" + Uri.encode("$clean $firstArtist"))))
                     } catch (_: Exception) {

@@ -42,10 +42,11 @@ class HitMix(
         // "artist:<id>:<Name>" = nur Lieder eines Künstlers
         val artist = genreKey?.takeIf { it.startsWith("artist:") }?.split(":", limit = 3)
         val genre = Genres.all.firstOrNull { it.key == genreKey }
-        val name = artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
+        val name = if (genreKey == "mine") "Mein Mix" else artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
         prefs(context).edit().putString("name", name).putString("now", "Suche Hits…").apply()
 
         val hits = when {
+            genreKey == "mine" -> mySongs()
             artist != null -> Deezer.artistTop(artist.getOrNull(1)?.toLongOrNull() ?: 0L)
             genre?.key == "kids" -> Deezer.kidsHits()
             genre?.playlist != null -> Deezer.playlistByName(genre.playlist)
@@ -65,6 +66,24 @@ class HitMix(
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
         job = scope.launch { loop() }
         return first?.let { prepareItem(it) }
+    }
+
+    /**
+     * "Mein Mix": Lieder, die du im Radio gehört oder als Favorit hast,
+     * dazu die Top-Lieder deiner meistgehörten Künstler.
+     */
+    private suspend fun mySongs(): List<Entry> {
+        val heard = Heard.all(context).map { h ->
+            val artist = h.title.substringBefore(" - ").substringBefore(" – ").trim()
+            val title = h.title.substringAfter(" - ").substringAfter(" – ").trim()
+            Entry("hd:" + h.title.hashCode(), Kind.TRACK, title, artist, "", "", title)
+        }
+        val favTracks = (Favorites.all(context) + Recent.all(context)).filter { it.kind == Kind.TRACK }
+        val topArtists = heard.groupingBy { it.subtitle.lowercase() }.eachCount()
+            .entries.sortedByDescending { it.value }.take(4).map { it.key }
+        val artistSongs = topArtists.flatMap { a -> Deezer.artist(a)?.let { Deezer.artistTop(it.id).take(15) }.orEmpty() }
+        val all = heard + favTracks + artistSongs
+        return if (all.size < 5) Deezer.topGermany(100) + all else all
     }
 
     fun stop() {

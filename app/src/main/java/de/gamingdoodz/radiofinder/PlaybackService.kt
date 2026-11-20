@@ -3,6 +3,7 @@ package de.gamingdoodz.radiofinder
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.SharedPreferences
+import android.media.audiofx.DynamicsProcessing
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -47,6 +48,8 @@ class PlaybackService : MediaLibraryService() {
         const val CMD_SLEEP = "SLEEP_TIMER"
         const val CMD_HITMIX = "HITMIX"        // args: "genre" (leer = Deutsche Charts), "stop"
         const val CMD_NEXT = "NEXT_HIT"
+        const val CMD_FADEIN = "FADE_IN"          // Wecker: leise anfangen, lauter werden
+        const val CMD_BEDTIME = "BEDTIME"         // Einschlaf-Modus, args: "min"
     }
 
     private var session: MediaLibrarySession? = null
@@ -76,9 +79,73 @@ class PlaybackService : MediaLibraryService() {
 
     private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }) }
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val sleepRunnable = Runnable {
-        session?.player?.pause()
-        Settings.setSleepEnd(this, 0L)
+    private var bedtime = false
+    private var exo: ExoPlayer? = null
+    private var dynamics: DynamicsProcessing? = null
+
+    /** Am Ende des Schlaf-Timers: 60 Sekunden langsam leiser, dann aus. */
+    private val sleepRunnable = object : Runnable {
+        private var step = 0
+        override fun run() {
+            val p = session?.player ?: return
+            if (step < 12) {
+                step++
+                p.volume = (1f - step / 12f).coerceAtLeast(0f)
+                sleepHandler.postDelayed(this, 5_000)
+            } else {
+                step = 0
+                p.pause()
+                p.volume = 1f
+                bedtime = false
+                Settings.setSleepEnd(this@PlaybackService, 0L)
+            }
+        }
+    }
+
+    /** Wecker: in einer Minute von leise auf normal. */
+    private val fadeInRunnable = object : Runnable {
+        override fun run() {
+            val p = session?.player ?: return
+            if (p.volume < 1f) {
+                p.volume = (p.volume + 0.06f).coerceAtMost(1f)
+                sleepHandler.postDelayed(this, 4_000)
+            }
+        }
+    }
+
+    private fun startSleepTimer(min: Int) {
+        sleepHandler.removeCallbacks(sleepRunnable)
+        session?.player?.volume = 1f
+        if (min > 0) {
+            // Ausblenden beginnt eine Minute vor Schluss
+            sleepHandler.postDelayed(sleepRunnable, (min * 60_000L - 60_000L).coerceAtLeast(0L))
+            Settings.setSleepEnd(this, System.currentTimeMillis() + min * 60_000L)
+        } else {
+            Settings.setSleepEnd(this, 0L)
+        }
+    }
+
+    /** Lautstärke zwischen Sendern angleichen (Kompressor + Begrenzer). */
+    private fun setupNormalizer(sessionId: Int) {
+        try {
+            dynamics?.release()
+            dynamics = null
+            if (!Settings.normalize(this) || android.os.Build.VERSION.SDK_INT < 28 || sessionId == C.AUDIO_SESSION_ID_UNSET) return
+            val cfg = DynamicsProcessing.Config.Builder(
+                DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 2, false, 0, true, 1, false, 0, true
+            ).build()
+            val d = DynamicsProcessing(0, sessionId, cfg)
+            d.setMbcBandAllChannelsTo(0, DynamicsProcessing.MbcBand(true, 20000f, 5f, 120f, 3f, -26f, 6f, -90f, 1f, 0f, 5f))
+            d.setLimiterAllChannelsTo(DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, -1.5f, 0f))
+            d.enabled = true
+            dynamics = d
+        } catch (_: Exception) {
+            dynamics = null
+        }
+    }
+
+    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "normalize") exo?.let { setupNormalizer(it.audioSessionId) }
     }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> updateFavButton() }
 
@@ -102,11 +169,37 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        exo = player
+        setupNormalizer(player.audioSessionId)
         player.addListener(object : Player.Listener {
             private var retries = 0
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) retries = 0
+                // Einschlaf-Modus: nach der Geschichte leise Schlaflieder
+                if (state == Player.STATE_ENDED && bedtime) {
+                    scope.launch {
+                        val songs = (Jamendo.byTag("lullaby", 30) + Jamendo.search("schlaflied", 15)).distinctBy { it.id }
+                        val p = session?.player ?: return@launch
+                        if (songs.isNotEmpty()) {
+                            p.setMediaItems(songs.map { it.toMediaItem() })
+                            p.volume = 0.7f
+                            p.prepare(); p.play()
+                        }
+                    }
+                }
+            }
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) = setupNormalizer(audioSessionId)
+
+            override fun onEvents(player: Player, events: Player.Events) {
+                // Widget auf dem Startbildschirm aktualisieren
+                val item = player.currentMediaItem
+                val m = item?.mediaMetadata
+                val title = player.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
+                    ?: m?.title?.toString()?.takeIf { it.isNotBlank() } ?: m?.artist?.toString() ?: "Radio Finder"
+                val sub = HitMix.activeName(this@PlaybackService)?.let { "⚡ Hit-Mix · $it" } ?: m?.artist?.toString().orEmpty()
+                RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -148,12 +241,13 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(openApp)
             .build()
         Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        Settings.prefs(this).registerOnSharedPreferenceChangeListener(settingsListener)
         // Ein alter Hit-Mix von vor einem Neustart läuft nicht mehr
         HitMix.prefs(this).edit().clear().apply()
         sleepHandler.postDelayed(posRunnable, 15_000)
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
-        if (left > 0) sleepHandler.postDelayed(sleepRunnable, left) else Settings.setSleepEnd(this, 0L)
+        if (left > 0) sleepHandler.postDelayed(sleepRunnable, (left - 60_000L).coerceAtLeast(0L)) else Settings.setSleepEnd(this, 0L)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -170,6 +264,9 @@ class PlaybackService : MediaLibraryService() {
         sleepHandler.removeCallbacks(sleepRunnable)
         Settings.setSleepEnd(this, 0L)
         Favorites.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
+        Settings.prefs(this).unregisterOnSharedPreferenceChangeListener(settingsListener)
+        sleepHandler.removeCallbacks(fadeInRunnable)
+        try { dynamics?.release() } catch (_: Exception) {}
         session?.run {
             player.release()
             release()
@@ -280,7 +377,8 @@ class PlaybackService : MediaLibraryService() {
             MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                        .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand).build()
+                        .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand)
+                        .add(SessionCommand(CMD_FADEIN, Bundle.EMPTY)).add(SessionCommand(CMD_BEDTIME, Bundle.EMPTY)).build()
                 )
                 .setCustomLayout(buttons())
                 .build()
@@ -316,14 +414,16 @@ class PlaybackService : MediaLibraryService() {
                 if (p.hasNextMediaItem()) p.seekToNextMediaItem()
             }
             if (customCommand.customAction == CMD_SLEEP) {
-                val min = args.getInt("min", 0)
-                sleepHandler.removeCallbacks(sleepRunnable)
-                if (min > 0) {
-                    sleepHandler.postDelayed(sleepRunnable, min * 60_000L)
-                    Settings.setSleepEnd(this@PlaybackService, System.currentTimeMillis() + min * 60_000L)
-                } else {
-                    Settings.setSleepEnd(this@PlaybackService, 0L)
-                }
+                startSleepTimer(args.getInt("min", 0))
+            }
+            if (customCommand.customAction == CMD_BEDTIME) {
+                bedtime = true
+                startSleepTimer(args.getInt("min", 45))
+            }
+            if (customCommand.customAction == CMD_FADEIN) {
+                session.player.volume = 0.15f
+                sleepHandler.removeCallbacks(fadeInRunnable)
+                sleepHandler.postDelayed(fadeInRunnable, 4_000)
             }
             if (customCommand.customAction == favCommand.customAction) {
                 session.player.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let {
@@ -478,6 +578,17 @@ class PlaybackService : MediaLibraryService() {
             mediaItems.mapNotNull { resolve(it) }.toMutableList()
         }
 
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            val last = Recent.all(applicationContext).firstOrNull()
+            val item = last?.toMediaItem()?.let { liveTitle(it) }
+                ?: hitMix.start(null)
+            val pos = last?.let { Positions.get(this@PlaybackService, it.id) }?.takeIf { it > 0 } ?: C.TIME_UNSET
+            MediaSession.MediaItemsWithStartPosition(listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, pos)
+        }
+
         override fun onSetMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -494,6 +605,7 @@ class PlaybackService : MediaLibraryService() {
                     listOfNotNull(first), if (first == null) C.INDEX_UNSET else 0, C.TIME_UNSET
                 )
             }
+            bedtime = false
             // Etwas anderes gewählt: Hit-Mix beenden
             if (hitMix.isActive) { hitMix.stop(); updateFavButton() }
             val resolved = mediaItems.mapNotNull { resolve(it) }
