@@ -149,8 +149,19 @@ object Positions {
     fun save(context: Context, id: String, pos: Long, duration: Long) {
         if (!id.startsWith("pc:") && !id.startsWith("ia:")) return
         val e = prefs(context).edit()
-        // Fast am Ende: als fertig betrachten
-        if (duration > 0 && pos > duration - 30_000) e.remove(id) else if (pos > 15_000) e.putLong(id, pos)
+        // Fast am Ende: als fertig gehört merken
+        if (duration > 0 && pos > duration - 30_000) e.remove(id).putBoolean("done:$id", true)
+        else if (pos > 15_000) e.putLong(id, pos)
         e.apply()
+    }
+
+    fun isDone(context: Context, id: String) = prefs(context).getBoolean("done:$id", false)
+
+    /** Welche Folge als Nächstes? Angefangene zuerst, sonst die nach der zuletzt fertig gehörten, sonst Folge 1. */
+    fun nextIndex(context: Context, eps: List<Entry>): Int {
+        if (eps.isEmpty()) return 0
+        eps.indexOfFirst { get(context, it.id) > 0 }.takeIf { it >= 0 }?.let { return it }
+        val lastDone = eps.indexOfLast { isDone(context, it.id) }
+        return if (lastDone >= 0 && lastDone + 1 < eps.size) lastDone + 1 else if (lastDone == eps.size - 1) 0 else 0
     }
 }

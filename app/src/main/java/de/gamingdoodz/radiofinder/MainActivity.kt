@@ -590,8 +590,9 @@ class MainActivity : ComponentActivity() {
             val eps = Podcasts.episodes(show)
             val c = controller ?: return@launch
             if (eps.isEmpty()) { Toast.makeText(this@MainActivity, "Keine Folgen gefunden", Toast.LENGTH_SHORT).show(); return@launch }
-            // Neueste Folge, danach Schlaflieder
-            c.setMediaItem(eps.last().toMediaItem(), 0L)
+            // Nächste noch nicht gehörte Folge (beim ersten Mal Folge 1), danach Schlaflieder
+            val ep = eps[Positions.nextIndex(this@MainActivity, eps)]
+            c.setMediaItem(ep.toMediaItem(), 0L)
             c.prepare()
             c.play()
             c.sendCustomCommand(SessionCommand(PlaybackService.CMD_BEDTIME, Bundle.EMPTY), Bundle().apply { putInt("min", 45) })
@@ -894,13 +895,26 @@ class MainActivity : ComponentActivity() {
     private fun renderShow(show: Entry) {
         val list = episodes[show.url]
         rows.add(Row.Item(show, emptyList()))
+        if (!list.isNullOrEmpty()) {
+            val i = Positions.nextIndex(this, list)
+            val ep = list[i]
+            rows.add(Row.Action(
+                if (i == 0 && Positions.get(this, ep.id) == 0L) "Von Anfang an hören" else "Weiterhören",
+                ep.title, dark = false, icon = R.drawable.ic_play
+            ) { play(ep, list) })
+        }
         rows.add(Row.Header("Folgen", "Von Anfang an · ⏭ spielt die nächste Folge · merkt sich, wo du warst"))
         when {
             list == null -> rows.add(Row.Empty("Lade Folgen…"))
             list.isEmpty() -> rows.add(Row.Empty("Keine Folgen gefunden."))
             else -> list.forEach { e ->
                 val pos = Positions.get(this, e.id)
-                rows.add(Row.Item(e, list, if (pos > 0) "▶ weiter bei ${fmt(pos)}" else null))
+                val mark = when {
+                    pos > 0 -> "▶ weiter bei ${fmt(pos)}"
+                    Positions.isDone(this, e.id) -> "✓ gehört"
+                    else -> null
+                }
+                rows.add(Row.Item(e, list, mark))
             }
         }
     }
