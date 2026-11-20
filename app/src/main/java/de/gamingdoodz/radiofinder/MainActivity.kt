@@ -721,7 +721,7 @@ class MainActivity : ComponentActivity() {
                 val mine = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
                 if (latest > mine) {
                     updateUrl = url
-                    updateRow = Row.Action("Neue Version verfügbar", "Jetzt aktualisieren – dauert nur einen Moment", dark = false, icon = R.drawable.ic_star) { runUpdate() }
+                    updateRow = Row.Action("Neue Version verfügbar", "Tippen zum Aktualisieren – dauert nur einen Moment", dark = true, icon = R.drawable.ic_star) { runUpdate() }
                     render()
                 }
             } catch (_: Exception) {
@@ -796,11 +796,12 @@ class MainActivity : ComponentActivity() {
         controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_HITMIX, Bundle.EMPTY), Bundle().apply { putBoolean("stop", true) })
     }
 
-    private fun hitMixRow(key: String?, label: String, sub: String): Row {
-        val active = HitMix.activeName(this)
-        return if (active != null) Row.Action("Hit-Mix läuft: $active", (HitMix.nowPlaying(this) ?: "") + " · Tippen zum Beenden", dark = true, icon = R.drawable.ic_bolt) { stopHitMix() }
-        else Row.Action("Hit-Mix $label", sub, dark = false, icon = R.drawable.ic_bolt) { startHitMix(key, label) }
-    }
+    private fun button(icon: Int, label: String, action: () -> Unit) = Row.Quick(listOf(Triple(icon, label, action)))
+
+    /** Einheitlicher Knopf zum Starten eines Hit-Mix (läuft er schon, steht das im Statusbalken). */
+    @Suppress("UNUSED_PARAMETER")
+    private fun hitMixRow(key: String?, label: String, sub: String): Row =
+        button(R.drawable.ic_bolt, "Hit-Mix $label") { startHitMix(key, label) }
 
     private fun next() {
         val c = controller ?: return
@@ -890,7 +891,7 @@ class MainActivity : ComponentActivity() {
         val tag = freeTags[freeTag].second
         val list = freeByTag[tag]
         if (list == null) { loadFreeTag(); rows.add(Row.Empty("Lade Musik…")) } else if (list.isNotEmpty()) {
-            rows.add(Row.Action("${freeTags[freeTag].first} endlos abspielen", "Gemischt, mit Weiter – lädt immer neue Lieder nach", dark = false, icon = R.drawable.ic_play) {
+            rows.add(button(R.drawable.ic_play, "${freeTags[freeTag].first} endlos abspielen") {
                 play(list.first(), list)
                 controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_ENDLESS, Bundle.EMPTY), Bundle().apply { putString("tag", tag) })
             })
@@ -944,7 +945,7 @@ class MainActivity : ComponentActivity() {
             limited("radio", list, 5) { rows.add(Row.Item(it, list, "● LIVE")) }
         }
         if (WatchService.activeQuery(this) == null) {
-            rows.add(Row.Action("Wächter starten", "Ich spiele „$query“ ab, sobald es irgendwo im Radio läuft.", dark = radioHits.isNotEmpty()) {
+            rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
                 WatchService.start(this, query)
                 Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
             })
@@ -952,7 +953,7 @@ class MainActivity : ComponentActivity() {
 
         artistMix?.let { a ->
             if (HitMix.activeName(this) == null) {
-                rows.add(Row.Action("${a.name}-Mix", "Nur Lieder von ${a.name} – springt zwischen Radios, die gerade ${a.name} spielen", dark = false, icon = R.drawable.ic_bolt) {
+                if (radioHits.isNotEmpty()) rows.add(button(R.drawable.ic_bolt, "${a.name}-Mix starten") {
                     startHitMix("artist:${a.id}:${a.name}", "– ${a.name}")
                 })
             }
@@ -1053,9 +1054,8 @@ class MainActivity : ComponentActivity() {
         if (!list.isNullOrEmpty()) {
             val i = Positions.nextIndex(this, list)
             val ep = list[i]
-            rows.add(Row.Action(
-                if (i == 0 && Positions.get(this, ep.id) == 0L) "Von Anfang an hören" else "Weiterhören",
-                ep.title, dark = false, icon = R.drawable.ic_play
+            rows.add(button(R.drawable.ic_play,
+                if (i == 0 && Positions.get(this, ep.id) == 0L) "Von Anfang an hören" else "Weiterhören: ${ep.title}"
             ) { play(ep, list) })
         }
         rows.add(Row.Header("Folgen", "Von Anfang an · ⏭ spielt die nächste Folge · merkt sich, wo du warst"))
@@ -1077,7 +1077,7 @@ class MainActivity : ComponentActivity() {
     private fun renderCharts() {
         rows.add(Row.Hero(Genres.all.first { it.key == "charts" }, "Die Top 100 in Deutschland"))
         if (topDe.isNotEmpty()) {
-            rows.add(Row.Action("Alle 100 auf die Wunschliste", "Der Wächter spielt jeden dieser Hits, sobald er irgendwo im Radio kommt", dark = false) {
+            rows.add(button(R.drawable.ic_bell, "Alle 100 auf die Wunschliste") {
                 WatchService.startMany(this, topDe.map { e ->
                     e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
                 })
@@ -1186,7 +1186,7 @@ class MainActivity : ComponentActivity() {
 
         rows.add(Row.Header("Über die App"))
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" }
-        rows.add(Row.Action("Radio Finder $version", "Entwickelt von gamingdoodz · mit Claude von Anthropic", dark = false, icon = R.drawable.ic_radar) {
+        rows.add(Row.Action("Radio Finder $version", "Entwickelt von gamingdoodz · mit Claude von Anthropic", dark = true, icon = R.drawable.ic_radar) {
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder"))) } catch (_: Exception) {}
         })
         rows.add(Row.Empty(
@@ -1690,7 +1690,8 @@ class MainActivity : ComponentActivity() {
                     row.items.forEach { (icon, label, action) ->
                         val b = android.widget.LinearLayout(this@MainActivity)
                         b.orientation = android.widget.LinearLayout.HORIZONTAL
-                        b.gravity = android.view.Gravity.CENTER_VERTICAL
+                        b.gravity = android.view.Gravity.CENTER
+                        b.minimumHeight = dp(50f).toInt()
                         b.setBackgroundResource(R.drawable.bg_option)
                         val pad = dp(12f).toInt()
                         b.setPadding(pad, pad, pad, pad)
