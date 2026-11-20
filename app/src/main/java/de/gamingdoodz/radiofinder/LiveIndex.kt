@@ -39,6 +39,12 @@ object LiveIndex {
         map[s.id] = Now(s, title, t, since)
     }
 
+    private val talkWords = Regex("(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|magazin|sendung|moderation|gewinnspiel")
+
+    /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen, Nachrichten, Werbung nicht. */
+    fun isMusic(title: String) =
+        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title)
+
     fun get(stationId: String): Now? = map[stationId]?.takeIf { System.currentTimeMillis() - it.time < MAX_AGE }
 
     fun isFresh(s: Station) = map[s.id]?.let { System.currentTimeMillis() - it.time < MAX_AGE } == true

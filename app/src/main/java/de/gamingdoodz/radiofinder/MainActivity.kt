@@ -707,11 +707,7 @@ class MainActivity : ComponentActivity() {
         return dedupe(stations.mapNotNull { s -> now[s.id]?.takeIf { isMusic(it.title) }?.let { s.toEntry(it.title) } })
     }
 
-    private val talkWords = Regex("(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|magazin|sendung|moderation")
-
-    /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen und Nachrichten fliegen raus. */
-    private fun isMusic(title: String) =
-        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title)
+    private fun isMusic(title: String) = LiveIndex.isMusic(title)
 
     /**
      * Viele Sender gehören zum selben Netzwerk und spielen dasselbe.

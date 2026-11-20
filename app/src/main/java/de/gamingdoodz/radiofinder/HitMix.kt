@@ -36,6 +36,10 @@ class HitMix(
 
     val isActive get() = job?.isActive == true
 
+    /** Genre-Mix (z. B. Weihnachten): jede Musik auf passenden Sendern zählt, nicht nur eine feste Liste. */
+    private var genreIds: Set<String> = emptySet()
+    private var artistNames: List<String> = emptyList()
+
     /** Startet den Hit-Mix und gibt den ersten Sender zurück (oder null, wenn gerade nichts passt). */
     suspend fun start(genreKey: String?): MediaItem? {
         stop()
@@ -55,8 +59,21 @@ class HitMix(
         }
         songs = hits.distinctBy { it.id }.map { LiveIndex.Song(it) }.filter { it.key.isNotBlank() }
 
+        // Künstler aus der Hitliste: für "ähnliche" Treffer, wenn gerade kein Listen-Song läuft
+        artistNames = hits.map { it.subtitle.split(Regex("[,&]| feat| x ")).first().trim() }
+            .filter { it.length >= 3 }.distinct()
+
+        // Passende Sender zum Genre (bei Weihnachten auch deutsche Weihnachtssender)
+        val genreStations = when (genre?.key) {
+            null, "charts" -> emptyList()
+            "kids" -> StationRepository.kids(context)
+            "xmas" -> StationRepository.byTag("christmas") + StationRepository.byTag("weihnachten") + StationRepository.byTag("weihnachtsmusik")
+            else -> StationRepository.byTag(genre.radioTag)
+        }
+        genreIds = genreStations.map { it.id }.toSet()
+
         val base = try { StationRepository.load(context, big = false) } catch (_: Exception) { emptyList() }
-        val extra = genre?.let { StationRepository.byTag(it.radioTag) }.orEmpty() + StationRepository.byTag("charts")
+        val extra = genreStations + StationRepository.byTag("charts")
         val wifi = Net.isUnmetered(context)
         val big = if (wifi) (try { StationRepository.load(context, big = true) } catch (_: Exception) { emptyList() }) else emptyList()
         stations = (extra + base + big).distinctBy { it.id }.take(if (wifi) 700 else 220)
@@ -96,10 +113,12 @@ class HitMix(
 
     private var waitingForNext = false
 
-    /** Sofort zum nächsten Hit springen. Gibt false zurück, wenn gerade kein anderer Hit läuft. */
+    /** Sofort zum nächsten Hit springen. Gibt false zurück, wenn wirklich nichts Passendes läuft. */
     suspend fun next(): Boolean {
-        poll(force = false)
-        val item = pickNext() ?: pickNext(allowRepeats = true)
+        // Beim Drücken auf "Weiter" die wichtigsten Sender sofort frisch abfragen
+        val priority = (stations.filter { it.id in genreIds } + stations).distinctBy { it.id }.take(80)
+        LiveIndex.refresh(priority, maxAgeMs = 10_000L)
+        val item = pickNext() ?: pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true)
         if (item == null) {
             waitingForNext = true
             prefs(context).edit().putString("now", "Gerade läuft kein anderer Hit – ich springe, sobald einer anfängt").apply()
@@ -118,7 +137,11 @@ class HitMix(
             if (!p.playWhenReady) continue
             poll(force = false)
             val now = currentStationId?.let { LiveIndex.get(it) }
-            val stillHit = now != null && songs.any { it.key == currentSongKey && it.matches(now.normalized) }
+            val stillHit = now != null && (
+                songs.any { it.key == currentSongKey && it.matches(now.normalized) } ||
+                    // Genre-Mix: auf dem Sender bleiben, solange dort Musik läuft
+                    (currentStationId in genreIds && LiveIndex.isMusic(now.title))
+                )
             val broken = p.playbackState == Player.STATE_IDLE || p.playerError != null
             // Hit vorbei (anderes Lied, Werbung, Moderation) oder Sender kaputt -> weiter
             if (waitingForNext || !stillHit || broken || System.currentTimeMillis() - songStartedAt > 7 * 60_000L) {
@@ -140,6 +163,9 @@ class HitMix(
         }
         // Mobil: Statusseiten (fast keine Daten) + jedes Mal ein paar Sender direkt, reihum
         LiveIndex.refresh(stations, maxAgeMs = 15_000L, statusOnly = true)
+        // Genre-Sender (z. B. Weihnachtssender) häufiger anschauen
+        val genre = stations.filter { it.id in genreIds }.take(25)
+        if (genre.isNotEmpty()) LiveIndex.refresh(genre, maxAgeMs = 40_000L)
         val batch = if (Settings.saver(context)) 15 else 30
         if (stations.isNotEmpty()) {
             val from = rotation % stations.size
@@ -150,20 +176,35 @@ class HitMix(
     }
 
     /** Sucht einen Sender, auf dem gerade ein Hit läuft – am liebsten einen, der eben erst angefangen hat. */
-    private fun pickNext(allowRepeats: Boolean = false): MediaItem? {
+    /**
+     * Sucht den nächsten Sender, am liebsten einen, auf dem der Song eben erst angefangen hat:
+     * 1. ein Song aus der Hitliste, 2. Musik auf einem Genre-Sender,
+     * 3. ein Song von einem Künstler aus der Liste, 4. (nur bei "Weiter") irgendeine Musik.
+     */
+    private fun pickNext(allowRepeats: Boolean = false, anyMusic: Boolean = false): MediaItem? {
         val t = System.currentTimeMillis()
         val ids = stations.map { it.id }.toHashSet()
-        val candidates = LiveIndex.fresh()
-            .filter { it.station.id in ids && it.station.id != currentStationId }
-            .mapNotNull { n -> songs.firstOrNull { it.matches(n.normalized) }?.let { n to it } }
-            .filter { (_, song) -> allowRepeats || song.key !in played }
-            .filter { (_, song) -> song.key != currentSongKey }
-        val best = candidates.minByOrNull { (n, _) -> t - n.since } ?: return null
-        val (n, song) = best
+        val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
+        val pool = LiveIndex.fresh().filter {
+            it.station.id in ids && it.station.id != currentStationId && it.normalized != currentTitle && LiveIndex.isMusic(it.title)
+        }
+        fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
+
+        val fromList = pool.mapNotNull { n -> songs.firstOrNull { it.matches(n.normalized) }?.let { n to it.key } }
+            .filter { (_, k) -> ok(k) }
+        val fromGenre = pool.filter { it.station.id in genreIds }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
+        val artistWords = artistNames.map { Scanner.words(it) }.filter { it.isNotEmpty() }
+        val fromArtist = pool.filter { n -> artistWords.any { w -> w.all { n.normalized.contains(it) } } }
+            .map { it to it.normalized }.filter { (_, k) -> ok(k) }
+        val fromAny = if (anyMusic) pool.map { it to it.normalized }.filter { (_, k) -> ok(k) } else emptyList()
+
+        val best = listOf(fromList, fromGenre, fromArtist, fromAny).firstOrNull { it.isNotEmpty() }
+            ?.minByOrNull { (n, _) -> t - n.since } ?: return null
+        val (n, key) = best
         currentStationId = n.station.id
-        currentSongKey = song.key
+        currentSongKey = key
         songStartedAt = n.since
-        played.addLast(song.key)
+        played.addLast(key)
         while (played.size > 25) played.removeFirst()
         prefs(context).edit().putString("now", "${n.title} · ${n.station.name}").apply()
         return n.station.toEntry(n.title).toMediaItem()
