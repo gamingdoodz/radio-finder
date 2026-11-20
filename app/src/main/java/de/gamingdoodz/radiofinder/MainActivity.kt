@@ -29,6 +29,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -77,6 +78,13 @@ class MainActivity : ComponentActivity() {
         data class Tiles(val g1: Genre, val g2: Genre?) : Row()
         data class Hero(val genre: Genre, val sub: String) : Row()
         data class More(val text: String, val onClick: () -> Unit) : Row()
+        data class Label(val text: String) : Row()
+        data class About(val title: String, val sub: String, val status: String, val onClick: () -> Unit) : Row()
+        /** Eine Zeile in den Einstellungen. pos: 0 einzeln, 1 oben, 2 Mitte, 3 unten. */
+        data class Setting(
+            val icon: Int, val title: String, val sub: String? = null, val value: String? = null,
+            val toggle: Boolean? = null, val chevron: Boolean = true, val pos: Int = 0, val onClick: () -> Unit,
+        ) : Row()
     }
 
     // Ansichten
@@ -1174,60 +1182,75 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Fügt eine Gruppe von Einstellungen als zusammenhängende Karte hinzu. */
+    private fun settingsGroup(label: String, items: List<Row.Setting>) {
+        rows.add(Row.Label(label))
+        items.forEachIndexed { i, it ->
+            val pos = when {
+                items.size == 1 -> 0
+                i == 0 -> 1
+                i == items.lastIndex -> 3
+                else -> 2
+            }
+            rows.add(it.copy(pos = pos))
+        }
+    }
+
     private fun renderSettings() {
-        rows.add(Row.Header("Wiedergabe"))
-        val q = Settings.quality(this)
-        val qName = listOf("Datensparend", "Normal", "Hoch")[q.coerceIn(0, 2)]
-        rows.add(Row.Action("Audioqualität: $qName",
-            "Gilt für freie Musik (Hoch ≈ 192 kbit/s). Radiosender senden in ihrer eigenen Qualität. Tippen zum Ändern",
-            dark = true, icon = R.drawable.ic_eq) { qualitySheet() })
-        val mineNames = Services.all.filter { it.key in Services.mine(this) }.joinToString(", ") { it.name }
-        rows.add(Row.Action("Meine Musik-Dienste", if (mineNames.isEmpty()) "Noch keine gewählt – tippen und deine Apps auswählen" else mineNames,
-            dark = true, icon = R.drawable.ic_note) { servicesSheet() })
-        rows.add(Row.Header("Radio-Wecker"))
-        val alarmOn = Settings.alarmOn(this)
-        rows.add(Row.Action(
-            if (alarmOn) "Wecker: %02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this)) else "Wecker: aus",
-            if (alarmOn) "${if (Settings.alarmWeekdays(this)) "Mo–Fr" else "Jeden Tag"} · ${Settings.alarmLabel(this)} · startet leise · Tippen zum Ändern"
-            else "Mit Radio oder Hit-Mix sanft aufwachen · Tippen zum Einstellen",
-            dark = true, icon = R.drawable.ic_bell
-        ) { alarmSheet() })
-
-        rows.add(Row.Header("Kinder & Daten"))
-        rows.add(Row.Action("Kinder-Modus starten", "Zeigt nur Kinderinhalte – Beenden nur mit PIN", dark = true, icon = R.drawable.ic_kids) { startKidsMode() })
-        val norm = Settings.normalize(this)
-        rows.add(Row.Action(
-            "Lautstärke angleichen: " + if (norm) "AN" else "AUS",
-            "Leise und laute Sender klingen ähnlich laut · Tippen zum Umschalten",
-            dark = true, icon = R.drawable.ic_eq
-        ) { Settings.setNormalize(this, !norm) })
-        rows.add(Row.Action(
-            "Im Auto automatisch starten",
-            "In den Android-Auto-Einstellungen „Musik automatisch starten“ einschalten. Dann spielt Hitradar beim Einsteigen weiter, wo du warst.",
-            dark = true, icon = R.drawable.ic_play
-        ) {})
-        val saver = Settings.saver(this)
-        rows.add(Row.Action(
-            "Datensparen unterwegs: " + if (saver) "AN" else "AUS",
-            if (saver) "Mobil werden nur die 150 beliebtesten Sender durchsucht. Im WLAN immer alle."
-            else "Mobil werden rund 500 Sender durchsucht (mehr Daten). Tippen zum Einschalten.",
-            dark = true
-        ) { Settings.setSaver(this, !saver) })
-        rows.add(Row.Action("Senderlisten neu laden", "Falls Sender fehlen oder nicht mehr gehen", dark = true, icon = R.drawable.ic_radar) {
-            StationRepository.clear(this)
-            popular = emptyList()
-            loadHome()
-            Toast.makeText(this, "Senderlisten werden neu geladen", Toast.LENGTH_SHORT).show()
-        })
-
-        rows.add(Row.Header("Über die App"))
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "" }
-        rows.add(Row.Action("Hitradar $version", "Entwickelt von gamingdoodz", dark = true, icon = R.drawable.ic_radar) {
+        rows.add(Row.About(
+            "Hitradar", "Version $version · Entwickelt von gamingdoodz",
+            if (Radar.ok) "● Hitradar-Server verbunden" else "○ Suche direkt über die App"
+        ) {
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder"))) } catch (_: Exception) {}
         })
+
+        val q = Settings.quality(this)
+        val norm = Settings.normalize(this)
+        val mine = Services.all.filter { it.key in Services.mine(this) }
+        settingsGroup("Wiedergabe", listOf(
+            Row.Setting(R.drawable.ic_eq, "Audioqualität", "Für freie Musik",
+                value = listOf("Sparend", "Normal", "Hoch")[q.coerceIn(0, 2)]) { qualitySheet() },
+            Row.Setting(R.drawable.ic_radio, "Lautstärke angleichen", "Alle Sender gleich laut",
+                toggle = norm, chevron = false) { Settings.setNormalize(this, !norm); render() },
+            Row.Setting(R.drawable.ic_note, "Meine Musik-Apps", "Zum Öffnen von Liedern",
+                value = when (mine.size) { 0 -> "Wählen"; 1 -> mine[0].name; else -> "${mine.size} Apps" }) { servicesSheet() },
+        ))
+
+        val alarmOn = Settings.alarmOn(this)
+        settingsGroup("Wecker", listOf(
+            Row.Setting(R.drawable.ic_bell, "Radio-Wecker",
+                if (alarmOn) "${if (Settings.alarmWeekdays(this)) "Mo–Fr" else "Täglich"} · ${Settings.alarmLabel(this)}" else "Sanft mit Musik aufwachen",
+                value = if (alarmOn) "%02d:%02d".format(Settings.alarmHour(this), Settings.alarmMinute(this)) else "Aus") { alarmSheet() },
+        ))
+
+        settingsGroup("Kinder", listOf(
+            Row.Setting(R.drawable.ic_kids, "Kinder-Modus", "Nur Kinderinhalte, Beenden mit PIN",
+                value = "Starten") { startKidsMode() },
+        ))
+
+        val saver = Settings.saver(this)
+        settingsGroup("Daten", listOf(
+            Row.Setting(R.drawable.ic_bolt, "Datensparen unterwegs",
+                if (saver) "Mobil weniger Sender, im WLAN alle" else "Mobil mehr Sender, mehr Daten",
+                toggle = saver, chevron = false) { Settings.setSaver(this, !saver); render() },
+            Row.Setting(R.drawable.ic_radar, "Senderlisten neu laden", "Falls Sender fehlen") {
+                StationRepository.clear(this)
+                popular = emptyList()
+                loadHome()
+                Toast.makeText(this, "Senderlisten werden neu geladen", Toast.LENGTH_SHORT).show()
+            },
+        ))
+
+        settingsGroup("Android Auto", listOf(
+            Row.Setting(R.drawable.ic_play, "Automatisch weiterspielen",
+                "In Android Auto „Musik automatisch starten“ einschalten", chevron = false) {
+                Toast.makeText(this, "Android Auto → Einstellungen → „Musik automatisch starten“", Toast.LENGTH_LONG).show()
+            },
+        ))
+
         rows.add(Row.Empty(
-            "Daten und Musik von: radio-browser.info (Senderliste), Deezer (Charts & Vorschauen), Jamendo, Audius und " +
-                "Internet Archive / LibriVox (freie Musik und Hörbücher), Apple Podcasts (Podcast-Verzeichnis). " +
+            "Daten und Musik von radio-browser.info, Deezer, Jamendo, Audius, Internet Archive / LibriVox und Apple Podcasts. " +
                 "Alle Rechte an Sendern, Liedern und Hörspielen liegen bei ihren Eigentümern."
         ))
     }
@@ -1603,6 +1626,9 @@ class MainActivity : ComponentActivity() {
             is Row.Segment -> 11
             is Row.Top -> 12
             is Row.Quick -> 13
+            is Row.Label -> 14
+            is Row.Setting -> 15
+            is Row.About -> 16
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -1619,6 +1645,9 @@ class MainActivity : ComponentActivity() {
                 11 -> R.layout.item_segment
                 12 -> R.layout.item_top
                 13 -> R.layout.item_quick
+                14 -> R.layout.item_label
+                15 -> R.layout.item_setting
+                16 -> R.layout.item_about
                 else -> R.layout.item_empty
             }
             val v = LayoutInflater.from(parent.context).inflate(layout, parent, false)
@@ -1679,6 +1708,32 @@ class MainActivity : ComponentActivity() {
                     v.setOnClickListener { row.onClick() }
                 }
                 is Row.Empty -> (v as TextView).text = row.text
+                is Row.Label -> (v as TextView).text = row.text
+                is Row.About -> {
+                    v.findViewById<TextView>(R.id.title).text = row.title
+                    v.findViewById<TextView>(R.id.sub).text = row.sub
+                    v.findViewById<TextView>(R.id.value).text = row.status
+                    v.setOnClickListener { row.onClick() }
+                }
+                is Row.Setting -> {
+                    val box = v.findViewById<View>(R.id.box)
+                    box.setBackgroundResource(when (row.pos) {
+                        1 -> R.drawable.bg_set_first; 2 -> R.drawable.bg_set_mid; 3 -> R.drawable.bg_set_last; else -> R.drawable.bg_set_only
+                    })
+                    v.findViewById<View>(R.id.divider).visibility = if (row.pos == 2 || row.pos == 3) View.VISIBLE else View.GONE
+                    v.findViewById<ImageView>(R.id.icon).setImageResource(row.icon)
+                    v.findViewById<TextView>(R.id.title).text = row.title
+                    v.findViewById<TextView>(R.id.sub).apply { text = row.sub; visibility = if (row.sub.isNullOrBlank()) View.GONE else View.VISIBLE }
+                    v.findViewById<TextView>(R.id.value).apply { text = row.value; visibility = if (row.value == null) View.GONE else View.VISIBLE }
+                    v.findViewById<Switch>(R.id.toggle).apply {
+                        visibility = if (row.toggle == null) View.GONE else View.VISIBLE
+                        isChecked = row.toggle == true
+                        thumbTintList = ColorStateList.valueOf(if (row.toggle == true) Color.parseColor("#FF2EE6A8") else Color.parseColor("#FFB0B8C0"))
+                        trackTintList = ColorStateList.valueOf(if (row.toggle == true) Color.parseColor("#802EE6A8") else Color.parseColor("#40FFFFFF"))
+                    }
+                    v.findViewById<View>(R.id.chevron).visibility = if (row.chevron) View.VISIBLE else View.GONE
+                    box.setOnClickListener { row.onClick() }
+                }
                 is Row.Tiles -> {
                     bindTile(v.findViewById(R.id.tile1), row.g1)
                     val t2 = v.findViewById<View>(R.id.tile2)
