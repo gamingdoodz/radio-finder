@@ -10,7 +10,7 @@ enum class Kind { STATION, TRACK }
 
 /** Ein Eintrag in den Listen: ein Radiosender oder ein freies Lied. */
 data class Entry(
-    val id: String,          // "st:..." für Sender, "au:..." für freie Lieder
+    val id: String,          // "st:" Sender, sonst freie Lieder ("jm:" Jamendo, "au:" Audius, "ia:" Archiv)
     val kind: Kind,
     val title: String,       // was groß angezeigt wird (z. B. laufendes Lied)
     val subtitle: String,    // Sendername oder Künstler
@@ -58,7 +58,7 @@ data class Entry(
             val title = m.title?.toString() ?: ""
             return Entry(
                 id = item.mediaId,
-                kind = if (item.mediaId.startsWith("au:")) Kind.TRACK else Kind.STATION,
+                kind = if (item.mediaId.startsWith("st:")) Kind.STATION else Kind.TRACK,
                 title = title,
                 subtitle = m.artist?.toString() ?: "",
                 url = url,
@@ -83,7 +83,7 @@ fun Audius.Track.toEntry() = Entry(
     id = "au:$id",
     kind = Kind.TRACK,
     title = title,
-    subtitle = artist,
+    subtitle = artist.ifBlank { "Audius" } + " · Audius",
     url = streamUrl,
     artwork = artwork,
     name = title,

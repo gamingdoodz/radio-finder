@@ -1,21 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Tab">
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#FF231C52</item>
+        <item name="android:navigationBarColor">#FF0A0B18</item>
+        <item name="android:colorAccent">#FFF97316</item>
+        <item name="android:windowBackground">#FF0A0B18</item>
+    </style>
+
+    <style name="Initials">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:fontFamily">sans-serif-black</item>
+    </style>
+
+    <style name="LiveBadge">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/bg_badge</item>
+        <item name="android:paddingStart">7dp</item>
+        <item name="android:paddingEnd">7dp</item>
+        <item name="android:paddingTop">1dp</item>
+        <item name="android:paddingBottom">1dp</item>
+        <item name="android:text">● LIVE</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:visibility">gone</item>
+    </style>
+
+    <style name="NavItem">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">match_parent</item>
         <item name="android:layout_weight">1</item>
-        <item name="android:layout_marginEnd">6dp</item>
         <item name="android:gravity">center</item>
-        <item name="android:background">@drawable/bg_tab_off</item>
-        <item name="android:textColor">#FFFFFFFF</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:background">?android:attr/selectableItemBackgroundBorderless</item>
+    </style>
+
+    <style name="NavIcon">
+        <item name="android:layout_width">26dp</item>
+        <item name="android:layout_height">26dp</item>
+    </style>
+
+    <style name="NavLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:textSize">12sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
-    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#FF1E1B4B</item>
-        <item name="android:navigationBarColor">#FF0B1020</item>
-        <item name="android:colorAccent">#FFF97316</item>
-        <item name="android:windowBackground">#FF0B1020</item>
+    <style name="FullBtn">
+        <item name="android:layout_width">54dp</item>
+        <item name="android:layout_height">54dp</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:layout_marginEnd">4dp</item>
+        <item name="android:background">@drawable/bg_round_btn</item>
+        <item name="android:scaleType">center</item>
     </style>
 </resources>

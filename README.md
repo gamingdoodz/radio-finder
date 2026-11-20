@@ -13,5 +13,12 @@ Weil die App nicht aus dem Play Store kommt, einmalig:
 
 Danach taucht Radio Finder in Android Auto auf. Suchen per Sprache: „Hey Google, spiel *Lied* auf Radio Finder“.
 
-## Woher kommen die Sender?
-Senderliste von radio-browser.info (deutsche Sender, weltweit beliebte, Dance und Remix). Der laufende Titel wird aus der Titelanzeige gelesen, die die Sender mitschicken.
+## Was kann die App?
+- **Lied suchen:** schaut in hunderten (mobil) bzw. tausenden (WLAN) Internetradios, wo es gerade läuft
+- **Wächter:** läuft das Lied gerade nirgends, sucht die App jede Minute weiter und spielt es automatisch ab, sobald es kommt
+- **Freie Musik:** Jamendo, Audius und Internet Archive – komplett hören, beliebig weiterspringen
+- **Kinder:** Kinderradios und freie Kinderlieder
+- **Favoriten:** ♥ antippen (bei Kacheln lange drücken)
+
+## Woher kommen die Daten?
+Senderliste von radio-browser.info. Der laufende Titel kommt von den Statusseiten der Radioserver bzw. aus der Titelanzeige der Sender. Freie Musik von Jamendo, Audius und archive.org.

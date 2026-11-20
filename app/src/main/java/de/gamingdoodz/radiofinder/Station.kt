@@ -8,8 +8,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 
 data class Station(
     val id: String,
@@ -27,13 +25,25 @@ object StationRepository {
         "de2.api.radio-browser.info",
     )
 
-    // Welche Sender durchsucht werden: deutsche, weltweit beliebte, Dance/Remix und Kinder
-    private val mainQueries = listOf(
+    // Unterwegs: rund 500 Sender (spart Daten)
+    private val smallQueries = listOf(
         "countrycode=DE&limit=250",
         "limit=150",
         "tag=dance&limit=50",
         "tag=remix&limit=30",
         "tag=kinder&limit=20",
+    )
+
+    // Im WLAN: mehrere tausend Sender
+    private val bigQueries = listOf(
+        "limit=3500",
+        "countrycode=DE&limit=900",
+        "countrycode=AT&limit=200",
+        "countrycode=CH&limit=200",
+        "tag=dance&limit=250",
+        "tag=remix&limit=120",
+        "tag=charts&limit=150",
+        "tag=kinder&limit=50",
     )
 
     private val kidsQueries = listOf(
@@ -48,7 +58,9 @@ object StationRepository {
     private val mutex = Mutex()
     private val cache = HashMap<String, List<Station>>()
 
-    suspend fun load(context: Context): List<Station> = loadList(context, "stations.json", mainQueries)
+    suspend fun load(context: Context, big: Boolean = Net.isUnmetered(context)): List<Station> =
+        if (big) loadList(context, "stations_big.json", bigQueries)
+        else loadList(context, "stations.json", smallQueries)
 
     suspend fun kids(context: Context): List<Station> = loadList(context, "kids.json", kidsQueries)
 
@@ -82,21 +94,8 @@ object StationRepository {
 
     private fun fetchJson(path: String): JSONArray? {
         for (server in servers) {
-            try {
-                val c = URL("https://$server/$path").openConnection() as HttpURLConnection
-                c.connectTimeout = 8000
-                c.readTimeout = 10000
-                c.setRequestProperty("User-Agent", "RadioFinder/1.0")
-                try {
-                    if (c.responseCode == 200) {
-                        return JSONArray(c.inputStream.bufferedReader().readText())
-                    }
-                } finally {
-                    c.disconnect()
-                }
-            } catch (_: Exception) {
-                // nächsten Server probieren
-            }
+            val text = Net.get("https://$server/$path", 8000, 20000, 12_000_000) ?: continue
+            try { return JSONArray(text) } catch (_: Exception) {}
         }
         return null
     }

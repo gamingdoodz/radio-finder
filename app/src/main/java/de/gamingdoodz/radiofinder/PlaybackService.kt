@@ -128,14 +128,14 @@ class PlaybackService : MediaLibraryService() {
 
     private fun remember(items: List<MediaItem>) {
         items.forEach { itemCache[it.mediaId] = it }
-        val tracks = items.filter { it.mediaId.startsWith("au:") }
+        val tracks = items.filter { !it.mediaId.startsWith("st:") }
         if (tracks.size > 1) tracks.forEach { listContext[it.mediaId] = tracks }
     }
 
     private suspend fun kidsEntries(): List<Entry> = coroutineScope {
         val stations = async { StationRepository.kids(applicationContext) }
-        val songs = async { Audius.search("kinderlieder", 30) }
-        stations.await().map { it.toEntry() } + songs.await().map { it.toEntry() }
+        val songs = async { FreeMusic.kids() }
+        stations.await().map { it.toEntry() } + songs.await()
     }
 
     /** "Spiel X": erst Sendername, dann Radio wo es gerade läuft, dann freie Musik. */
@@ -150,7 +150,7 @@ class PlaybackService : MediaLibraryService() {
             Scanner.lastHits = listOf(hit)
             return hit.station.toEntry(hit.title).toMediaItem()
         }
-        val tracks = Audius.search(query, 20).map { it.toEntry().toMediaItem() }
+        val tracks = FreeMusic.search(query).map { it.toMediaItem() }
         remember(tracks)
         return tracks.firstOrNull()
     }
@@ -220,16 +220,16 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             val items: List<MediaItem> = when (parentId) {
                 ROOT_ID -> listOf(
-                    folderItem(FAV_ID, "♥ Favoriten"),
-                    folderItem(HITS_ID, "Letzte Treffer"),
-                    folderItem(KIDS_ID, "Kinder"),
-                    folderItem(FREE_ID, "Freie Musik"),
-                    folderItem(POPULAR_ID, "Beliebte Sender"),
+                    folderItem(FAV_ID, "⭐ Favoriten"),
+                    folderItem(HITS_ID, "🔴 Letzte Treffer"),
+                    folderItem(POPULAR_ID, "📻 Beliebte Sender"),
+                    folderItem(FREE_ID, "🎵 Freie Musik"),
+                    folderItem(KIDS_ID, "🧸 Kinder"),
                 )
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
                 HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
                 KIDS_ID -> kidsEntries().map { it.toMediaItem() }
-                FREE_ID -> Audius.trending(40).map { it.toEntry().toMediaItem() }
+                FREE_ID -> FreeMusic.charts().map { it.toMediaItem() }
                 POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
                 else -> emptyList()
             }
@@ -273,7 +273,7 @@ class PlaybackService : MediaLibraryService() {
                 }
                 publish()
                 launch {
-                    free = Audius.search(query, 20).map { it.toEntry().toMediaItem() }
+                    free = FreeMusic.search(query).map { it.toMediaItem() }
                     publish()
                 }
                 val hits = Scanner.scan(stations, query) { hit ->
