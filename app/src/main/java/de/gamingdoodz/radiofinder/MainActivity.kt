@@ -721,7 +721,7 @@ class MainActivity : ComponentActivity() {
                 val mine = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
                 if (latest > mine) {
                     updateUrl = url
-                    updateRow = Row.Action("Neue Version verfügbar", "Tippen zum Aktualisieren – dauert nur einen Moment", dark = true, icon = R.drawable.ic_star) { runUpdate() }
+                    updateRow = Row.Action("Neue Version verfügbar", "Tippen zum Herunterladen – danach die Datei öffnen und installieren", dark = true, icon = R.drawable.ic_star) { runUpdate() }
                     render()
                 }
             } catch (_: Exception) {
@@ -758,20 +758,10 @@ class MainActivity : ComponentActivity() {
 
     private var updateUrl: String? = null
 
+    /** Neue Version im Browser herunterladen; installiert wird über die Download-Benachrichtigung. */
     private fun runUpdate() {
         val url = updateUrl ?: return
-        updateRow = Row.Status("Lade Update… 0 %", 0, 100)
-        render()
-        lifecycleScope.launch {
-            val ok = Updater.downloadAndInstall(this@MainActivity, url) { p ->
-                updateRow = Row.Status("Lade Update… $p %", p, 100)
-                val idx = rows.indexOfFirst { it is Row.Status }
-                if (idx >= 0) { rows[idx] = updateRow!!; adapter.notifyItemChanged(idx) }
-            }
-            updateRow = if (ok) Row.Action("Update geladen", "Bitte die Installation bestätigen. Beim ersten Mal fragt Android, ob Radio Finder Apps installieren darf – erlauben.", dark = true, icon = R.drawable.ic_star) { runUpdate() }
-            else Row.Action("Update fehlgeschlagen", "Tippen zum erneut Versuchen", dark = true, icon = R.drawable.ic_close) { runUpdate() }
-            render()
-        }
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
     }
 
     private fun watchSheet() {
