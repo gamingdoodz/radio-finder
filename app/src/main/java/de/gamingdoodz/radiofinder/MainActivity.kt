@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private enum class Tab { HOME, FIND, KIDS, STORIES, LIB }
+    private enum class Tab { HOME, FIND, STORIES, LIB }
 
     private sealed class Page {
         data class GenrePage(val genre: Genre) : Page()
@@ -182,7 +182,6 @@ class MainActivity : ComponentActivity() {
 
         findViewById<View>(R.id.navHome).setOnClickListener { selectTab(Tab.HOME) }
         findViewById<View>(R.id.navFind).setOnClickListener { selectTab(Tab.FIND) }
-        findViewById<View>(R.id.navKids).setOnClickListener { selectTab(Tab.KIDS) }
         findViewById<View>(R.id.navStories).setOnClickListener { selectTab(Tab.STORIES) }
         findViewById<View>(R.id.navLib).setOnClickListener { selectTab(Tab.LIB) }
 
@@ -371,7 +370,6 @@ class MainActivity : ComponentActivity() {
         listOf(
             Triple(Tab.HOME, R.id.navHomeIcon, R.id.navHomeLabel),
             Triple(Tab.FIND, R.id.navFindIcon, R.id.navFindLabel),
-            Triple(Tab.KIDS, R.id.navKidsIcon, R.id.navKidsLabel),
             Triple(Tab.STORIES, R.id.navStoriesIcon, R.id.navStoriesLabel),
             Triple(Tab.LIB, R.id.navLibIcon, R.id.navLibLabel),
         ).forEach { (key, icon, label) ->
@@ -379,8 +377,8 @@ class MainActivity : ComponentActivity() {
             findViewById<ImageView>(icon).imageTintList = ColorStateList.valueOf(color)
             findViewById<TextView>(label).setTextColor(color)
         }
-        if (t == Tab.KIDS) { loadKids(); loadStories(Podcasts.kidsCategories) }
-        if (t == Tab.STORIES) loadStories(Podcasts.adultCategories)
+        if (t == Tab.FIND && musicAudience == 1) loadKids()
+        if (t == Tab.STORIES) loadStories(Podcasts.all)
         render()
         recycler.scrollToPosition(0)
     }
@@ -409,7 +407,6 @@ class MainActivity : ComponentActivity() {
             null -> when (tab) {
                 Tab.HOME -> "Radio Finder"
                 Tab.FIND -> "Musik"
-                Tab.KIDS -> "Für Kinder"
                 Tab.STORIES -> "Hörspiele"
                 Tab.LIB -> "Bibliothek"
             }
@@ -506,7 +503,6 @@ class MainActivity : ComponentActivity() {
             null -> when (tab) {
                 Tab.HOME -> renderHome()
                 Tab.FIND -> if (query.isEmpty()) renderFind() else renderSearch()
-                Tab.KIDS -> renderKids()
                 Tab.STORIES -> renderStories()
                 Tab.LIB -> renderLib()
             }
@@ -621,7 +617,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var musicAudience = 0 // 0 = Erwachsene, 1 = Kinder
+
+    private fun audienceChips(selected: Int, onSelect: (Int) -> Unit) =
+        Row.Chips(listOf("Für Erwachsene", "Für Kinder"), selected, onSelect)
+
     private fun renderFind() {
+        rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
+        if (musicAudience == 1) { renderKidsMusic(); return }
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix"))
         Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
@@ -715,9 +718,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private var storySection = 0
+    private var storyAudience = 0 // 0 = Erwachsene, 1 = Kinder
 
     private fun renderStories() {
-        val cats = Podcasts.adultCategories
+        rows.add(audienceChips(storyAudience) { storyAudience = it; storySection = 0; render() })
+        val cats = if (storyAudience == 1) Podcasts.kidsCategories else Podcasts.adultCategories
         rows.add(Row.Chips(cats.map { it.name }, storySection) { storySection = it; render() })
         val cat = cats[storySection.coerceIn(0, cats.size - 1)]
         val list = storyShows[cat.key]
@@ -726,7 +731,6 @@ class MainActivity : ComponentActivity() {
             list.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
             else -> list.forEach { rows.add(Row.Item(it, emptyList())) }
         }
-        rows.add(Row.Empty("Geschichten für Kinder findest du im Reiter „Kinder“."))
     }
 
     private fun addCategory(cat: Podcasts.Category) {
@@ -758,14 +762,7 @@ class MainActivity : ComponentActivity() {
         if (topDe.isEmpty()) rows.add(Row.Empty("Lade…")) else addSongs(topDe, ranked = true)
     }
 
-    private var kidsSection = 0 // 0 = Musik, 1 = Geschichten
-
-    private fun renderKids() {
-        rows.add(Row.Chips(listOf("🎵  Musik", "📖  Geschichten"), kidsSection) { kidsSection = it; render() })
-        if (kidsSection == 1) {
-            Podcasts.kidsCategories.forEach { addCategory(it) }
-            return
-        }
+    private fun renderKidsMusic() {
         rows.add(hitMixRow("kids", "für Kinder", "Bekannte Kinderlieder aus Kinderradios – springt automatisch weiter"))
         rows.add(Row.Header("Kinderradios", "Rund um die Uhr Kindermusik"))
         when {
@@ -1336,8 +1333,8 @@ class MainActivity : ComponentActivity() {
     private fun openMoment(m: Moments.Moment) {
         when (m.action) {
             Moments.Action.HITMIX -> startHitMix(m.genreKey, "– ${m.title}")
-            Moments.Action.KIDS_STORIES -> { kidsSection = 1; selectTab(Tab.KIDS) }
-            Moments.Action.ADULT_STORIES -> { storySection = m.storyIndex; selectTab(Tab.STORIES) }
+            Moments.Action.KIDS_STORIES -> { storyAudience = 1; storySection = 0; selectTab(Tab.STORIES) }
+            Moments.Action.ADULT_STORIES -> { storyAudience = 0; storySection = m.storyIndex; selectTab(Tab.STORIES) }
         }
     }
 
