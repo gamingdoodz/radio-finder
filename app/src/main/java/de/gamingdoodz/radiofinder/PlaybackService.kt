@@ -50,6 +50,7 @@ class PlaybackService : MediaLibraryService() {
         const val CMD_NEXT = "NEXT_HIT"
         const val CMD_FADEIN = "FADE_IN"          // Wecker: leise anfangen, lauter werden
         const val CMD_BEDTIME = "BEDTIME"         // Einschlaf-Modus, args: "min"
+        const val CMD_ENDLESS = "ENDLESS"         // Endlos freie Musik, args: "tag"
     }
 
     private var session: MediaLibrarySession? = null
@@ -80,6 +81,23 @@ class PlaybackService : MediaLibraryService() {
     private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }) }
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bedtime = false
+    private var endlessTag: String? = null
+    private var endlessOffset = 0
+    private var endlessLoading = false
+
+    /** Fast am Ende der Liste: die nächsten 200 freien Lieder anhängen. */
+    private fun checkEndless() {
+        val tag = endlessTag ?: return
+        val p = session?.player ?: return
+        if (endlessLoading || p.mediaItemCount - p.currentMediaItemIndex > 3) return
+        endlessLoading = true
+        scope.launch {
+            val more = Jamendo.page(tag, endlessOffset)
+            endlessOffset += 200
+            if (more.isNotEmpty()) p.addMediaItems(more.map { it.toMediaItem() })
+            endlessLoading = false
+        }
+    }
     // Werbung am Senderanfang messen
     private var stationStart = 0L
     private var musicSeen = false
@@ -249,6 +267,7 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
+                if (mediaItem?.mediaId?.startsWith("jm:") == true) checkEndless() else if (mediaItem != null) endlessTag = null
                 updateFavButton()
                 mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
             }
@@ -399,7 +418,8 @@ class PlaybackService : MediaLibraryService() {
                 .setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                         .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand)
-                        .add(SessionCommand(CMD_FADEIN, Bundle.EMPTY)).add(SessionCommand(CMD_BEDTIME, Bundle.EMPTY)).build()
+                        .add(SessionCommand(CMD_FADEIN, Bundle.EMPTY)).add(SessionCommand(CMD_BEDTIME, Bundle.EMPTY))
+                        .add(SessionCommand(CMD_ENDLESS, Bundle.EMPTY)).build()
                 )
                 .setCustomLayout(buttons())
                 .build()
@@ -436,6 +456,10 @@ class PlaybackService : MediaLibraryService() {
             }
             if (customCommand.customAction == CMD_SLEEP) {
                 startSleepTimer(args.getInt("min", 0))
+            }
+            if (customCommand.customAction == CMD_ENDLESS) {
+                endlessTag = args.getString("tag")
+                endlessOffset = 200
             }
             if (customCommand.customAction == CMD_BEDTIME) {
                 bedtime = true
@@ -487,6 +511,7 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(CHARTS_LIVE_ID, "🔥 Charts gerade im Radio"),
                     folderItem(POPULAR_ID, "📻 Beliebte Sender"),
                     folderItem(FREE_ID, "🎵 Freie Musik"),
+                    folderItem(FREEGENRES_ID, "♾️ Freie Musik endlos"),
                     folderItem(KIDS_ID, "🧸 Kinder"),
                     folderItem(STORIES_ID, "📚 Geschichten & Hörspiele"),
                     folderItem(HITS_ID, "🔎 Letzte Suche"),
@@ -513,6 +538,7 @@ class PlaybackService : MediaLibraryService() {
                 KIDS_ID -> listOf(hitMixItem("kids", "⚡ Kinder-Hit-Mix")) + kidsEntries().map { it.toMediaItem() }
                 FREE_ID -> FreeMusic.charts().map { it.toMediaItem() }
                 POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
+                FREEGENRES_ID -> FREE_TAGS.map { (name, tag) -> folderItem("ftag:$tag", name) }
                 STORIES_ID -> Podcasts.all.map { folderItem("cat:" + it.key, (if (it.kids) "🧸 " else "") + it.name) }
                 else -> when {
                     parentId.startsWith("cat:") -> {
@@ -521,6 +547,11 @@ class PlaybackService : MediaLibraryService() {
                             shows["show:" + show.id] = show
                             folderItem("show:" + show.id, show.name)
                         }
+                    }
+                    parentId.startsWith("ftag:") -> {
+                        val tag = parentId.removePrefix("ftag:")
+                        endlessTag = tag; endlessOffset = 200
+                        Jamendo.many(tag).map { it.toMediaItem() }
                     }
                     parentId.startsWith("show:") ->
                         shows[parentId]?.let { Podcasts.episodes(it) }.orEmpty().map { it.toMediaItem() }

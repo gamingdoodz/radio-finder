@@ -24,7 +24,11 @@ object Jamendo {
     suspend fun byTag(tag: String, limit: Int = 25) = tracks("tags=${enc(tag)}&order=popularity_week&limit=$limit")
 
     /** Sehr viele Lieder eines Genres (bis 200), gut gemischt. */
-    suspend fun many(tag: String) = tracks("tags=${enc(tag)}&order=popularity_total&limit=200").shuffled()
+    suspend fun many(tag: String) = page(tag, 0)
+
+    /** 200 Lieder ab "offset" – für den Endlos-Modus. */
+    suspend fun page(tag: String, offset: Int) =
+        tracks("tags=${enc(tag)}&order=popularity_total&limit=200&offset=$offset").shuffled()
 
     private suspend fun tracks(params: String): List<Entry> = withContext(Dispatchers.IO) {
         val text = Net.get(
@@ -158,10 +162,10 @@ object Archive {
 
 /** Alle freien Musikquellen zusammen. */
 object FreeMusic {
-    suspend fun search(q: String): List<Entry> = coroutineScope {
+    suspend fun search(q: String, quick: Boolean = false): List<Entry> = coroutineScope {
         val j = async { safe { Jamendo.search(q, 20) } }
         val a = async { safe { Audius.search(q, 15).map { it.toEntry() } } }
-        val ia = async { safe { Archive.search(q, 3, 3) } }
+        val ia = async { if (quick) emptyList() else safe { Archive.search(q, 3, 3) } }
         (j.await() + a.await() + ia.await()).distinctBy { it.id }
     }
 

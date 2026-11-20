@@ -12,6 +12,13 @@ data class Genre(
     val playlist: String? = null, // Deezer-Playlist (Suche nach Name) statt Genre-Charts
 )
 
+/** Genres für freie Musik (Jamendo-Tags). */
+val FREE_TAGS = listOf(
+    "Pop" to "pop", "Rock" to "rock", "Elektro" to "electronic", "Hip-Hop" to "hiphop", "Chill" to "lounge",
+    "Akustik" to "acoustic", "Jazz" to "jazz", "Klassik" to "classical", "Metal" to "metal", "Reggae" to "reggae",
+    "Latin" to "latin", "Country" to "country", "Soundtrack" to "soundtrack", "Weihnachten" to "christmas", "Kinder" to "kids",
+)
+
 object Genres {
     val all = listOf(
         Genre("xmas", "Weihnachten", "#FFEF4444", "#FF15803D", R.drawable.ic_star, "christmas", null, "christmas", "Weihnachtslieder Klassiker"),

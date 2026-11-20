@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
         data class Status(val text: String, val done: Int, val total: Int) : Row()
         data class Action(val title: String, val sub: String, val dark: Boolean, val icon: Int = R.drawable.ic_bell, val onClick: () -> Unit) : Row()
         data class Moments(val list: List<de.gamingdoodz.radiofinder.Moments.Moment>) : Row()
+        data class Quick(val items: List<Triple<Int, String, () -> Unit>>) : Row()
         data class Segment(val labels: List<String>, val selected: Int, val onSelect: (Int) -> Unit) : Row()
         data class Top(val entry: Entry, val label: String, val sub: String, val onClick: () -> Unit) : Row()
         data class Chips(val labels: List<String>, val selected: Int, val onSelect: (Int) -> Unit) : Row()
@@ -326,10 +327,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val freeTags = listOf(
-        "Pop" to "pop", "Rock" to "rock", "Elektro" to "electronic", "Hip-Hop" to "hiphop",
-        "Chill" to "lounge", "Akustik" to "acoustic", "Jazz" to "jazz", "Klassik" to "classical", "Weihnachten" to "christmas",
-    )
+    private val freeTags = FREE_TAGS.filter { it.second != "kids" }
     private var freeTag = 0
     private val freeByTag = HashMap<String, List<Entry>>()
 
@@ -496,12 +494,12 @@ class MainActivity : ComponentActivity() {
                 val songs = Deezer.search(q)
                 if (myId == searchId) { songHits = songs; songLoading = false; render() }
             }
-            launch {
+            if (deep) launch {
                 val st = Podcasts.search(q, limit = 12)
                 if (myId == searchId) { storyShows["search"] = st; render() }
             }
             launch {
-                val free = FreeMusic.search(q)
+                val free = FreeMusic.search(q, quick = !deep)
                 if (myId == searchId) { freeHits = free; freeLoading = false; render() }
             }
             val all = try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }
@@ -722,9 +720,8 @@ class MainActivity : ComponentActivity() {
                 val info = packageManager.getPackageInfo(packageName, 0)
                 val mine = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
                 if (latest > mine) {
-                    updateRow = Row.Action("Neue Version verfügbar", "Tippen zum Herunterladen – danach einfach installieren", dark = false, icon = R.drawable.ic_star) {
-                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
-                    }
+                    updateUrl = url
+                    updateRow = Row.Action("Neue Version verfügbar", "Jetzt aktualisieren – dauert nur einen Moment", dark = false, icon = R.drawable.ic_star) { runUpdate() }
                     render()
                 }
             } catch (_: Exception) {
@@ -756,6 +753,24 @@ class MainActivity : ComponentActivity() {
                 close.setOnClickListener { stopHitMix() }
             }
             else -> strip.visibility = View.GONE
+        }
+    }
+
+    private var updateUrl: String? = null
+
+    private fun runUpdate() {
+        val url = updateUrl ?: return
+        updateRow = Row.Status("Lade Update… 0 %", 0, 100)
+        render()
+        lifecycleScope.launch {
+            val ok = Updater.downloadAndInstall(this@MainActivity, url) { p ->
+                updateRow = Row.Status("Lade Update… $p %", p, 100)
+                val idx = rows.indexOfFirst { it is Row.Status }
+                if (idx >= 0) { rows[idx] = updateRow!!; adapter.notifyItemChanged(idx) }
+            }
+            updateRow = if (ok) Row.Action("Update geladen", "Bitte die Installation bestätigen. Beim ersten Mal fragt Android, ob Radio Finder Apps installieren darf – erlauben.", dark = true, icon = R.drawable.ic_star) { runUpdate() }
+            else Row.Action("Update fehlgeschlagen", "Tippen zum erneut Versuchen", dark = true, icon = R.drawable.ic_close) { runUpdate() }
+            render()
         }
     }
 
@@ -875,8 +890,9 @@ class MainActivity : ComponentActivity() {
         val tag = freeTags[freeTag].second
         val list = freeByTag[tag]
         if (list == null) { loadFreeTag(); rows.add(Row.Empty("Lade Musik…")) } else if (list.isNotEmpty()) {
-            rows.add(Row.Action("${freeTags[freeTag].first}: ${list.size} Lieder abspielen", "Gemischt, mit Weiter und Zurück", dark = false, icon = R.drawable.ic_play) {
+            rows.add(Row.Action("${freeTags[freeTag].first} endlos abspielen", "Gemischt, mit Weiter – lädt immer neue Lieder nach", dark = false, icon = R.drawable.ic_play) {
                 play(list.first(), list)
+                controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_ENDLESS, Bundle.EMPTY), Bundle().apply { putString("tag", tag) })
             })
             rows.add(Row.Carousel(list.take(25)))
         }
@@ -1006,12 +1022,11 @@ class MainActivity : ComponentActivity() {
     private fun renderStories() {
         if (!kids()) rows.add(audienceChips(storyAudience) { storyAudience = it; storySection = 0; render() })
         val cats = if (storyAudience == 1) Podcasts.kidsCategories else Podcasts.adultCategories
-        rows.add(Row.Action("Bekannte Serien",
-            if (storyAudience == 1) "Bibi Blocksberg, Paw Patrol & Co. – mit Prime in Amazon Music" else "Die drei ???, Harry Potter & Co. – in Amazon Music",
-            dark = true, icon = R.drawable.ic_star) { famousSheet(storyAudience == 1) })
-        if (storyAudience == 1) {
-            rows.add(Row.Action("Einschlaf-Modus", "Gute-Nacht-Geschichte, danach leise Schlaflieder – nach 45 Minuten aus", dark = false, icon = R.drawable.ic_sun) { bedtimeSheet() })
-        }
+        val quick = mutableListOf<Triple<Int, String, () -> Unit>>(
+            Triple(R.drawable.ic_star, "Bekannte Serien", { famousSheet(storyAudience == 1) })
+        )
+        if (storyAudience == 1) quick.add(0, Triple(R.drawable.ic_sun, "Einschlafen", { bedtimeSheet() }))
+        rows.add(Row.Quick(quick))
         rows.add(Row.Chips(cats.map { it.name }, storySection) { storySection = it; render() })
         val cat = cats[storySection.coerceIn(0, cats.size - 1)]
         val list = storyShows[cat.key]
@@ -1555,6 +1570,7 @@ class MainActivity : ComponentActivity() {
             is Row.Moments -> 10
             is Row.Segment -> 11
             is Row.Top -> 12
+            is Row.Quick -> 13
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -1570,6 +1586,7 @@ class MainActivity : ComponentActivity() {
                 9 -> R.layout.item_chips
                 11 -> R.layout.item_segment
                 12 -> R.layout.item_top
+                13 -> R.layout.item_quick
                 else -> R.layout.item_empty
             }
             val v = LayoutInflater.from(parent.context).inflate(layout, parent, false)
@@ -1665,6 +1682,36 @@ class MainActivity : ComponentActivity() {
                         t.layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                         t.setOnClickListener { row.onSelect(i) }
                         box.addView(t)
+                    }
+                }
+                is Row.Quick -> {
+                    val box = v.findViewById<ViewGroup>(R.id.quickBox)
+                    box.removeAllViews()
+                    row.items.forEach { (icon, label, action) ->
+                        val b = android.widget.LinearLayout(this@MainActivity)
+                        b.orientation = android.widget.LinearLayout.HORIZONTAL
+                        b.gravity = android.view.Gravity.CENTER_VERTICAL
+                        b.setBackgroundResource(R.drawable.bg_option)
+                        val pad = dp(12f).toInt()
+                        b.setPadding(pad, pad, pad, pad)
+                        val lp = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        lp.marginEnd = dp(6f).toInt()
+                        b.layoutParams = lp
+                        val iv = ImageView(this@MainActivity)
+                        iv.setImageResource(icon)
+                        iv.imageTintList = ColorStateList.valueOf(Color.parseColor("#FF2EE6A8"))
+                        iv.layoutParams = android.widget.LinearLayout.LayoutParams(dp(22f).toInt(), dp(22f).toInt())
+                        val tv = TextView(this@MainActivity)
+                        tv.text = label
+                        tv.setTextColor(Color.WHITE)
+                        tv.textSize = 14f
+                        tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
+                        tv.maxLines = 1
+                        tv.ellipsize = android.text.TextUtils.TruncateAt.END
+                        tv.setPadding(dp(10f).toInt(), 0, 0, 0)
+                        b.addView(iv); b.addView(tv)
+                        b.setOnClickListener { action() }
+                        box.addView(b)
                     }
                 }
                 is Row.Top -> {
