@@ -66,7 +66,8 @@ class MainActivity : ComponentActivity() {
         data class Carousel(val entries: List<Entry>, val live: Boolean = false) : Row()
         data class Item(val entry: Entry, val section: List<Entry>, val liveText: String? = null, val rank: Int? = null) : Row()
         data class Status(val text: String, val done: Int, val total: Int) : Row()
-        data class Action(val title: String, val sub: String, val dark: Boolean, val onClick: () -> Unit) : Row()
+        data class Action(val title: String, val sub: String, val dark: Boolean, val icon: Int = R.drawable.ic_bell, val onClick: () -> Unit) : Row()
+        data class Chips(val labels: List<String>, val selected: Int, val onSelect: (Int) -> Unit) : Row()
         data class Empty(val text: String) : Row()
         data class Tiles(val g1: Genre, val g2: Genre?) : Row()
         data class Hero(val genre: Genre, val sub: String) : Row()
@@ -242,6 +243,11 @@ class MainActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
         ticker.post(tick)
         startLiveRefresh()
+        // Wunschliste vorhanden, aber Wächter läuft nicht mehr (z. B. nach Neustart): weitermachen
+        val wishes = WatchService.queries(this)
+        if (wishes.isNotEmpty() && WatchService.status(this).isEmpty()) {
+            try { WatchService.start(this, wishes.first()) } catch (_: Exception) {}
+        }
         render()
     }
 
@@ -334,7 +340,13 @@ class MainActivity : ComponentActivity() {
         if (genreStations.containsKey(g.key) || !genreLoading.add(g.key)) return
         lifecycleScope.launch {
             val st = async { StationRepository.byTag(g.radioTag) }
-            val songs = async { if (g.deezerGenre != null) Deezer.genreChart(g.deezerGenre, 30) else emptyList() }
+            val songs = async {
+                when {
+                    g.playlist != null -> Deezer.playlistByName(g.playlist).take(40)
+                    g.deezerGenre != null -> Deezer.genreChart(g.deezerGenre, 30)
+                    else -> emptyList()
+                }
+            }
             val free = async { if (g.jamendoTag != null) Jamendo.byTag(g.jamendoTag) else emptyList() }
             val stations = st.await()
             genreStations[g.key] = stations
@@ -367,7 +379,7 @@ class MainActivity : ComponentActivity() {
             findViewById<TextView>(label).setTextColor(color)
         }
         if (t == Tab.KIDS) { loadKids(); loadStories(Podcasts.kidsCategories) }
-        if (t == Tab.STORIES) loadStories(Podcasts.all)
+        if (t == Tab.STORIES) loadStories(Podcasts.adultCategories)
         render()
         recycler.scrollToPosition(0)
     }
@@ -395,9 +407,9 @@ class MainActivity : ComponentActivity() {
             is Page.ShowPage -> p.show.name
             null -> when (tab) {
                 Tab.HOME -> "Radio Finder"
-                Tab.FIND -> "Finden"
+                Tab.FIND -> "Musik"
                 Tab.KIDS -> "Für Kinder"
-                Tab.STORIES -> "Geschichten"
+                Tab.STORIES -> "Hörspiele"
                 Tab.LIB -> "Bibliothek"
             }
         }
@@ -504,7 +516,7 @@ class MainActivity : ComponentActivity() {
 
     private fun watchRow(): Row? {
         val q = WatchService.activeQuery(this) ?: return null
-        return Row.Action("🔔 Wächter: „$q“", WatchService.status(this) + " · Tippen zum Verwalten", dark = true) {
+        return Row.Action("Wächter: „$q“", WatchService.status(this) + " · Tippen zum Verwalten", dark = true) {
             watchSheet()
         }
     }
@@ -533,20 +545,31 @@ class MainActivity : ComponentActivity() {
 
     private fun hitMixRow(key: String?, label: String, sub: String): Row {
         val active = HitMix.activeName(this)
-        return if (active != null) Row.Action("⚡ Hit-Mix läuft: $active", (HitMix.nowPlaying(this) ?: "") + " · Tippen zum Beenden", dark = true) { stopHitMix() }
-        else Row.Action("⚡ Hit-Mix $label", sub, dark = false) { startHitMix(key, label) }
+        return if (active != null) Row.Action("Hit-Mix läuft: $active", (HitMix.nowPlaying(this) ?: "") + " · Tippen zum Beenden", dark = true, icon = R.drawable.ic_bolt) { stopHitMix() }
+        else Row.Action("Hit-Mix $label", sub, dark = false, icon = R.drawable.ic_bolt) { startHitMix(key, label) }
     }
 
     private fun next() {
         val c = controller ?: return
-        if (HitMix.activeName(this) != null) c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
-        else c.seekToNextMediaItem()
+        if (HitMix.activeName(this) != null) {
+            val f = c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
+            f.addListener({
+                val ok = try { f.get().resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS } catch (_: Exception) { false }
+                if (!ok) Toast.makeText(this, "Gerade läuft kein anderer Hit – ich springe automatisch, sobald einer anfängt", Toast.LENGTH_LONG).show()
+            }, ContextCompat.getMainExecutor(this))
+        } else c.seekToNextMediaItem()
     }
 
     private fun liveEntries(stations: List<Station>): List<Entry> {
         val now = LiveIndex.fresh().associateBy { it.station.id }
-        return dedupe(stations.mapNotNull { s -> now[s.id]?.let { s.toEntry(it.title) } })
+        return dedupe(stations.mapNotNull { s -> now[s.id]?.takeIf { isMusic(it.title) }?.let { s.toEntry(it.title) } })
     }
+
+    private val talkWords = Regex("(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|magazin|sendung|moderation")
+
+    /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen und Nachrichten fliegen raus. */
+    private fun isMusic(title: String) =
+        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title)
 
     /**
      * Viele Sender gehören zum selben Netzwerk und spielen dasselbe.
@@ -631,9 +654,18 @@ class MainActivity : ComponentActivity() {
 
         artistMix?.let { a ->
             if (HitMix.activeName(this) == null) {
-                rows.add(Row.Action("⚡ ${a.name}-Mix", "Nur Lieder von ${a.name} – springt zwischen Radios, die gerade ${a.name} spielen", dark = false) {
+                rows.add(Row.Action("${a.name}-Mix", "Nur Lieder von ${a.name} – springt zwischen Radios, die gerade ${a.name} spielen", dark = false, icon = R.drawable.ic_bolt) {
                     startHitMix("artist:${a.id}:${a.name}", "– ${a.name}")
                 })
+            }
+        }
+        artistMix?.let { a ->
+            val aw = Scanner.words(a.name)
+            val now = dedupe(LiveIndex.fresh().filter { n -> aw.all { n.normalized.contains(it) } }
+                .map { it.station.toEntry(it.title) }).filter { e -> radioHits.none { it.id == e.id } }
+            if (now.isNotEmpty()) {
+                rows.add(Row.Header("Von ${a.name} gerade im Radio", "Komplett hören"))
+                now.forEach { rows.add(Row.Item(it, now, "● LIVE")) }
             }
         }
         rows.add(Row.Header("Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
@@ -662,7 +694,7 @@ class MainActivity : ComponentActivity() {
 
     private fun renderGenre(g: Genre) {
         rows.add(Row.Hero(g, "Radio live · Top-Songs · Freie Musik"))
-        if (g.key != "schlager" && g.key != "chill") rows.add(hitMixRow(g.key, g.name, "Nur ${g.name}-Hits aus dem Radio"))
+        rows.add(hitMixRow(g.key, g.name, "Nur ${g.name}-Hits aus dem Radio – springt automatisch weiter"))
         val stations = genreStations[g.key]
         rows.add(Row.Header("Sender", "● LIVE zeigt, was gerade läuft"))
         when {
@@ -686,16 +718,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var storySection = 0
+
     private fun renderStories() {
-        rows.add(Row.Header("Für Kinder", "Gute-Nacht-Geschichten, Märchen, Hörspiele"))
-        Podcasts.kidsCategories.forEach { addCategory(it) }
-        rows.add(Row.Header("Für Erwachsene", "Krimis, Hörbücher, Grusel, Comedy"))
-        Podcasts.adultCategories.forEach { addCategory(it) }
+        val cats = Podcasts.adultCategories
+        rows.add(Row.Chips(cats.map { it.name }, storySection) { storySection = it; render() })
+        val cat = cats[storySection.coerceIn(0, cats.size - 1)]
+        val list = storyShows[cat.key]
+        when {
+            list == null -> rows.add(Row.Empty("Lade…"))
+            list.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
+            else -> list.forEach { rows.add(Row.Item(it, emptyList())) }
+        }
+        rows.add(Row.Empty("Geschichten für Kinder findest du im Reiter „Kinder“."))
     }
 
     private fun addCategory(cat: Podcasts.Category) {
         val list = storyShows[cat.key]
-        rows.add(Row.Empty(cat.name.uppercase()))
+        rows.add(Row.Header(cat.name))
         when {
             list == null -> rows.add(Row.Empty("Lade…"))
             list.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
@@ -706,7 +746,7 @@ class MainActivity : ComponentActivity() {
     private fun renderShow(show: Entry) {
         val list = episodes[show.url]
         rows.add(Row.Item(show, emptyList()))
-        rows.add(Row.Header("Folgen", "Neueste zuerst · weiterhören, wo du aufgehört hast"))
+        rows.add(Row.Header("Folgen", "Von Anfang an · ⏭ spielt die nächste Folge · merkt sich, wo du warst"))
         when {
             list == null -> rows.add(Row.Empty("Lade Folgen…"))
             list.isEmpty() -> rows.add(Row.Empty("Keine Folgen gefunden."))
@@ -718,17 +758,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderCharts() {
-        rows.add(Row.Hero(Genres.all.first(), "Die Top 100 in Deutschland"))
+        rows.add(Row.Hero(Genres.all.first { it.key == "charts" }, "Die Top 100 in Deutschland"))
         if (topDe.isEmpty()) rows.add(Row.Empty("Lade…")) else addSongs(topDe, ranked = true)
     }
 
+    private var kidsSection = 0 // 0 = Musik, 1 = Geschichten
+
     private fun renderKids() {
-        rows.add(Row.Hero(Genres.all.last(), "Radios · Lieder · Geschichten"))
-        rows.add(hitMixRow("kids", "für Kinder", "Bekannte Kinderlieder aus Kinderradios"))
-        Podcasts.kidsCategories.forEach { cat ->
-            val list = storyShows[cat.key]
-            if (!list.isNullOrEmpty()) { rows.add(Row.Header(cat.name)); rows.add(Row.Carousel(list)) }
+        rows.add(Row.Chips(listOf("🎵  Musik", "📖  Geschichten"), kidsSection) { kidsSection = it; render() })
+        if (kidsSection == 1) {
+            Podcasts.kidsCategories.forEach { addCategory(it) }
+            return
         }
+        rows.add(hitMixRow("kids", "für Kinder", "Bekannte Kinderlieder aus Kinderradios – springt automatisch weiter"))
         rows.add(Row.Header("Kinderradios", "Rund um die Uhr Kindermusik"))
         when {
             kidStations.isNotEmpty() -> {
@@ -742,7 +784,7 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.Header("Bekannte Kinderlieder", "Rolf Zuckowski, Bibi Blocksberg & Co."))
             addSongs(kidCharts.take(20), ranked = false)
         }
-        rows.add(Row.Header("Kinderlieder zum Durchhören", "Freie Lieder, komplett"))
+        rows.add(Row.Header("Kinderlieder zum Durchhören", "Freie Lieder, komplett und mit Weiter"))
         when {
             kidSongs.isNotEmpty() -> kidSongs.forEach { rows.add(Row.Item(it, kidSongs)) }
             kidsState == 1 -> rows.add(Row.Empty("Lade…"))
@@ -1111,6 +1153,7 @@ class MainActivity : ComponentActivity() {
             is Row.Tiles -> 6
             is Row.Hero -> 7
             is Row.More -> 8
+            is Row.Chips -> 9
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -1123,6 +1166,7 @@ class MainActivity : ComponentActivity() {
                 6 -> R.layout.item_tiles
                 7 -> R.layout.item_hero
                 8 -> R.layout.item_more
+                9 -> R.layout.item_chips
                 else -> R.layout.item_empty
             }
             val v = LayoutInflater.from(parent.context).inflate(layout, parent, false)
@@ -1171,6 +1215,7 @@ class MainActivity : ComponentActivity() {
                     val fg = if (row.dark) Color.WHITE else Color.parseColor("#FF08131C")
                     v.findViewById<TextView>(R.id.title).setTextColor(fg)
                     v.findViewById<TextView>(R.id.sub).setTextColor(if (row.dark) Color.parseColor("#B3FFFFFF") else Color.parseColor("#CC08131C"))
+                    v.findViewById<ImageView>(R.id.icon).setImageResource(row.icon)
                     v.findViewById<ImageView>(R.id.icon).imageTintList =
                         ColorStateList.valueOf(if (row.dark) Color.parseColor("#FF2EE6A8") else Color.parseColor("#FF08131C"))
                     v.setOnClickListener { row.onClick() }
@@ -1195,6 +1240,26 @@ class MainActivity : ComponentActivity() {
                 is Row.More -> {
                     (v as TextView).text = row.text
                     v.setOnClickListener { row.onClick() }
+                }
+                is Row.Chips -> {
+                    val box = v.findViewById<ViewGroup>(R.id.chipBox)
+                    box.removeAllViews()
+                    row.labels.forEachIndexed { i, label ->
+                        val chip = TextView(this@MainActivity)
+                        chip.text = label
+                        chip.textSize = 14f
+                        chip.setTypeface(chip.typeface, android.graphics.Typeface.BOLD)
+                        val on = i == row.selected
+                        chip.setTextColor(if (on) Color.parseColor("#FF08131C") else Color.WHITE)
+                        chip.setBackgroundResource(if (on) R.drawable.bg_chip_on else R.drawable.bg_chip_off)
+                        val ph = dp(16f).toInt(); val pv = dp(9f).toInt()
+                        chip.setPadding(ph, pv, ph, pv)
+                        val lp = ViewGroup.MarginLayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                        lp.marginEnd = dp(8f).toInt()
+                        chip.layoutParams = lp
+                        chip.setOnClickListener { row.onSelect(i) }
+                        box.addView(chip)
+                    }
                 }
             }
         }

@@ -46,6 +46,15 @@ object Deezer {
         }
     }
 
+    /** Lieder einer Deezer-Playlist, gefunden über ihren Namen (z. B. "80er Hits"). */
+    suspend fun playlistByName(name: String): List<Entry> = cached("p:$name") {
+        val text = withContext(Dispatchers.IO) {
+            Net.get("https://api.deezer.com/search/playlist?limit=1&q=" + URLEncoder.encode(name, "UTF-8"))
+        }
+        val id = try { JSONObject(text ?: "{}").optJSONArray("data")?.optJSONObject(0)?.optLong("id") } catch (_: Exception) { null }
+        if (id == null || id == 0L) emptyList() else load("playlist/$id/tracks?limit=100")
+    }
+
     suspend fun artistTop(id: Long): List<Entry> = cached("a$id") { load("artist/$id/top?limit=50") }
 
     suspend fun search(q: String, limit: Int = 25): List<Entry> =

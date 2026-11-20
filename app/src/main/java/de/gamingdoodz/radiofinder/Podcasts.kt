@@ -72,13 +72,13 @@ object Podcasts {
         }
     }
 
-    /** Folgen einer Show (neueste zuerst, höchstens 80). */
+    /** Folgen einer Show in Erscheinungs-Reihenfolge: Folge 1 zuerst. */
     suspend fun episodes(show: Entry): List<Entry> = withContext(Dispatchers.IO) {
         synchronized(episodeCache) {
             episodeCache[show.url]?.let { (t, l) -> if (System.currentTimeMillis() - t < 30 * 60_000L) return@withContext l }
         }
         val xml = Net.get(show.url, 10_000, 20_000, 15_000_000) ?: return@withContext emptyList()
-        val list = try { parse(xml, show) } catch (_: Exception) { emptyList() }
+        val list = try { parse(xml, show).asReversed().toList() } catch (_: Exception) { emptyList() }
         if (list.isNotEmpty()) synchronized(episodeCache) { episodeCache[show.url] = System.currentTimeMillis() to list }
         list
     }
@@ -95,7 +95,7 @@ object Podcasts {
         var channelImage = ""
         var text = StringBuilder()
         var event = p.eventType
-        while (event != XmlPullParser.END_DOCUMENT && out.size < 80) {
+        while (event != XmlPullParser.END_DOCUMENT && out.size < 500) {
             when (event) {
                 XmlPullParser.START_TAG -> {
                     text = StringBuilder()

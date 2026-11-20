@@ -48,6 +48,7 @@ class HitMix(
         val hits = when {
             artist != null -> Deezer.artistTop(artist.getOrNull(1)?.toLongOrNull() ?: 0L)
             genre?.key == "kids" -> Deezer.kidsHits()
+            genre?.playlist != null -> Deezer.playlistByName(genre.playlist)
             genre?.deezerGenre != null && genre.deezerGenre != 0 -> Deezer.genreChart(genre.deezerGenre, 50) + Deezer.topGermany(50)
             else -> Deezer.topGermany(100)
         }
@@ -74,16 +75,25 @@ class HitMix(
         prefs(context).edit().remove("name").remove("now").apply()
     }
 
-    /** Sofort zum nächsten Hit springen. */
-    suspend fun next() {
+    private var waitingForNext = false
+
+    /** Sofort zum nächsten Hit springen. Gibt false zurück, wenn gerade kein anderer Hit läuft. */
+    suspend fun next(): Boolean {
         poll(force = false)
-        val item = pickNext() ?: return
+        val item = pickNext() ?: pickNext(allowRepeats = true)
+        if (item == null) {
+            waitingForNext = true
+            prefs(context).edit().putString("now", "Gerade läuft kein anderer Hit – ich springe, sobald einer anfängt").apply()
+            return false
+        }
+        waitingForNext = false
         switchTo(item)
+        return true
     }
 
     private suspend fun loop() {
         while (scope.isActive && job?.isActive != false) {
-            delay(20_000)
+            delay(if (waitingForNext) 10_000 else 20_000)
             val p = player() ?: continue
             // Pausiert: nichts tun
             if (!p.playWhenReady) continue
@@ -92,26 +102,43 @@ class HitMix(
             val stillHit = now != null && songs.any { it.key == currentSongKey && it.matches(now.normalized) }
             val broken = p.playbackState == Player.STATE_IDLE || p.playerError != null
             // Hit vorbei (anderes Lied, Werbung, Moderation) oder Sender kaputt -> weiter
-            if (!stillHit || broken || System.currentTimeMillis() - songStartedAt > 7 * 60_000L) {
-                pickNext()?.let { switchTo(it) }
+            if (waitingForNext || !stillHit || broken || System.currentTimeMillis() - songStartedAt > 7 * 60_000L) {
+                (pickNext() ?: if (broken || waitingForNext) pickNext(allowRepeats = true) else null)?.let {
+                    waitingForNext = false
+                    switchTo(it)
+                }
             }
         }
     }
 
+    private var rotation = 0
+
     private suspend fun poll(force: Boolean) {
         val wifi = Net.isUnmetered(context)
-        // Mobil nur über Statusseiten (wenig Daten), im WLAN auch direkt
-        LiveIndex.refresh(stations, maxAgeMs = if (force) 0L else 15_000L, statusOnly = !wifi && !force)
+        if (force || wifi) {
+            LiveIndex.refresh(stations, maxAgeMs = if (force) 0L else 15_000L)
+            return
+        }
+        // Mobil: Statusseiten (fast keine Daten) + jedes Mal ein paar Sender direkt, reihum
+        LiveIndex.refresh(stations, maxAgeMs = 15_000L, statusOnly = true)
+        val batch = if (Settings.saver(context)) 15 else 30
+        if (stations.isNotEmpty()) {
+            val from = rotation % stations.size
+            val part = (stations.drop(from) + stations.take(from)).take(batch)
+            rotation += batch
+            LiveIndex.refresh(part, maxAgeMs = 15_000L)
+        }
     }
 
     /** Sucht einen Sender, auf dem gerade ein Hit läuft – am liebsten einen, der eben erst angefangen hat. */
-    private fun pickNext(): MediaItem? {
+    private fun pickNext(allowRepeats: Boolean = false): MediaItem? {
         val t = System.currentTimeMillis()
         val ids = stations.map { it.id }.toHashSet()
         val candidates = LiveIndex.fresh()
             .filter { it.station.id in ids && it.station.id != currentStationId }
             .mapNotNull { n -> songs.firstOrNull { it.matches(n.normalized) }?.let { n to it } }
-            .filter { (_, song) -> song.key !in played }
+            .filter { (_, song) -> allowRepeats || song.key !in played }
+            .filter { (_, song) -> song.key != currentSongKey }
         val best = candidates.minByOrNull { (n, _) -> t - n.since } ?: return null
         val (n, song) = best
         currentStationId = n.station.id

@@ -138,6 +138,8 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(openApp)
             .build()
         Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        // Ein alter Hit-Mix von vor einem Neustart läuft nicht mehr
+        HitMix.prefs(this).edit().clear().apply()
         sleepHandler.postDelayed(posRunnable, 15_000)
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
@@ -295,8 +297,13 @@ class PlaybackService : MediaLibraryService() {
             }
             if (customCommand.customAction == CMD_NEXT) {
                 val p = session.player
-                if (hitMix.isActive) scope.launch { hitMix.next() }
-                else if (p.hasNextMediaItem()) p.seekToNextMediaItem()
+                if (hitMix.isActive) {
+                    @Suppress("DEPRECATION")
+                    return scope.future {
+                        SessionResult(if (hitMix.next()) SessionResult.RESULT_SUCCESS else SessionResult.RESULT_ERROR_UNKNOWN)
+                    }
+                }
+                if (p.hasNextMediaItem()) p.seekToNextMediaItem()
             }
             if (customCommand.customAction == CMD_SLEEP) {
                 val min = args.getInt("min", 0)
