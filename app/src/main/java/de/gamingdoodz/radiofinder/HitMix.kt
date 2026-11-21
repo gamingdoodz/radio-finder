@@ -229,7 +229,10 @@ class HitMix(
         // Bekanntheit: läuft auf vielen Sendern, steht weit oben in der Liste oder ist von einem bekannten Künstler
         val pop = LiveIndex.popularity()
         val rank = HashMap<String, Int>().also { m -> songs.forEachIndexed { i, sg -> m.putIfAbsent(sg.key, i) } }
-        val best = listOf(fromList, fromGenre, fromArtist, fromAny).firstOrNull { it.isNotEmpty() }
+        // Sender, bei denen beim Umschalten Werbung kommt, nur nehmen, wenn es gar nicht anders geht
+        fun noAds(l: List<Pair<LiveIndex.Now, String>>) = l.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
+        val tiers = listOf(fromList, fromGenre, fromArtist, fromAny)
+        val best = (tiers.map { noAds(it) } + tiers).firstOrNull { it.isNotEmpty() }
             ?.minByOrNull { (n, key) ->
                 val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 45_000L
                 val top = rank[key]?.let { (100 - it).coerceAtLeast(0) * 1_500L } ?: 0L

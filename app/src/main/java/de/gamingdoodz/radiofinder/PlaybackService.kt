@@ -727,6 +727,8 @@ class PlaybackService : MediaLibraryService() {
                 val chosen = resolved[0]
                 val others = LiveIndex.fresh()
                     .filter { "st:" + it.station.id != chosen.mediaId && LiveIndex.isMusic(it.title) }
+                    // Weiter/Zurück: keine Sender, bei denen beim Umschalten Werbung kommt
+                    .filter { !Ads.likely(this@PlaybackService, it.station.id, it.station.url) }
                     .let { list ->
                         val pop = LiveIndex.popularity()
                         // Bekannte Lieder (laufen auf vielen Sendern) zuerst, dann frisch angefangene

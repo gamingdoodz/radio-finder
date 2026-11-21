@@ -43,7 +43,8 @@ class WatchService : Service() {
         private const val CHANNEL_HIT = "watch_hit"
         private const val ID_RUN = 11
         private const val ID_HIT = 12
-        private const val MAX_MINUTES = 120
+        private const val MAX_MINUTES = 60
+        private const val ACTION_PLAY = "de.gamingdoodz.radiofinder.WATCH_PLAY"
 
         fun start(context: Context, query: String, skipStation: String? = null) {
             // "Nochmal hören": den Sender, auf dem es gerade läuft, eine Weile ignorieren
@@ -119,6 +120,21 @@ class WatchService : Service() {
         when (intent?.action) {
             ACTION_STOP -> { job?.cancel(); finish(); return START_NOT_STICKY }
             ACTION_NOW -> { waitJob?.cancel(); return START_NOT_STICKY }
+            ACTION_PLAY -> {
+                // Aus der Benachrichtigung "Jetzt hören" getippt
+                val json = prefs(this).getString("pending", null)
+                getSystemService(NotificationManager::class.java).cancel(ID_HIT)
+                if (json != null) scope.launch {
+                    try { playNow(Entry.fromJson(org.json.JSONObject(json))) } catch (_: Exception) {}
+                    if (job?.isActive != true) finish()
+                }
+                if (job?.isActive == true) return START_NOT_STICKY
+                ServiceCompat.startForeground(
+                    this, ID_RUN, runningNotification("Starte Wiedergabe…", false),
+                    if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
+                )
+                return START_NOT_STICKY
+            }
         }
         if (queries(this).isEmpty()) { finish(); return START_NOT_STICKY }
         ServiceCompat.startForeground(
@@ -182,7 +198,7 @@ class WatchService : Service() {
                 onFound(f.first, f.second)
                 if (queries(this).isEmpty()) break
                 // Das gefundene Lied in Ruhe hören lassen, dann weitersuchen
-                setStatus("Spielt gerade dein Wunschlied – danach suche ich weiter", false)
+                setStatus("Gefunden – in ein paar Minuten suche ich weiter", false)
                 waitFor(4 * 60_000L)
             } else {
                 setStatus("Noch nicht gefunden – nächste Suche in 1 Minute", false)
@@ -190,7 +206,7 @@ class WatchService : Service() {
             }
         }
         if (queries(this).isNotEmpty()) {
-            notifyHit("Wächter beendet", "Deine Wunschlieder liefen in den letzten 2 Stunden nicht.")
+            notifyHit("Wächter beendet", "Deine Wunschlieder liefen in der letzten Stunde nicht.")
             saveQueries(this, emptyList())
         }
         finish()
@@ -208,7 +224,27 @@ class WatchService : Service() {
         Scanner.lastHits = listOf(hit)
         saveQueries(this, queries(this).filter { it != query })
         val entry = hit.station.toEntry(hit.title)
-        notifyHit("Gefunden: „$query“ 🎉", "${hit.title}\nläuft jetzt auf ${hit.station.name}")
+        // Nur automatisch umschalten, wenn gerade Musik läuft. Sonst nicht einfach losspielen
+        // (z. B. im Meeting), sondern Bescheid geben: "Jetzt hören" in der Benachrichtigung.
+        val playing = try {
+            val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+            val future = MediaController.Builder(this, token).buildAsync()
+            val c = future.await()
+            val p = c.isPlaying || c.playWhenReady
+            MediaController.releaseFuture(future)
+            p
+        } catch (_: Exception) { false }
+        if (playing) {
+            notifyHit("Gefunden: „$query“ 🎉", "${hit.title}\nläuft jetzt auf ${hit.station.name}", null)
+            playNow(entry)
+        } else {
+            prefs(this).edit().putString("pending", entry.toJson().toString()).apply()
+            notifyHit("„$query“ läuft gerade! 🎉", "${hit.title}\nauf ${hit.station.name} – tippe auf „Jetzt hören“",
+                serviceIntent(ACTION_PLAY, 3))
+        }
+    }
+
+    private suspend fun playNow(entry: Entry) {
         try {
             val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
             val future = MediaController.Builder(this, token).buildAsync()
@@ -283,8 +319,8 @@ class WatchService : Service() {
         return b.build()
     }
 
-    private fun notifyHit(title: String, text: String) {
-        val n = NotificationCompat.Builder(this, CHANNEL_HIT)
+    private fun notifyHit(title: String, text: String, play: PendingIntent? = null) {
+        val b = NotificationCompat.Builder(this, CHANNEL_HIT)
             .setSmallIcon(R.drawable.ic_bell)
             .setLargeIcon(logo())
             .setColor(0xFF2EE6A8.toInt())
@@ -293,8 +329,9 @@ class WatchService : Service() {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            .setContentIntent(openApp())
-            .build()
+            .setContentIntent(play ?: openApp())
+        if (play != null) b.addAction(R.drawable.ic_play, "Jetzt hören", play)
+        val n = b.build()
         try {
             getSystemService(NotificationManager::class.java).notify(ID_HIT, n)
         } catch (_: SecurityException) {

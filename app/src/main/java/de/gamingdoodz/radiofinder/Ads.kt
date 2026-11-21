@@ -25,4 +25,11 @@ object Ads {
     }
 
     fun clear(c: Context, stationId: String) = prefs(c).edit().remove(stationId).apply()
+
+    /** Streams großer Werbe-Vermarkter spielen beim Verbinden fast immer erst Werbung. */
+    private val adHosts = Regex("(?i)streamtheworld|tritondigital|adswizz|revma|ihrhls|spotxchange|liveadexchanger|deliver\\.adswizz|playerservices|ais-sa|ais-edge|audioad|adtonos|targetspot")
+
+    /** Kommt hier beim Umschalten wahrscheinlich Werbung? (gelernt oder bekannter Werbe-Stream) */
+    fun likely(c: Context, stationId: String, url: String): Boolean =
+        duration(c, stationId) > 0 || adHosts.containsMatchIn(url)
 }
