@@ -15,7 +15,7 @@ object LiveIndex {
 
     /** Ein Song zum Wiedererkennen im Radio (Titel- und Künstlerwörter). */
     class Song(val entry: Entry) {
-        private val titleWords = Scanner.words(
+        val titleWords = Scanner.words(
             entry.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ").substringBefore(" - ")
         ).filter { it.length >= 2 }
         private val artistWords = Scanner.words(entry.subtitle).filter { it.length >= 3 }
@@ -93,11 +93,36 @@ object LiveIndex {
     /** Läuft dieser Song (Titel + Künstler) gerade irgendwo? */
     fun findSong(title: String, artist: String): Now? = findSongs(title, artist).firstOrNull()
 
+    /** Wort -> laufende Titel mit diesem Wort. Damit muss nicht jedes Mal über alle 8.000 Einträge gesucht werden. */
+    @Volatile private var wordIndex: Pair<List<Now>, Map<String, List<Now>>>? = null
+
+    private fun index(): Map<String, List<Now>> {
+        val list = fresh()
+        wordIndex?.let { (l, m) -> if (l === list) return m }
+        val m = HashMap<String, MutableList<Now>>()
+        for (n in list) for (w in n.normalized.split(' ')) if (w.length >= 2) m.getOrPut(w) { mutableListOf() }.add(n)
+        wordIndex = list to m
+        return m
+    }
+
+    /** Alle laufenden Titel, die zu diesem Song passen (schnell über den Wort-Index). */
+    fun matching(song: Song): List<Now> {
+        if (song.titleWords.isEmpty()) return emptyList()
+        val idx = index()
+        val candidates = song.titleWords.map { idx[it].orEmpty() }.minByOrNull { it.size } ?: return emptyList()
+        return candidates.filter { song.matches(it.normalized) }
+    }
+
     /** Alle Sender mit diesem Song, zuletzt angefangene zuerst. Länger als 5 Minuten = wohl schon vorbei. */
     fun findSongs(title: String, artist: String): List<Now> {
         val song = Song(Entry("", Kind.TRACK, title, artist, "", "", title))
+        val words = Scanner.words(title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ").substringBefore(" - ")).filter { it.length >= 2 }
+        if (words.isEmpty()) return emptyList()
+        val idx = index()
+        // Nur Titel, die das seltenste Wort enthalten, genauer prüfen
+        val candidates = words.map { idx[it].orEmpty() }.minByOrNull { it.size } ?: return emptyList()
         val t = System.currentTimeMillis()
-        return fresh().filter { song.matches(it.normalized) && t - it.since < 5 * 60_000L }.sortedByDescending { it.since }
+        return candidates.filter { song.matches(it.normalized) && t - it.since < 5 * 60_000L }.sortedByDescending { it.since }
     }
 
     /** Aktualisiert die Liste für die angegebenen Sender (nur einmal gleichzeitig). */

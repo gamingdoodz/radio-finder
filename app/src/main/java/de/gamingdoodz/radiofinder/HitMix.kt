@@ -94,7 +94,9 @@ class HitMix(
         }
         genreIds = genreStations.map { it.id }.toSet()
         strict = genre?.key == "xmas" || genre?.key == "kids"
-        themeWords = if (genre?.key == "xmas")
+        themeWords = if (genre?.key == "kids")
+            Regex("(?i)kinderlied|zuckowski|sommerland|deine freunde|volker rosin|jöcker|lichterkinder|bibi blocksberg|bibi und tina|benjamin blümchen|schlümpfe|biene maja|pippi|kikaninchen|sternschnuppe|frederik vahle|paw patrol|sandmännchen|die maus|kinderdisco")
+        else if (genre?.key == "xmas")
             Regex("(?i)christmas|xmas|weihnacht|santa|jingle|snow|winter|noel|navidad|feliz|rudolph|sleigh|mistletoe|let it snow|silent night|stille nacht|o tannenbaum|advent|nikolaus|lebkuchen|schnee")
         else null
 
@@ -225,7 +227,10 @@ class HitMix(
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
 
         fun theme(n: LiveIndex.Now) = themeWords?.containsMatchIn(n.title) == true
-        val fromList = pool.mapNotNull { n -> songs.firstOrNull { it.matches(n.normalized) }?.let { n to it.key } }
+        // Schnell über den Wort-Index statt jedes Lied mit jedem laufenden Titel zu vergleichen
+        val poolIds = pool.mapTo(HashSet()) { it.station.id }
+        val fromList = songs.flatMap { sg -> LiveIndex.matching(sg).filter { it.station.id in poolIds }.map { it to sg.key } }
+            .distinctBy { it.first.station.id }
             .filter { (_, k) -> ok(k) }
         val fromGenre = pool.filter { it.station.id in genreIds || theme(it) }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
         val artistWords = artistNames.map { Scanner.words(it) }.filter { it.isNotEmpty() }

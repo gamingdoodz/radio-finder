@@ -66,6 +66,10 @@ object StationRepository {
         "tag=kinder&limit=40",
         "tag=kinderlieder&limit=20",
         "tag=kids&limit=30",
+        "tag=kindermusik&limit=20",
+        "name=kinderlieder&limit=10",
+        "tag=children&countrycode=DE&limit=10",
+        "name=kids&countrycode=DE&limit=10",
         "tag=children&limit=20",
     )
 
