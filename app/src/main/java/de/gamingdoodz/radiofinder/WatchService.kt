@@ -45,7 +45,10 @@ class WatchService : Service() {
         private const val ID_HIT = 12
         private const val MAX_MINUTES = 120
 
-        fun start(context: Context, query: String) {
+        fun start(context: Context, query: String, skipStation: String? = null) {
+            // "Nochmal hören": den Sender, auf dem es gerade läuft, eine Weile ignorieren
+            if (skipStation != null) prefs(context).edit()
+                .putString("skip:$query", skipStation + "|" + (System.currentTimeMillis() + 8 * 60_000L)).apply()
             val list = queries(context).toMutableList()
             if (list.none { it.equals(query, ignoreCase = true) }) list.add(query)
             saveQueries(context, list)
@@ -127,6 +130,13 @@ class WatchService : Service() {
         return START_NOT_STICKY
     }
 
+    /** Treffer auf einem Sender, der für diesen Wunsch gerade ignoriert wird? */
+    private fun skipped(query: String, stationId: String): Boolean {
+        val v = prefs(this).getString("skip:$query", null) ?: return false
+        val (id, until) = v.split("|").let { it[0] to (it.getOrNull(1)?.toLongOrNull() ?: 0L) }
+        return id == stationId && System.currentTimeMillis() < until
+    }
+
     private suspend fun watch() {
         val end = System.currentTimeMillis() + MAX_MINUTES * 60_000L
         var round = 0
@@ -145,13 +155,13 @@ class WatchService : Service() {
                 if (serverOk) {
                     val live = LiveIndex.fresh()
                     found = matchers.firstNotNullOfOrNull { (q, w) ->
-                        live.firstOrNull { Scanner.matches(it.title, w) }?.let { q to Scanner.Hit(it.station, it.title) }
+                        live.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
                     }
                 }
             } else for ((q, w) in matchers) {
                 val remote = Radar.search(q)
                 if (remote == null) { serverOk = false; break }
-                remote.firstOrNull { Scanner.matches(it.title, w) }?.let { found = q to it }
+                remote.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { found = q to it }
                 if (found != null) break
             }
             val stations = if (found != null || serverOk) emptyList()
@@ -159,7 +169,7 @@ class WatchService : Service() {
             if (stations.isNotEmpty()) try {
                 Scanner.titles(stations) { s, title ->
                     if (found == null) {
-                        matchers.firstOrNull { (_, w) -> Scanner.matches(title, w) }?.let { (q, _) ->
+                        matchers.firstOrNull { (q, w) -> Scanner.matches(title, w) && !skipped(q, s.id) }?.let { (q, _) ->
                             found = q to Scanner.Hit(s, title)
                             throw FoundSignal()
                         }

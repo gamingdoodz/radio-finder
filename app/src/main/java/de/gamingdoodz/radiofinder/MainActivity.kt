@@ -225,6 +225,7 @@ class MainActivity : ComponentActivity() {
         }
         findViewById<View>(R.id.fullSleep).setOnClickListener { sleepDialog() }
         findViewById<View>(R.id.fullBack30).setOnClickListener { controller?.seekBack() }
+        findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
         findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
         findViewById<View>(R.id.fullSpeed).setOnClickListener {
             val c = controller ?: return@setOnClickListener
@@ -1374,6 +1375,29 @@ class MainActivity : ComponentActivity() {
 
     private class Option(val icon: Int, val label: String, val sub: String?, val action: () -> Unit)
 
+    /**
+     * Das laufende Radio-Lied nochmal von vorn: läuft es gerade woanders frisch an, sofort dorthin.
+     * Sonst übernimmt der Wächter und spielt es, sobald es wieder irgendwo anfängt.
+     */
+    private fun playAgain() {
+        val c = controller ?: return
+        val item = c.currentMediaItem ?: return
+        val live = c.mediaMetadata.title?.toString()?.takeIf { LiveIndex.isMusic(it) } ?: return
+        val artist = live.substringBefore(" - ").substringBefore(" – ").trim()
+        val title = live.substringAfter(" - ").substringAfter(" – ").trim()
+        val here = item.mediaId.removePrefix("st:")
+        val t = System.currentTimeMillis()
+        val best = LiveIndex.findSongs(title, artist).filter { it.station.id != here && t - it.since < 90_000 }.firstOrNull()
+        if (best != null) {
+            Toast.makeText(this, "Läuft gerade von vorn auf ${best.station.name}", Toast.LENGTH_SHORT).show()
+            play(best.station.toEntry(best.title), emptyList())
+            return
+        }
+        WatchService.start(this, "$title $artist", skipStation = here)
+        Toast.makeText(this, "Wächter läuft: Sobald „$title“ woanders anfängt, geht's los", Toast.LENGTH_LONG).show()
+        render()
+    }
+
     /** Menü beim langen Drücken auf einen Eintrag. */
     private fun itemMenu(e: Entry, section: List<Entry>) {
         val liveSong = e.kind == Kind.STATION && e.subtitle != "Internetradio"
@@ -1601,7 +1625,12 @@ class MainActivity : ComponentActivity() {
             findViewById<EqualizerView>(R.id.fullEq).apply { bars = 9; this.playing = c.isPlaying }
             findViewById<View>(R.id.fullSeek).visibility = if (isStation) View.INVISIBLE else View.VISIBLE
             val story = item.mediaId.startsWith("pc:") || item.mediaId.startsWith("ia:")
-            findViewById<View>(R.id.fullStoryBar).visibility = if (story) View.VISIBLE else View.GONE
+            val againOk = isStation && live != null && LiveIndex.isMusic(live)
+            findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.fullAgain).visibility = if (againOk && !story) View.VISIBLE else View.GONE
+            listOf(R.id.fullBack30, R.id.fullSpeed, R.id.fullFwd30).forEach {
+                findViewById<View>(it).visibility = if (story) View.VISIBLE else View.GONE
+            }
             if (story) findViewById<TextView>(R.id.fullSpeed).text =
                 "%.2f".format(c.playbackParameters.speed).trimEnd('0').trimEnd('.', ',').replace('.', ',') + "×"
             bindArt(findViewById(R.id.fullArt), findViewById(R.id.fullInitials), art, name, isStation, 24f)
