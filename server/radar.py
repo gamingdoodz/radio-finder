@@ -233,7 +233,7 @@ async def h_now(req):
 async def main():
     app = web.Application()
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now)])
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     print(f"Radar-Server läuft auf Port {PORT}", flush=True)

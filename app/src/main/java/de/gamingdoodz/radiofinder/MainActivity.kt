@@ -1243,6 +1243,27 @@ class MainActivity : ComponentActivity() {
             },
         ))
 
+        settingsGroup("Rechtliches", listOf(
+            Row.Setting(R.drawable.ic_book, "Datenschutz", null) {
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder/blob/main/PRIVACY.md"))) } catch (_: Exception) {}
+            },
+            Row.Setting(R.drawable.ic_note, "Open-Source-Lizenzen", null) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Open-Source-Lizenzen")
+                    .setMessage(
+                        "Hitradar verwendet diese Bibliotheken, alle unter der Apache License 2.0 " +
+                            "(apache.org/licenses/LICENSE-2.0):\n\n" +
+                            "• AndroidX Media3 (ExoPlayer) – © The Android Open Source Project\n" +
+                            "• AndroidX Core, Activity, Lifecycle, RecyclerView – © The Android Open Source Project\n" +
+                            "• Kotlin & Kotlin Coroutines – © JetBrains s.r.o.\n" +
+                            "• Coil – © Coil Contributors\n" +
+                            "• Guava – © The Guava Authors"
+                    )
+                    .setPositiveButton("OK", null)
+                    .show()
+            },
+        ))
+
         rows.add(Row.Empty(
             "Daten und Musik von radio-browser.info, Deezer, Jamendo, Audius, Internet Archive / LibriVox und Apple Podcasts. " +
                 "Alle Rechte an Sendern, Liedern und Hörspielen liegen bei ihren Eigentümern."
