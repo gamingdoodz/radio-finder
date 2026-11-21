@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   # Google erlaubt nur wenige Uploads pro Tag: nachts automatisch die neueste Version hochladen
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 8 * * *"   # 9:17 Uhr: nach dem Zurücksetzen des Google-Tageslimits (Mitternacht US-Westküste)
 
 permissions:
   contents: write
