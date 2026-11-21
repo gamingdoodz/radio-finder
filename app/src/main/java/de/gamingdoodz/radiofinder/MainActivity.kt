@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
     private sealed class Row {
         data class Header(val title: String, val sub: String? = null, val more: String? = null, val onMore: (() -> Unit)? = null) : Row()
         data class Carousel(val entries: List<Entry>, val live: Boolean = false) : Row()
-        data class Item(val entry: Entry, val section: List<Entry>, val liveText: String? = null, val rank: Int? = null) : Row()
+        data class Item(val entry: Entry, val section: List<Entry>, val liveText: String? = null, val rank: Int? = null, val meta: String? = null) : Row()
         data class Status(val text: String, val done: Int, val total: Int) : Row()
         data class Action(val title: String, val sub: String, val dark: Boolean, val icon: Int = R.drawable.ic_bell, val onClick: () -> Unit) : Row()
         data class Moments(val list: List<de.gamingdoodz.radiofinder.Moments.Moment>) : Row()
@@ -192,6 +192,20 @@ class MainActivity : ComponentActivity() {
         back = findViewById(R.id.back)
         searchBox = findViewById(R.id.searchBox)
         recycler = findViewById(R.id.recycler)
+        // Nach unten ziehen: alles neu laden
+        findViewById<androidx.swiperefreshlayout.widget.SwipeRefreshLayout>(R.id.refresh).apply {
+            setColorSchemeColors(getColor(R.color.c_ff2ee6a8))
+            setProgressBackgroundColorSchemeColor(getColor(R.color.c_ff111d2a))
+            setOnRefreshListener {
+                lifecycleScope.launch {
+                    Radar.sync(force = true)
+                    radioChartsAt = 0L
+                    if (tab == Tab.HOME && page == null) loadHome()
+                    render()
+                    isRefreshing = false
+                }
+            }
+        }
         mini = findViewById(R.id.mini)
         full = findViewById(R.id.full)
 
@@ -239,6 +253,7 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullSleep).setOnClickListener { sleepDialog() }
         findViewById<View>(R.id.fullBack30).setOnClickListener { controller?.seekBack() }
         findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
+        findViewById<View>(R.id.fullShare).setOnClickListener { shareSong() }
         findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
         findViewById<View>(R.id.fullSpeed).setOnClickListener {
             val c = controller ?: return@setOnClickListener
@@ -434,6 +449,7 @@ class MainActivity : ComponentActivity() {
     // ================= Navigation =================
 
     private fun selectTab(t: Tab) {
+        if (tab != t) { recycler.alpha = 0.3f; recycler.animate().alpha(1f).setDuration(180).start() }
         tab = t
         page = null
         val accent = getColor(R.color.c_ff2ee6a8)
@@ -1343,15 +1359,21 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.Header("Zuletzt gehört"))
             recent.forEach { rows.add(Row.Item(it, recent.filter { r -> r.kind == Kind.TRACK })) }
         }
-        val heard = Heard.all(this).take(30)
+        val heard = Heard.all(this).take(50)
         if (heard.isNotEmpty()) {
-            rows.add(Row.Header("Im Radio gehört", "Wie hieß das Lied? Tippen für Wächter & mehr"))
-            val list = heard.map { h ->
-                val artist = h.title.substringBefore(" - ").substringBefore(" – ").trim()
-                val title = h.title.substringAfter(" - ").substringAfter(" – ").trim()
-                Entry("hd:" + h.title.hashCode().toString(16), Kind.TRACK, title, artist, "", "", title, preview = true)
+            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen für Radio, Wächter & mehr"))
+            loadCoverTitles(heard.take(15).map { it.title })
+            val list = heard.map { songEntry(it.title) }
+            val fmtTime = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY)
+            val fmtDay = java.text.SimpleDateFormat("EE HH:mm", java.util.Locale.GERMANY)
+            val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+            list.forEachIndexed { i, e ->
+                val h = heard[i]
+                val cal = java.util.Calendar.getInstance().apply { timeInMillis = h.time }
+                val time = if (h.time <= 0) "" else if (cal.get(java.util.Calendar.DAY_OF_YEAR) == today) fmtTime.format(h.time) else fmtDay.format(h.time)
+                val meta = listOf(time, h.station).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null }
+                rows.add(Row.Item(e, list, liveText(e), meta = meta))
             }
-            list.forEach { e -> rows.add(Row.Item(e, list, liveText(e))) }
         }
     }
 
@@ -1578,6 +1600,22 @@ class MainActivity : ComponentActivity() {
         render()
     }
 
+    /** Laufendes Lied an Freunde schicken (Text mit Links zu Spotify und YouTube). */
+    private fun shareSong() {
+        val c = controller ?: return
+        val item = c.currentMediaItem ?: return
+        val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
+        val song = live?.let { Covers.get(it)?.let { i -> "${i.artist} - ${i.title}" } ?: it }
+            ?: item.mediaMetadata.let { "${it.artist ?: ""} - ${it.title ?: ""}" }.trim(' ', '-')
+        if (song.isBlank()) return
+        val q = Uri.encode(song)
+        val text = "Hör mal: $song\n\n" +
+            "Spotify: https://open.spotify.com/search/$q\n" +
+            "YouTube: https://www.youtube.com/results?search_query=$q\n\n" +
+            "Gefunden mit Hitradar"
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Lied teilen"))
+    }
+
     /** Menü beim langen Drücken auf einen Eintrag. */
     private fun itemMenu(e: Entry, section: List<Entry>) {
         val liveSong = e.kind == Kind.STATION && e.subtitle != "Internetradio"
@@ -1740,8 +1778,34 @@ class MainActivity : ComponentActivity() {
         sheet("Schlaf-Timer", "Die Musik geht danach automatisch aus", null, "", false, null, options)
     }
 
+    private var tintedArt: String? = null
+
+    /** Großer Player: Hintergrund in der Farbe des Covers. */
+    private fun tintPlayer(art: String) {
+        if (art == tintedArt) return
+        tintedArt = art
+        if (art.isBlank()) { full.setBackgroundColor(getColor(R.color.c_ff0a0b18)); return }
+        lifecycleScope.launch {
+            val req = coil.request.ImageRequest.Builder(this@MainActivity).data(art).size(128).allowHardware(false).build()
+            val bmp = (coil.Coil.imageLoader(this@MainActivity).execute(req).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return@launch
+            val pal = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { androidx.palette.graphics.Palette.from(bmp).generate() }
+            if (art != tintedArt) return@launch
+            val base = getColor(R.color.c_ff060b11)
+            val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val tone = if (night) pal.getDarkVibrantColor(pal.getDominantColor(base))
+            else pal.getLightVibrantColor(pal.getLightMutedColor(base))
+            full.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(androidx.core.graphics.ColorUtils.blendARGB(tone, base, 0.35f), base))
+        }
+    }
+
     private fun showFull(show: Boolean) {
         if (show && controller?.currentMediaItem == null) return
+        if (show && full.visibility != View.VISIBLE) {
+            full.translationY = resources.displayMetrics.heightPixels * 0.15f
+            full.alpha = 0f
+            full.animate().translationY(0f).alpha(1f).setDuration(220).start()
+        }
         full.visibility = if (show) View.VISIBLE else View.GONE
         updateBack()
         if (show) updatePlayer()
@@ -1809,7 +1873,9 @@ class MainActivity : ComponentActivity() {
             findViewById<View>(R.id.fullSeek).visibility = if (isStation) View.INVISIBLE else View.VISIBLE
             val story = item.mediaId.startsWith("pc:") || item.mediaId.startsWith("ia:")
             val againOk = isStation && live != null && LiveIndex.isMusic(live)
-            findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk) View.VISIBLE else View.GONE
+            val canShare = (isStation && live != null && isMusic(live)) || (!isStation && !story)
+            findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk || canShare) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.fullShare).visibility = if (canShare) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullAgain).visibility = if (againOk && !story) View.VISIBLE else View.GONE
             listOf(R.id.fullBack30, R.id.fullSpeed, R.id.fullFwd30).forEach {
                 findViewById<View>(it).visibility = if (story) View.VISIBLE else View.GONE
@@ -1817,6 +1883,7 @@ class MainActivity : ComponentActivity() {
             if (story) findViewById<TextView>(R.id.fullSpeed).text =
                 "%.2f".format(c.playbackParameters.speed).trimEnd('0').trimEnd('.', ',').replace('.', ',') + "×"
             bindArt(findViewById(R.id.fullArt), findViewById(R.id.fullInitials), art, name, isStation && songCover == null, 24f)
+            tintPlayer(art)
             val bg = findViewById<ImageView>(R.id.fullBg)
             if (art.isNotBlank()) bg.load(art) { crossfade(true) } else bg.setImageDrawable(null)
         }
@@ -2234,7 +2301,8 @@ class MainActivity : ComponentActivity() {
             bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION && !Covers.isCover(e.artwork), 12f)
             v.findViewById<TextView>(R.id.title).text = e.title
             v.findViewById<TextView>(R.id.subtitle).text =
-                if (e.preview && row.liveText == null && e.url.isNotBlank()) "${e.subtitle} · Vorschau" else e.subtitle
+                (if (e.preview && row.liveText == null && e.url.isNotBlank()) "${e.subtitle} · Vorschau" else e.subtitle) +
+                    (row.meta?.let { " · $it" } ?: "")
             val badge = v.findViewById<TextView>(R.id.badge)
             badge.visibility = if (row.liveText != null) View.VISIBLE else View.GONE
             badge.text = row.liveText ?: ""
