@@ -178,7 +178,7 @@ async def ask_llm(session, q: str):
         "genre": {"type": "string", "enum": list(GENRES)},
         "artist": {"type": "string", "maxLength": 40}}, "required": ["genre", "artist"]}
     async with _llm_lock:
-        async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 48, "temperature": 0.1,
+        async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 32, "temperature": 0.1,
                                                "json_schema": schema, "cache_prompt": True},
                                 timeout=aiohttp.ClientTimeout(total=20)) as r:
             data = await r.json()
@@ -195,12 +195,19 @@ async def h_wish(req):
     hit = _wish_cache.get(key)
     if hit:
         return web.json_response(hit)
-    res = None
-    try:
-        async with aiohttp.ClientSession() as session:
-            res = await ask_llm(session, q)
-    except Exception:
-        res = None
+    # Eindeutige Stichwörter ("ruhig", "Party", "90er" …) sofort beantworten, die KI nur für den Rest
+    res = wish_rules(q)
+    if res is None:
+        try:
+            async with aiohttp.ClientSession() as session:
+                res = await ask_llm(session, q)
+        except Exception:
+            res = None
+    # Künstler nur übernehmen, wenn er wirklich im Wunsch vorkommt (die KI erfindet sonst gern einen)
+    if res and res.get("artist"):
+        a = res["artist"].lower()
+        if a not in q.lower() or len(a) > 0.8 * len(q):
+            res["artist"] = None
     if not res or not (res.get("genre") or res.get("artist")):
         res = wish_rules(q) or {"genre": None, "artist": None, "ai": False}
     if len(_wish_cache) > 2000:

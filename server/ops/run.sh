@@ -8,7 +8,7 @@ done
 echo "--- Einrichtung (Ende) ---"; tail -5 /var/log/llm-setup.log
 echo "KI-Dienst: $(systemctl is-active llm)"
 sleep 5
-for q in "was Ruhiges zum Einschlafen" "Party wie auf Mallorca" "etwas von Helene Fischer" "Musik für eine Autofahrt im Sommer" "Lieder wie von Queen"; do
+for q in "Party wie auf Mallorca" "etwas von Helene Fischer" "was für einen verregneten Sonntag" "Lieder wie von Queen"; do
   echo "Wunsch: $q"
   START=$(date +%s)
   curl -s -m 40 "http://localhost:8081/wish?q=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" "$q")"; echo
