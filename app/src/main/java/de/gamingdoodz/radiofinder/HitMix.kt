@@ -52,7 +52,13 @@ class HitMix(
         // "artist:<id>:<Name>" = nur Lieder eines Künstlers
         val artist = genreKey?.takeIf { it.startsWith("artist:") }?.split(":", limit = 3)
         val genre = Genres.all.firstOrNull { it.key == genreKey }
-        val name = if (genreKey == "mine") "Mein Mix" else artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
+        val favMix = genreKey == "favs"
+        val name = when {
+            genreKey == "mine" -> "Mein Mix"
+            favMix -> "Lieblingssender"
+            else -> artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
+        }
+        Radar.fast = true
         prefs(context).edit().putString("name", name).putString("now", "Suche Hits…").apply()
 
         val hits = when {
@@ -70,7 +76,10 @@ class HitMix(
             .filter { it.length >= 3 }.distinct()
 
         // Passende Sender zum Genre (bei Weihnachten auch deutsche Weihnachtssender)
-        val genreStations = when (genre?.key) {
+        // Lieblingssender-Mix: nur die eigenen Favoriten-Sender
+        val favStations = if (favMix) Favorites.all(context).filter { it.kind == Kind.STATION }
+            .map { Station(it.id.removePrefix("st:"), it.name, it.url, it.artwork, false) } else emptyList()
+        val genreStations = if (favMix) favStations else when (genre?.key) {
             null, "charts" -> emptyList()
             "kids" -> StationRepository.kids(context)
             "xmas" -> StationRepository.byTag("christmas") + StationRepository.byTag("weihnachten") + StationRepository.byTag("weihnachtsmusik")
@@ -86,7 +95,7 @@ class HitMix(
         val extra = genreStations + StationRepository.byTag("charts")
         val wifi = Net.isUnmetered(context)
         val big = if (wifi) (try { StationRepository.load(context, big = true) } catch (_: Exception) { emptyList() }) else emptyList()
-        stations = (extra + base + big).distinctBy { it.id }.take(if (wifi) 700 else 220)
+        stations = if (favMix) favStations else (extra + base + big).distinctBy { it.id }.take(if (wifi) 700 else 220)
 
         poll(force = true)
         val first = pickNext()
@@ -114,6 +123,7 @@ class HitMix(
     }
 
     fun stop() {
+        Radar.fast = false
         job?.cancel()
         job = null
         currentStationId = null

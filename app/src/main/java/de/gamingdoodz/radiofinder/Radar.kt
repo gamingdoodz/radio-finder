@@ -35,15 +35,19 @@ object Radar {
 
     fun init(context: Context) { appContext = context.applicationContext }
 
+    /** Hit-Mix läuft: öfter aktualisieren. Sonst seltener, das spart Akku und Daten. */
+    @Volatile var fast = false
+
     /** Server hat in den letzten Minuten geantwortet. */
     val ok get() = System.currentTimeMillis() - lastOk < 5 * 60_000L
 
     private fun interval(): Long {
         val c = appContext ?: return 120_000L
         return when {
-            Net.isUnmetered(c) -> 60_000L
-            Settings.saver(c) -> 300_000L
-            else -> 150_000L
+            fast && Net.isUnmetered(c) -> 60_000L
+            fast -> if (Settings.saver(c)) 180_000L else 120_000L
+            Net.isUnmetered(c) -> 150_000L
+            else -> 300_000L
         }
     }
 
@@ -68,7 +72,7 @@ object Radar {
         if (!lock.tryLock()) return@withContext ok
         try {
             lastTry = t
-            val text = fetch("/now?limit=8000", 15_000, 10_000_000)
+            val text = fetch("/now?limit=8000&music=1", 15_000, 10_000_000)
             val list = text?.let { runCatching { parse(it) }.getOrNull() }
             if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
             list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }

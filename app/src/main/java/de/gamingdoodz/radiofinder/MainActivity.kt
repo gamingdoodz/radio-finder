@@ -224,6 +224,15 @@ class MainActivity : ComponentActivity() {
             controller?.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let { Favorites.toggle(this, it) }
         }
         findViewById<View>(R.id.fullSleep).setOnClickListener { sleepDialog() }
+        findViewById<View>(R.id.fullBack30).setOnClickListener { controller?.seekBack() }
+        findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
+        findViewById<View>(R.id.fullSpeed).setOnClickListener {
+            val c = controller ?: return@setOnClickListener
+            val speeds = listOf(1f, 1.25f, 1.5f, 0.8f)
+            val i = speeds.indexOfFirst { kotlin.math.abs(it - c.playbackParameters.speed) < 0.01f }
+            c.setPlaybackSpeed(speeds[(i + 1) % speeds.size])
+            updatePlayer()
+        }
         findViewById<SeekBar>(R.id.fullSeek).setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
                 if (fromUser) findViewById<TextView>(R.id.fullPos).text = fmt(p.toLong())
@@ -971,11 +980,19 @@ class MainActivity : ComponentActivity() {
         return null
     }
 
+    private var searchFilter = 0 // 0 Alles, 1 Radio, 2 Lieder, 3 Hörspiele
+
     private fun renderSearch() {
-        topRow()?.let { rows.add(it) }
+        rows.add(Row.Chips(listOf("Alles", "Radio", "Lieder", "Hörspiele"), searchFilter) { searchFilter = it; render() })
+        val showRadio = searchFilter == 0 || searchFilter == 1
+        val showSongs = searchFilter == 0 || searchFilter == 2
+        val showStories = searchFilter == 0 || searchFilter == 3
+        val n = if (searchFilter == 0) 5 else 30
+        if (searchFilter == 0) topRow()?.let { rows.add(it) }
         if (scanning) rows.add(Row.Status(statusText(), scanDone, scanTotal))
         else if (!deepSearch) rows.add(Row.More("📻 Alle Radios nach „$query“ durchsuchen") { startSearch() })
 
+        if (showRadio) {
         rows.add(Row.Header("Läuft gerade im Radio", "Komplett hören"))
         if (radioHits.isEmpty()) {
             rows.add(Row.Empty(when {
@@ -985,7 +1002,7 @@ class MainActivity : ComponentActivity() {
             }))
         } else {
             val list = dedupe(radioHits.toList())
-            limited("radio", list, 5) { rows.add(Row.Item(it, list, "● LIVE")) }
+            limited("radio", list, n) { rows.add(Row.Item(it, list, "● LIVE")) }
         }
         if (WatchService.activeQuery(this) == null) {
             rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
@@ -1010,27 +1027,33 @@ class MainActivity : ComponentActivity() {
                 now.forEach { rows.add(Row.Item(it, now, "● LIVE")) }
             }
         }
-        rows.add(Row.Header("Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
-        when {
-            songLoading -> rows.add(Row.Empty("Suche…"))
-            songHits.isEmpty() -> rows.add(Row.Empty("Keine Songs gefunden."))
-            else -> limited("songs", songHits, 5) { e -> rows.add(Row.Item(e, songHits, liveText(e))) }
-        }
-
         if (stationHits.isNotEmpty()) {
             rows.add(Row.Header("Sender"))
             rows.add(Row.Carousel(stationHits))
         }
-
-        storyShows["search"]?.takeIf { it.isNotEmpty() }?.let {
-            rows.add(Row.Header("Geschichten & Podcasts"))
-            rows.add(Row.Carousel(it))
+        }
+        if (showSongs) {
+        rows.add(Row.Header("Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
+        when {
+            songLoading -> rows.add(Row.Empty("Suche…"))
+            songHits.isEmpty() -> rows.add(Row.Empty("Keine Songs gefunden."))
+            else -> limited("songs", songHits, n) { e -> rows.add(Row.Item(e, songHits, liveText(e))) }
         }
         rows.add(Row.Header("Freie Musik", "Jamendo · Audius · Internet Archive"))
         when {
             freeLoading -> rows.add(Row.Empty("Suche…"))
             freeHits.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
-            else -> limited("free", freeHits, 5) { rows.add(Row.Item(it, freeHits)) }
+            else -> limited("free", freeHits, n) { rows.add(Row.Item(it, freeHits)) }
+        }
+        }
+        if (showStories) {
+            val st = storyShows["search"].orEmpty()
+            rows.add(Row.Header("Hörspiele & Podcasts"))
+            when {
+                st.isNotEmpty() -> if (searchFilter == 3) st.forEach { rows.add(Row.Item(it, emptyList())) } else rows.add(Row.Carousel(st))
+                !deepSearch -> rows.add(Row.More("Hörspiele zu „$query“ suchen") { startSearch() })
+                else -> rows.add(Row.Empty("Nichts gefunden."))
+            }
         }
     }
 
@@ -1071,6 +1094,16 @@ class MainActivity : ComponentActivity() {
         )
         if (storyAudience == 1) quick.add(0, Triple(R.drawable.ic_sun, "Einschlafen", { bedtimeSheet() }))
         rows.add(Row.Quick(quick))
+        // Angefangene Folgen mit Restzeit
+        if (!kids()) {
+            val started = Recent.all(this)
+                .filter { (it.id.startsWith("pc:") || it.id.startsWith("ia:")) && !Positions.isDone(this, it.id) && Positions.get(this, it.id) > 0 }
+                .take(5)
+            if (started.isNotEmpty()) {
+                rows.add(Row.Header("Weiterhören"))
+                started.forEach { rows.add(Row.Item(it, emptyList(), Positions.leftText(this, it.id))) }
+            }
+        }
         rows.add(Row.Chips(cats.map { it.name }, storySection) { storySection = it; render() })
         val cat = cats[storySection.coerceIn(0, cats.size - 1)]
         val list = storyShows[cat.key]
@@ -1164,7 +1197,10 @@ class MainActivity : ComponentActivity() {
             rows.add(Row.Carousel(showsFav))
         }
         rows.add(Row.Header("Lieblingssender"))
-        if (stations.isEmpty()) rows.add(Row.Empty("Tipp bei einem Sender auf ♥ (bei Kacheln lange drücken).")) else rows.add(Row.Carousel(stations))
+        if (stations.size >= 2 && HitMix.activeName(this) == null) rows.add(button(R.drawable.ic_bolt, "Lieblingssender-Mix starten") {
+            startHitMix("favs", "– Lieblingssender")
+        })
+        if (stations.isEmpty()) rows.add(Row.Empty("Tipp bei einem Sender auf ♥ oder halte ihn gedrückt.")) else rows.add(Row.Carousel(stations))
         rows.add(Row.Header("Lieblingslieder"))
         if (tracks.isEmpty()) rows.add(Row.Empty("Noch keine.")) else tracks.forEach { rows.add(Row.Item(it, tracks)) }
         val recent = Recent.all(this)
@@ -1337,6 +1373,39 @@ class MainActivity : ComponentActivity() {
     }
 
     private class Option(val icon: Int, val label: String, val sub: String?, val action: () -> Unit)
+
+    /** Menü beim langen Drücken auf einen Eintrag. */
+    private fun itemMenu(e: Entry, section: List<Entry>) {
+        val liveSong = e.kind == Kind.STATION && e.subtitle != "Internetradio"
+        val song = when {
+            liveSong -> e.title
+            e.kind == Kind.TRACK && (e.preview || e.id.startsWith("hd:")) ->
+                e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
+            else -> null
+        }
+        val isFav = Favorites.isFav(this, e.id)
+        sheet(
+            if (liveSong) e.title else e.title, if (liveSong) e.name else e.subtitle, e.artwork.ifBlank { null }, e.name,
+            e.kind == Kind.STATION, null,
+            listOfNotNull(
+                Option(R.drawable.ic_play, if (e.kind == Kind.SHOW) "Öffnen" else "Abspielen", null) { onEntryTap(e, section) },
+                if (!e.preview && !e.id.startsWith("hd:")) Option(if (isFav) R.drawable.ic_heart else R.drawable.ic_heart_outline,
+                    if (isFav) "Aus Favoriten entfernen" else "Zu Favoriten", null) {
+                    Favorites.toggle(this, e); render()
+                } else null,
+                song?.let {
+                    Option(R.drawable.ic_bell, "Wächter für dieses Lied", "Spielt es, sobald es wieder im Radio läuft") {
+                        WatchService.start(this, it)
+                        Toast.makeText(this, "Wächter läuft", Toast.LENGTH_SHORT).show()
+                        render()
+                    }
+                },
+                if (song != null && !kids()) Option(R.drawable.ic_note, "In deiner Musik-App öffnen", null) {
+                    openIn(song, stories = false)
+                } else null,
+            )
+        )
+    }
 
     /** Kurze Einführung in 4 Schritten (beim ersten Start und unter Mehr → So funktioniert's). */
     private fun intro(step: Int) {
@@ -1531,6 +1600,10 @@ class MainActivity : ComponentActivity() {
             findViewById<View>(R.id.fullPrev).visibility = if (c.hasPreviousMediaItem()) View.VISIBLE else View.GONE
             findViewById<EqualizerView>(R.id.fullEq).apply { bars = 9; this.playing = c.isPlaying }
             findViewById<View>(R.id.fullSeek).visibility = if (isStation) View.INVISIBLE else View.VISIBLE
+            val story = item.mediaId.startsWith("pc:") || item.mediaId.startsWith("ia:")
+            findViewById<View>(R.id.fullStoryBar).visibility = if (story) View.VISIBLE else View.GONE
+            if (story) findViewById<TextView>(R.id.fullSpeed).text =
+                "%.2f".format(c.playbackParameters.speed).trimEnd('0').trimEnd('.', ',').replace('.', ',') + "×"
             bindArt(findViewById(R.id.fullArt), findViewById(R.id.fullInitials), art, name, isStation, 24f)
             val bg = findViewById<ImageView>(R.id.fullBg)
             if (art.isNotBlank()) bg.load(art) { crossfade(true) } else bg.setImageDrawable(null)
@@ -1959,6 +2032,7 @@ class MainActivity : ComponentActivity() {
             fav.setImageResource(if (Favorites.isFav(this@MainActivity, e.id)) R.drawable.ic_heart else R.drawable.ic_heart_outline)
             fav.setOnClickListener { Favorites.toggle(this@MainActivity, e) }
             v.setOnClickListener { onEntryTap(e, row.section) }
+            v.setOnLongClickListener { itemMenu(e, row.section); true }
         }
     }
 
@@ -2007,12 +2081,7 @@ class MainActivity : ComponentActivity() {
             v.findViewById<TextView>(R.id.subtitle).text = e.subtitle
             v.findViewById<View>(R.id.badge).visibility = if (live) View.VISIBLE else View.GONE
             v.setOnClickListener { onEntryTap(e, entries) }
-            v.setOnLongClickListener {
-                if (e.preview) return@setOnLongClickListener false
-                val now = Favorites.toggle(this@MainActivity, e)
-                Toast.makeText(this@MainActivity, if (now) "♥ Zu Favoriten hinzugefügt" else "Aus Favoriten entfernt", Toast.LENGTH_SHORT).show()
-                true
-            }
+            v.setOnLongClickListener { itemMenu(e, entries); true }
         }
     }
 }

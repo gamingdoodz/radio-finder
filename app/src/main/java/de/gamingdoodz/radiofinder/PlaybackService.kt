@@ -119,6 +119,11 @@ class PlaybackService : MediaLibraryService() {
             } else {
                 step = 0
                 p.pause()
+                // Hörspiel: ein paar Minuten zurück, damit man beim Weiterhören nichts Verschlafenes verpasst
+                if (isStory(p.currentMediaItem?.mediaId)) {
+                    p.seekTo((p.currentPosition - 3 * 60_000L).coerceAtLeast(0L))
+                    savePosition()
+                }
                 p.volume = 1f
                 bedtime = false
                 Settings.setSleepEnd(this@PlaybackService, 0L)
@@ -183,6 +188,8 @@ class PlaybackService : MediaLibraryService() {
             .setConnectTimeoutMs(10_000)
             .setReadTimeoutMs(15_000)
         val player = ExoPlayer.Builder(this)
+            .setSeekBackIncrementMs(30_000)
+            .setSeekForwardIncrementMs(30_000)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -271,6 +278,8 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
+                // Tempo gilt nur für Hörspiele und Hörbücher
+                if (!isStory(mediaItem?.mediaId)) session?.player?.setPlaybackSpeed(1f)
                 if (mediaItem?.mediaId?.startsWith("jm:") == true) checkEndless() else if (mediaItem != null) endlessTag = null
                 updateFavButton()
                 mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
@@ -352,9 +361,20 @@ class PlaybackService : MediaLibraryService() {
             .setSessionCommand(nextCommand)
             .build()
 
-    private fun buttons(): ImmutableList<CommandButton> =
-        if (hitMix.isActive) ImmutableList.of(nextButton(), favButton(currentIsFav()))
-        else ImmutableList.of(favButton(currentIsFav()))
+    private fun isStory(id: String?) = id != null && (id.startsWith("pc:") || id.startsWith("ia:") || id.startsWith("lv:"))
+
+    private fun seekButton(back: Boolean): CommandButton =
+        CommandButton.Builder()
+            .setDisplayName(if (back) "30 s zurück" else "30 s vor")
+            .setIconResId(if (back) R.drawable.ic_replay30 else R.drawable.ic_forward30)
+            .setPlayerCommand(if (back) Player.COMMAND_SEEK_BACK else Player.COMMAND_SEEK_FORWARD)
+            .build()
+
+    private fun buttons(): ImmutableList<CommandButton> = when {
+        hitMix.isActive -> ImmutableList.of(nextButton(), favButton(currentIsFav()))
+        isStory(session?.player?.currentMediaItem?.mediaId) -> ImmutableList.of(seekButton(true), seekButton(false), favButton(currentIsFav()))
+        else -> ImmutableList.of(favButton(currentIsFav()))
+    }
 
     @Suppress("DEPRECATION")
     private fun updateFavButton() {
@@ -523,6 +543,8 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(STORIES_ID, "Hörspiele"),
                 )
                 FORYOU_ID -> listOf(hitMixItem(null, "⚡ Hit-Mix – nur Hits")) +
+                    (if (Favorites.all(applicationContext).count { it.kind == Kind.STATION } >= 2)
+                        listOf(hitMixItem("favs", "⚡ Lieblingssender-Mix")) else emptyList()) +
                     Moments.now().filter { it.action == Moments.Action.HITMIX }.map { hitMixItem(it.genreKey, "⚡ " + it.title) } +
                     listOf(folderItem(FAV_ID, "⭐ Favoriten"), folderItem(RECENT_ID, "🕘 Zuletzt gehört"))
                 RADIO_ID -> listOf(

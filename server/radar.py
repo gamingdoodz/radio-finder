@@ -272,7 +272,10 @@ async def h_search(req):
 async def h_now(req):
     limit = min(int(req.query.get("limit", "5000")), 20000)
     ids = by_id()
-    out = [item(ids[sid], n) for sid, n in fresh() if sid in ids]
+    music = req.query.get("music") == "1"
+    # music=1: nur Liedtitel ("Künstler - Titel"), halb so viele Daten
+    out = [item(ids[sid], n) for sid, n in fresh()
+           if sid in ids and (not music or " - " in n["title"] or " – " in n["title"])]
     out.sort(key=lambda h: -h["since"])
     return gz(web.json_response(out[:limit]))
 

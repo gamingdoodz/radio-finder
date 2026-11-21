@@ -159,11 +159,18 @@ object Positions {
         val e = prefs(context).edit()
         // Fast am Ende: als fertig gehört merken
         if (duration > 0 && pos > duration - 30_000) e.remove(id).putBoolean("done:$id", true)
-        else if (pos > 15_000) e.putLong(id, pos)
+        else if (pos > 15_000) e.putLong(id, pos).putLong("dur:$id", duration)
         e.apply()
     }
 
     fun isDone(context: Context, id: String) = prefs(context).getBoolean("done:$id", false)
+
+    /** "noch 23 Min." für angefangene Folgen, sonst null. */
+    fun leftText(context: Context, id: String): String? {
+        val pos = get(context, id).takeIf { it > 0 } ?: return null
+        val dur = prefs(context).getLong("dur:$id", 0L)
+        return if (dur > pos) "▶ noch ${(dur - pos) / 60_000 + 1} Min." else "▶ weiter bei ${pos / 60_000}:%02d".format(pos / 1000 % 60)
+    }
 
     /** Welche Folge als Nächstes? Angefangene zuerst, sonst die nach der zuletzt fertig gehörten, sonst Folge 1. */
     fun nextIndex(context: Context, eps: List<Entry>): Int {
