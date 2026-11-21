@@ -166,10 +166,12 @@ def wish_rules(q: str):
 
 async def ask_llm(session, q: str):
     genres = "\n".join(f"- {k}: {v}" for k, v in GENRES.items())
+    # Fester Anfang (wird von der KI zwischengespeichert), der Wunsch kommt erst am Ende -> schnelle Antworten
     prompt = (
-        "<|im_start|>system\nDu wählst Musik für eine Radio-App. Antworte nur mit JSON.<|im_end|>\n"
-        f"<|im_start|>user\nMusikwunsch: \"{q}\"\n\nWähle das passendste genre aus dieser Liste:\n{genres}\n\n"
+        "<|im_start|>system\nDu wählst Musik für eine Radio-App. Antworte nur mit JSON.\n"
+        f"Mögliche genre-Werte:\n{genres}\n"
         "Wenn ein bestimmter Künstler oder eine Band genannt wird, schreibe den Namen in artist, sonst einen leeren Text.<|im_end|>\n"
+        f"<|im_start|>user\nMusikwunsch: \"{q}\"<|im_end|>\n"
         "<|im_start|>assistant\n"
     )
     schema = {"type": "object", "properties": {
@@ -178,7 +180,7 @@ async def ask_llm(session, q: str):
     async with _llm_lock:
         async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 48, "temperature": 0.1,
                                                "json_schema": schema, "cache_prompt": True},
-                                timeout=aiohttp.ClientTimeout(total=25)) as r:
+                                timeout=aiohttp.ClientTimeout(total=20)) as r:
             data = await r.json()
     out = json.loads(data.get("content", "{}"))
     return {"genre": out.get("genre") if out.get("genre") in GENRES else None,
