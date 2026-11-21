@@ -61,7 +61,7 @@ async def load_stations(session: aiohttp.ClientSession):
         for host in RB_SERVERS:
             try:
                 url = f"https://{host}/json/stations/search?{q}&order=clickcount&reverse=true&hidebroken=true"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as r:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=300)) as r:
                     data = await r.json(content_type=None)
                 for o in data:
                     sid = o.get("stationuuid")

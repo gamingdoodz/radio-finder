@@ -14,7 +14,9 @@ fi
 
 # Bei wenig Arbeitsspeicher weniger gleichzeitig abfragen
 MEM=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-if [ "$MEM" -lt 2000 ]; then CONC=120; MAXS=8000; else CONC=250; MAXS=12000; fi
+if [ "$MEM" -lt 2000 ]; then CONC=120; MAXS=8000
+elif [ "$MEM" -lt 8000 ]; then CONC=250; MAXS=15000
+else CONC=500; MAXS=60000; fi   # großer Server (z. B. Oracle): alle Sender
 
 cd ~
 if [ -d radio-finder ]; then (cd radio-finder && git pull); else git clone https://github.com/gamingdoodz/radio-finder.git; fi
