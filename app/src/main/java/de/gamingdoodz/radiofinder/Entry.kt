@@ -105,6 +105,10 @@ const val HITS_ID = "hits"
 const val KIDS_ID = "kids"
 const val FREE_ID = "free"
 const val POPULAR_ID = "popular"
+const val FORYOU_ID = "foryou"
+const val RADIO_ID = "radio"
+const val MUSIC_ID = "music"
+const val STORY_CONT_ID = "storycont"
 
 fun folderItem(id: String, title: String): MediaItem =
     MediaItem.Builder()

@@ -515,34 +515,49 @@ class PlaybackService : MediaLibraryService() {
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
             val items: List<MediaItem> = when (parentId) {
+                // Android Auto zeigt bis zu 4 Ordner als Reiter: übersichtlich wie in der App
                 ROOT_ID -> listOf(
-                    folderItem(MOMENTS_ID, "✨ Für dich jetzt"),
-                    hitMixItem(null, "⚡ Hit-Mix – nur Hits"),
-                    folderItem(FAV_ID, "⭐ Favoriten"),
-                    folderItem(RECENT_ID, "🕘 Zuletzt gehört"),
-                    folderItem(LIVE_ID, "🔴 Gerade im Radio"),
+                    folderItem(FORYOU_ID, "Für dich"),
+                    folderItem(RADIO_ID, "Radio"),
+                    folderItem(MUSIC_ID, "Musik"),
+                    folderItem(STORIES_ID, "Hörspiele"),
+                )
+                FORYOU_ID -> listOf(hitMixItem(null, "⚡ Hit-Mix – nur Hits")) +
+                    Moments.now().filter { it.action == Moments.Action.HITMIX }.map { hitMixItem(it.genreKey, "⚡ " + it.title) } +
+                    listOf(folderItem(FAV_ID, "⭐ Favoriten"), folderItem(RECENT_ID, "🕘 Zuletzt gehört"))
+                RADIO_ID -> listOf(
+                    folderItem(LIVE_ID, "🔴 Jetzt im Radio"),
                     folderItem(CHARTS_LIVE_ID, "🔥 Charts gerade im Radio"),
                     folderItem(POPULAR_ID, "📻 Beliebte Sender"),
-                    folderItem(FREE_ID, "🎵 Freie Musik"),
-                    folderItem(FREEGENRES_ID, "♾️ Freie Musik endlos"),
-                    folderItem(KIDS_ID, "🧸 Kinder"),
-                    folderItem(STORIES_ID, "📚 Geschichten & Hörspiele"),
                     folderItem(HITS_ID, "🔎 Letzte Suche"),
+                )
+                MUSIC_ID -> listOf(
+                    folderItem(FREE_ID, "🎵 Freie Musik – Charts"),
+                    folderItem(FREEGENRES_ID, "♾️ Freie Musik endlos"),
+                    folderItem(KIDS_ID, "🧸 Kinderlieder"),
                 )
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
                 MOMENTS_ID -> Moments.now().filter { it.action == Moments.Action.HITMIX }
                     .map { hitMixItem(it.genreKey, "⚡ " + it.title) }
                 RECENT_ID -> Recent.all(applicationContext).map { it.toMediaItem() }
+                STORY_CONT_ID -> Recent.all(applicationContext)
+                    .filter { it.id.startsWith("pc:") || it.id.startsWith("ia:") }.map { it.toMediaItem() }
                 LIVE_ID -> {
-                    val stations = StationRepository.load(applicationContext, big = false).take(80)
-                    withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
-                    val now = LiveIndex.fresh().associateBy { it.station.id }
-                    stations.mapNotNull { s -> now[s.id]?.let { s.toEntry(it.title).toMediaItem() } }
+                    // Vom Server: alles, was gerade an Musik läuft, frisch angefangene Lieder zuerst
+                    if (!Radar.sync()) {
+                        val stations = StationRepository.load(applicationContext, big = false).take(80)
+                        withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
+                    }
+                    LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) }
+                        .sortedByDescending { it.since }.distinctBy { it.normalized }.take(60)
+                        .map { it.station.toEntry(it.title).toMediaItem() }
                 }
                 CHARTS_LIVE_ID -> {
-                    val stations = StationRepository.load(applicationContext, big = false).take(150)
                     val charts = Deezer.topGermany()
-                    withTimeoutOrNull(20_000) { LiveIndex.refresh(stations) }
+                    if (!Radar.sync()) {
+                        val stations = StationRepository.load(applicationContext, big = false).take(150)
+                        withTimeoutOrNull(20_000) { LiveIndex.refresh(stations) }
+                    }
                     charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
                         .distinctBy { it.station.id }
                         .map { it.station.toEntry(it.title).toMediaItem() }
@@ -552,7 +567,8 @@ class PlaybackService : MediaLibraryService() {
                 FREE_ID -> FreeMusic.charts().map { it.toMediaItem() }
                 POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
                 FREEGENRES_ID -> FREE_TAGS.map { (name, tag) -> folderItem("ftag:$tag", name) }
-                STORIES_ID -> Podcasts.all.map { folderItem("cat:" + it.key, (if (it.kids) "🧸 " else "") + it.name) }
+                STORIES_ID -> listOf(folderItem(STORY_CONT_ID, "▶ Weiterhören")) +
+                    Podcasts.all.map { folderItem("cat:" + it.key, (if (it.kids) "🧸 " else "") + it.name) }
                 else -> when {
                     parentId.startsWith("cat:") -> {
                         val cat = Podcasts.all.firstOrNull { it.key == parentId.removePrefix("cat:") }
