@@ -31,7 +31,7 @@ object Settings {
     fun setCompact(context: Context, v: Boolean) = prefs(context).edit().putBoolean("compact", v).apply()
 
     /** Startseite: welche Bereiche angezeigt werden. */
-    val homeSections = listOf("now" to "Jetzt läuft", "quick" to "Schnellstart", "again" to "Weiterhören",
+    val homeSections = listOf("quick" to "Schnellstart", "again" to "Weiterhören",
         "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "charts" to "Deutsche Charts")
     fun homeOn(context: Context, key: String) = prefs(context).getBoolean("home_$key", true)
     fun setHomeOn(context: Context, key: String, v: Boolean) = prefs(context).edit().putBoolean("home_$key", v).apply()

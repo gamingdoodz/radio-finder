@@ -303,10 +303,6 @@ class MainActivity : ComponentActivity() {
             c.addListener(object : Player.Listener {
                 override fun onEvents(player: Player, events: Player.Events) {
                     updatePlayer()
-                    // Startseite: "Jetzt läuft" aktuell halten
-                    if (tab == Tab.HOME && page == null && events.containsAny(
-                            Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_METADATA_CHANGED)
-                    ) render()
                 }
             })
             updatePlayer()
@@ -987,20 +983,6 @@ class MainActivity : ComponentActivity() {
         if (!Net.online(this)) rows.add(Row.Empty("⚠ Keine Internetverbindung – Radio und Suche gehen gerade nicht."))
         rows.add(Row.Header(Moments.greeting()))
 
-        // Jetzt läuft: großes Cover vom aktuellen Lied
-        val c = controller
-        val cur = c?.currentMediaItem
-        if (Settings.homeOn(this, "now") && cur != null) {
-            val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
-            val e = Entry.fromMediaItem(cur)
-            val cover = live?.let { Covers.get(it) }
-            val title = cover?.let { "${it.artist} - ${it.title}" } ?: live ?: e?.title ?: ""
-            val art = cover?.artwork ?: cur.mediaMetadata.artworkUri?.toString().orEmpty()
-            val shown = (e ?: Entry(cur.mediaId, Kind.TRACK, title, "", "", art, title)).copy(title = title, artwork = art)
-            rows.add(Row.Top(shown, if (c.isPlaying) "JETZT LÄUFT" else "PAUSIERT",
-                HitMix.activeName(this)?.let { "⚡ Hit-Mix · $it" } ?: e?.name ?: "") { showFull(true) })
-        }
-
         // Schnellstart
         if (Settings.homeOn(this, "quick")) {
             val season = Moments.now().firstOrNull { it.action == Moments.Action.HITMIX && it.genreKey != null && it.genreKey != "charts" }
@@ -1016,7 +998,7 @@ class MainActivity : ComponentActivity() {
         if (Settings.homeOn(this, "again")) {
             val heard = Heard.all(this).take(12)
             loadCoverTitles(heard.map { it.title })
-            val songs = heard.map { songEntry(it.title) }
+            val songs = heard.map { songEntry(it.title) }.distinctBy { Scanner.normalize(it.subtitle + " " + it.title) }
             val others = Recent.all(this).filter { it.kind != Kind.STATION }.take(6)
             val again = (songs + others).distinctBy { it.id }
             if (again.isNotEmpty()) {
@@ -1364,7 +1346,9 @@ class MainActivity : ComponentActivity() {
         }
         val heard = Heard.all(this).take(50)
         if (heard.isNotEmpty()) {
-            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen für Radio, Wächter & mehr"))
+            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen für Radio, Wächter & mehr", "LEEREN") {
+                Heard.clear(this); render()
+            })
             loadCoverTitles(heard.take(15).map { it.title })
             val list = heard.map { songEntry(it.title) }
             val fmtTime = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY)

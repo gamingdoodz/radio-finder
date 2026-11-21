@@ -85,6 +85,8 @@ object Heard {
         emptyList()
     }
 
+    fun clear(context: Context) = prefs(context).edit().remove("list").apply()
+
     fun add(context: Context, title: String, station: String) {
         val list = all(context)
         if (list.firstOrNull()?.title == title) return

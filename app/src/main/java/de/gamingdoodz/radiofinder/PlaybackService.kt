@@ -269,8 +269,13 @@ class PlaybackService : MediaLibraryService() {
                         nonMusicSeen = true
                     }
                 }
+                // Erst als "gehört" merken, wenn das Lied mindestens 45 Sekunden lief
+                // (nicht beim schnellen Durchschalten im Hit-Mix)
+                sleepHandler.removeCallbacks(heardRunnable)
                 if (t.contains(" - ") || t.contains(" – ")) {
-                    Heard.add(this@PlaybackService, t, item.mediaMetadata.artist?.toString().orEmpty())
+                    heardTitle = t
+                    heardStation = item.mediaMetadata.artist?.toString().orEmpty()
+                    sleepHandler.postDelayed(heardRunnable, 45_000)
                 }
                 updateArtwork(item, t)
             }
@@ -384,6 +389,14 @@ class PlaybackService : MediaLibraryService() {
             val bmp = (coil.Coil.imageLoader(this@PlaybackService).execute(req).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
             if (url == widgetArtUrl) { RadioWidget.art = bmp; RadioWidget.refresh(this@PlaybackService) }
         }
+    }
+
+    private var heardTitle = ""
+    private var heardStation = ""
+    private val heardRunnable = Runnable {
+        val p = session?.player ?: return@Runnable
+        val now = p.mediaMetadata.title?.toString()?.trim().orEmpty()
+        if (p.isPlaying && Text.clean(now) == Text.clean(heardTitle)) Heard.add(this, Text.clean(heardTitle), heardStation)
     }
 
     private val stationLogos = HashMap<String, android.net.Uri?>()
