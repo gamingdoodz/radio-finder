@@ -570,8 +570,10 @@ class PlaybackService : MediaLibraryService() {
                         val stations = StationRepository.load(applicationContext, big = false).take(80)
                         withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
                     }
+                    val pop = LiveIndex.popularity()
                     LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) }
-                        .sortedByDescending { it.since }.distinctBy { it.normalized }.take(60)
+                        .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+                        .distinctBy { it.normalized }.take(60)
                         .map { it.station.toEntry(it.title).toMediaItem() }
                 }
                 CHARTS_LIVE_ID -> {
@@ -725,7 +727,11 @@ class PlaybackService : MediaLibraryService() {
                 val chosen = resolved[0]
                 val others = LiveIndex.fresh()
                     .filter { "st:" + it.station.id != chosen.mediaId && LiveIndex.isMusic(it.title) }
-                    .sortedByDescending { it.since }
+                    .let { list ->
+                        val pop = LiveIndex.popularity()
+                        // Bekannte Lieder (laufen auf vielen Sendern) zuerst, dann frisch angefangene
+                        list.sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+                    }
                     .distinctBy { it.normalized }
                     .take(30)
                     .map { liveTitle(it.station.toEntry(it.title).toMediaItem()) ?: it.station.toEntry(it.title).toMediaItem() }

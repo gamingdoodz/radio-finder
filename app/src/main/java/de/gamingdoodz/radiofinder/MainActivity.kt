@@ -912,7 +912,9 @@ class MainActivity : ComponentActivity() {
         val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
             .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
         // Danach beliebte Sender, dann alles andere, was der Server gerade an Musik kennt (frisch angefangen zuerst)
-        val others = LiveIndex.fresh().filter { isMusic(it.title) }.sortedByDescending { it.since }
+        val pop = LiveIndex.popularity()
+        val others = LiveIndex.fresh().filter { isMusic(it.title) }
+            .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
             .take(60).map { it.station.toEntry(it.title) }
         val live = dedupe(chartsLive + liveEntries(popular.take(80)) + others).take(25)
         rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))

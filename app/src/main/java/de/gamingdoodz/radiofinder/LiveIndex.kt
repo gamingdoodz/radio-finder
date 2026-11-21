@@ -63,6 +63,9 @@ object LiveIndex {
 
     fun isFresh(s: Station) = map[s.id]?.let { System.currentTimeMillis() - it.time < MAX_AGE } == true
 
+    /** Wie viele Sender spielen dieses Lied gerade? Bekannte Hits laufen auf vielen gleichzeitig. */
+    fun popularity(): Map<String, Int> = fresh().groupingBy { it.normalized }.eachCount()
+
     fun fresh(): List<Now> {
         val t = System.currentTimeMillis()
         return map.values.filter { t - it.time < MAX_AGE }

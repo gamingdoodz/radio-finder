@@ -226,10 +226,16 @@ class HitMix(
             .map { it to it.normalized }.filter { (_, k) -> ok(k) }
         val fromAny = if (anyMusic && !strict) pool.map { it to it.normalized }.filter { (_, k) -> ok(k) } else emptyList()
 
+        // Bekanntheit: läuft auf vielen Sendern, steht weit oben in der Liste oder ist von einem bekannten Künstler
+        val pop = LiveIndex.popularity()
+        val rank = HashMap<String, Int>().also { m -> songs.forEachIndexed { i, sg -> m.putIfAbsent(sg.key, i) } }
         val best = listOf(fromList, fromGenre, fromArtist, fromAny).firstOrNull { it.isNotEmpty() }
-            ?.minByOrNull { (n, _) ->
-                // Sender mit bekannter Vorab-Werbung rutschen nach hinten
-                (t - n.since) + if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L
+            ?.minByOrNull { (n, key) ->
+                val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 45_000L
+                val top = rank[key]?.let { (100 - it).coerceAtLeast(0) * 1_500L } ?: 0L
+                val knownArtist = if (artistWords.any { w -> w.all { n.normalized.contains(it) } }) 60_000L else 0L
+                // Frisch angefangen zählt, Sender mit Vorab-Werbung rutschen nach hinten
+                (t - n.since) + (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - top - knownArtist
             } ?: return null
         val (n, key) = best
         currentStationId = n.station.id
