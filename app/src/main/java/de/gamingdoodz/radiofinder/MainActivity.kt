@@ -877,6 +877,19 @@ class MainActivity : ComponentActivity() {
 
     private var coverJob: Job? = null
 
+    private var coverTitleJob: Job? = null
+
+    /** Cover für Liedtitel ("Künstler - Titel") nachladen und dann neu anzeigen. */
+    private fun loadCoverTitles(titles: List<String>) {
+        val todo = titles.filter { isMusic(it) && !Covers.known(it) }
+        if (todo.isEmpty() || coverTitleJob?.isActive == true) return
+        coverTitleJob = lifecycleScope.launch {
+            var found = false
+            todo.take(15).forEach { if (Covers.load(it) != null) found = true }
+            if (found) render()
+        }
+    }
+
     /** Cover für laufende Lieder nachladen und dann neu anzeigen. */
     private fun loadCovers(list: List<Entry>) {
         val todo = list.filter { it.kind == Kind.STATION && it.subtitle != "Internetradio" && !Covers.known(it.title) }
@@ -916,17 +929,21 @@ class MainActivity : ComponentActivity() {
         rows.add(Row.Moments(moments))
 
         // 2. Weiterhören (Favoriten zuerst)
-        // Bei Sendern zeigen, welches Lied dort gerade läuft (mit Cover)
-        val again = (Favorites.all(this) + Recent.all(this)).distinctBy { it.id }.take(15).map { e ->
-            if (e.kind != Kind.STATION) e
-            else LiveIndex.get(e.id.removePrefix("st:"))?.takeIf { isMusic(it.title) }?.let {
-                Station(e.id.removePrefix("st:"), e.name, e.url, e.artwork, false).toEntry(it.title)
-            } ?: e
+        // Weiterhören: die zuletzt gehörten Lieder (mit Cover), dazu angefangene freie Musik und Hörspiele
+        val heard = Heard.all(this).take(12)
+        loadCoverTitles(heard.map { it.title })
+        val songs = heard.map { h ->
+            val artist = h.title.substringBefore(" - ").substringBefore(" – ").trim()
+            val title = h.title.substringAfter(" - ").substringAfter(" – ").trim()
+            val c = Covers.get(h.title)
+            Entry("hd:" + h.title.hashCode().toString(16), Kind.TRACK, c?.title ?: title, c?.artist ?: artist,
+                "", c?.artwork.orEmpty(), c?.title ?: title, preview = true)
         }
+        val others = Recent.all(this).filter { it.kind != Kind.STATION }.take(6)
+        val again = (songs + others).distinctBy { it.id }
         if (again.isNotEmpty()) {
-            loadCovers(again)
             rows.add(Row.Header("Weiterhören"))
-            rows.add(Row.Carousel(again.map { Covers.dress(it) }))
+            rows.add(Row.Carousel(again))
         }
 
         // 3. Jetzt im Radio: erst Chart-Hits, dann andere Musik – eine Liste statt zwei
@@ -934,10 +951,10 @@ class MainActivity : ComponentActivity() {
             .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
         // Danach beliebte Sender, dann alles andere, was der Server gerade an Musik kennt (frisch angefangen zuerst)
         val pop = LiveIndex.popularity()
-        val others = LiveIndex.fresh().filter { isMusic(it.title) }
+        val liveOthers = LiveIndex.fresh().filter { isMusic(it.title) }
             .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
             .take(60).map { it.station.toEntry(it.title) }
-        val live = dedupe(chartsLive + liveEntries(popular.take(80)) + others).take(25)
+        val live = dedupe(chartsLive + liveEntries(popular.take(80)) + liveOthers).take(25)
         loadCovers(live)
         rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
         if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
