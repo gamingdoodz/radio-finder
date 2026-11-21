@@ -1,5 +1,18 @@
 #!/bin/bash
 # Wird einmal auf dem Server ausgeführt, wenn sich diese Datei ändert (über GitHub Actions).
-# KI im Hintergrund einrichten (Übersetzen dauert ca. 15 Minuten), Fortschritt in /var/log/llm-setup.log
-nohup bash /root/radio-finder/server/llm.sh > /var/log/llm-setup.log 2>&1 &
-echo "KI-Einrichtung gestartet"
+# KI prüfen: warten, bis sie läuft (max. 12 Minuten), dann einen Wunsch testen
+for i in $(seq 1 72); do
+  systemctl is-active --quiet llm && break
+  sleep 10
+done
+echo "--- Einrichtung (Ende) ---"; tail -5 /var/log/llm-setup.log
+echo "KI-Dienst: $(systemctl is-active llm)"
+sleep 20
+for q in "was Ruhiges zum Einschlafen" "Party wie auf Mallorca" "etwas von Helene Fischer"; do
+  echo "Wunsch: $q"
+  START=$(date +%s)
+  curl -s -m 40 "http://localhost:8081/wish?q=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" "$q")"; echo
+  echo "Dauer: $(( $(date +%s) - START )) s"
+done
+echo "Ähnlich zu 'Wham - Last Christmas':"
+curl -s "http://localhost:8081/similar?q=Wham%20Last%20Christmas" | head -c 600; echo
