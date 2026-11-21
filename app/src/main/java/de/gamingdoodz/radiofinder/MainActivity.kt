@@ -1540,12 +1540,33 @@ class MainActivity : ComponentActivity() {
 
     private fun onEntryTap(e: Entry, section: List<Entry>) {
         if (e.kind == Kind.SHOW) { if ((page as? Page.ShowPage)?.show?.id != e.id) openPage(Page.ShowPage(e)); return }
+        // Sender mit laufendem Lied: das Lied am besten Ort hören (ohne Werbung, frisch angefangen)
+        if (e.kind == Kind.STATION && e.subtitle != "Internetradio" && isMusic(e.title)) {
+            val artist = e.title.substringBefore(" - ").substringBefore(" – ").trim()
+            val title = e.title.substringAfter(" - ").substringAfter(" – ").trim()
+            tapSong(title, artist, e, null)
+            return
+        }
         if (!e.preview) { play(e, section); return }
-        val candidates = LiveIndex.findSongs(e.title, e.subtitle).distinctBy { it.station.id }.take(5)
-        if (candidates.isEmpty()) { songDialog(e); return }
-        // Kurz direkt beim Sender nachsehen, ob das Lied wirklich noch läuft
-        Toast.makeText(this, "Prüfe, ob das Lied noch läuft…", Toast.LENGTH_SHORT).show()
-        val song = LiveIndex.Song(e)
+        tapSong(e.title, e.subtitle, null, e)
+    }
+
+    /**
+     * Lied antippen: alle Sender suchen, auf denen es gerade läuft, direkt nachsehen, ob es dort
+     * wirklich noch läuft, und den besten nehmen – ohne Vorab-Werbung und möglichst frisch angefangen.
+     */
+    private fun tapSong(title: String, artist: String, station: Entry?, preview: Entry?) {
+        val t = System.currentTimeMillis()
+        val candidates = LiveIndex.findSongs(title, artist).distinctBy { it.station.id }
+            .sortedWith(compareBy<LiveIndex.Now> { if (Ads.likely(this, it.station.id, it.station.url)) 1 else 0 }
+                .thenByDescending { it.since })
+            .take(6)
+        if (candidates.isEmpty()) {
+            if (station != null) play(station, emptyList()) else preview?.let { songDialog(it) }
+            return
+        }
+        Toast.makeText(this, "Prüfe, wo das Lied gerade läuft…", Toast.LENGTH_SHORT).show()
+        val song = LiveIndex.Song(Entry("", Kind.TRACK, title, artist, "", "", title))
         lifecycleScope.launch {
             val t0 = System.currentTimeMillis()
             Scanner.titles(candidates.map { it.station }) { _, _ -> }
@@ -1555,11 +1576,18 @@ class MainActivity : ComponentActivity() {
                 ?: candidates.firstOrNull { c -> checked.none { it.station.id == c.station.id } }
             if (ok != null) {
                 val now = LiveIndex.get(ok.station.id) ?: ok
-                Toast.makeText(this@MainActivity, "Läuft gerade auf ${ok.station.name} – los geht's!", Toast.LENGTH_SHORT).show()
+                val ads = Ads.likely(this@MainActivity, ok.station.id, ok.station.url)
+                val left = if (t - now.since > 3 * 60_000L) " (läuft schon länger)" else ""
+                Toast.makeText(this@MainActivity,
+                    "Läuft auf ${ok.station.name}$left" + if (ads) " – evtl. kurz Werbung vorab" else "", Toast.LENGTH_SHORT).show()
                 play(ok.station.toEntry(now.title), emptyList())
             } else {
                 render()
-                songDialog(e, "Das Lied ist gerade zu Ende gegangen.")
+                if (preview != null) songDialog(preview, "Das Lied ist gerade zu Ende gegangen.")
+                else if (station != null) {
+                    Toast.makeText(this@MainActivity, "Das Lied ist gerade zu Ende – ${station.name} läuft trotzdem", Toast.LENGTH_SHORT).show()
+                    play(station, emptyList())
+                }
             }
         }
     }
@@ -1979,7 +2007,8 @@ class MainActivity : ComponentActivity() {
         if (known > 0 && elapsed < known + 15_000) return AdInfo((known - elapsed).coerceAtLeast(0), known, elapsed)
         // Sender schickt im Player sonst Liedtitel, gerade aber keinen: am Anfang ist das fast immer Werbung.
         // (Sender, die nie Titel in den Stream schreiben, zählen nicht – sonst stünde dort fälschlich "Werbung".)
-        if (live == null && Ads.hasIcy(this, id) && elapsed < 90_000) return AdInfo(-1, 0, elapsed)
+        val url = c.currentMediaItem?.let { Entry.fromMediaItem(it)?.url }.orEmpty()
+        if (live == null && (Ads.hasIcy(this, id) || Ads.likely(this, id, url)) && elapsed < 90_000) return AdInfo(-1, 0, elapsed)
         return null
     }
 

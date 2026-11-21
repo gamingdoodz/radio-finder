@@ -34,7 +34,7 @@ object Ads {
     fun hasIcy(c: Context, stationId: String) = prefs(c).getBoolean("icy:$stationId", false)
 
     /** Streams großer Werbe-Vermarkter spielen beim Verbinden fast immer erst Werbung. */
-    private val adHosts = Regex("(?i)streamtheworld|tritondigital|adswizz|revma|ihrhls|spotxchange|liveadexchanger|deliver\\.adswizz|playerservices|ais-sa|ais-edge|audioad|adtonos|targetspot")
+    private val adHosts = Regex("(?i)streamtheworld|tritondigital|adswizz|revma|ihrhls|spotxchange|liveadexchanger|deliver\\.adswizz|playerservices|ais-sa|ais-edge|audioad|adtonos|targetspot|streamabc|laut\\.fm|rautemusik|radiohost|stream\\.radiogroup")
 
     /** Kommt hier beim Umschalten wahrscheinlich Werbung? (gelernt oder bekannter Werbe-Stream) */
     fun likely(c: Context, stationId: String, url: String): Boolean =
