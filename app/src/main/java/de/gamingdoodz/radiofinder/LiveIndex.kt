@@ -38,7 +38,8 @@ object LiveIndex {
         val old = map[s.id]
         val since = if (old != null && old.title == title && t - old.time < MAX_AGE) old.since else t
         map[s.id] = Now(s, title, t, since)
-        gen++
+        // Kein Neuberechnen hier: einzelne Treffer stehen sofort über get() bereit,
+        // die großen Listen werden beim nächsten Abgleich im Hintergrund erneuert
     }
 
     /** Vom Server: since = seit wann der Titel dort läuft. */
@@ -75,6 +76,27 @@ object LiveIndex {
     /** Alles vorberechnen (im Hintergrund aufrufen, damit die Anzeige nicht ruckelt). */
     fun warm() { fresh(); popularity(); index(); topMusic() }
 
+    /**
+     * Nach einem Server-Abgleich (im Hintergrund): alle Listen neu berechnen und dann auf einen Schlag
+     * austauschen. So muss die Anzeige nie selbst rechnen und ruckelt nicht.
+     */
+    fun rebuild() {
+        val t = System.currentTimeMillis()
+        val f = map.values.filter { t - it.time < MAX_AGE }
+        val pop = f.groupingBy { it.normalized }.eachCount()
+        val m = HashMap<String, MutableList<Now>>()
+        for (n in f) for (w in n.normalized.split(' ')) if (w.length >= 2) m.getOrPut(w) { mutableListOf() }.add(n)
+        val top = f.filter { isMusic(it.title) }
+            .sortedWith(compareByDescending<Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+            .distinctBy { it.normalized }.take(300)
+        val g = gen + 1
+        freshCache = Cache(g, t, f)
+        popCache = Cache(g, t, pop)
+        topCache = Cache(g, t, top)
+        wordIndex = f to m
+        gen = g
+    }
+
     private class Cache<T>(val gen: Long, val at: Long, val value: T)
     @Volatile private var freshCache: Cache<List<Now>>? = null
     @Volatile private var popCache: Cache<Map<String, Int>>? = null
@@ -82,7 +104,7 @@ object LiveIndex {
 
     private fun <T> valid(c: Cache<T>?): T? {
         if (c == null) return null
-        return if (c.gen == gen && System.currentTimeMillis() - c.at < 30_000) c.value else null
+        return if (c.gen == gen && System.currentTimeMillis() - c.at < 180_000) c.value else null
     }
 
     /** Alles, was gerade läuft. */

@@ -114,8 +114,7 @@ object Radar {
                 if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
                 list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
             }
-            LiveIndex.invalidate()
-            LiveIndex.warm() // Listen hier im Hintergrund vorberechnen, damit die Anzeige nicht hängt
+            LiveIndex.rebuild() // Listen hier im Hintergrund neu berechnen, damit die Anzeige nicht hängt
             lastOk = System.currentTimeMillis()
             true
         } finally {

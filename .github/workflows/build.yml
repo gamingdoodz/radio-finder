@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths-ignore: ["server/**", "README.md"]
   workflow_dispatch:
+  # Google erlaubt nur wenige Uploads pro Tag: nachts automatisch die neueste Version hochladen
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: write
@@ -59,8 +62,9 @@ jobs:
           make_latest: true
 
       # Automatisch in den internen Play-Test hochladen (sobald der Schlüssel hinterlegt ist)
+      # Hochladen nur nachts, von Hand oder wenn die Änderung "[play]" enthält (Tageslimit bei Google)
       - name: In Google Play hochladen (interner Test)
-        if: ${{ env.PLAY_JSON != '' }}
+        if: ${{ env.PLAY_JSON != '' && (github.event_name != 'push' || contains(github.event.head_commit.message, '[play]')) }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
