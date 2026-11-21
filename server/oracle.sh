@@ -33,7 +33,12 @@ fi
 SUB=$(oci network subnet list -c "$T" --vcn-id "$VCN" --display-name radar-subnet --query 'data[0].id' --raw-output)
 
 # ---------- Server ----------
-ID=$(q compute instance list -c "$T" --display-name radar --lifecycle-state RUNNING --query 'data[0].id' --raw-output)
+# Gibt es den Server schon (läuft oder startet gerade)?
+find_radar() {
+  q compute instance list -c "$T" --display-name radar --all \
+    --query 'data[?"lifecycle-state"!=`TERMINATED` && "lifecycle-state"!=`TERMINATING`].id | [0]' --raw-output
+}
+ID=$(find_radar)
 if [ -z "$ID" ] || [ "$ID" = "null" ]; then
   IMG=$(oci compute image list -c "$T" --operating-system "Canonical Ubuntu" --operating-system-version "24.04" \
     --shape VM.Standard.A1.Flex --sort-by TIMECREATED --sort-order DESC --limit 1 --query 'data[0].id' --raw-output)
@@ -51,7 +56,9 @@ EOF
         --shape VM.Standard.A1.Flex --shape-config '{"ocpus":4,"memoryInGBs":24}' \
         --image-id "$IMG" --subnet-id "$SUB" --assign-public-ip true --boot-volume-size-in-gbs 50 \
         --ssh-authorized-keys-file ~/.ssh/id_rsa.pub --user-data-file /tmp/radar-init.sh \
-        --wait-for-state RUNNING --query 'data.id' --raw-output 2>&1) && { ID="$OUT"; break 2; }
+        --query 'data.id' --raw-output 2>&1) && { ID="$OUT"; break 2; }
+      # Manchmal ist der Server trotz Fehlermeldung angelegt worden
+      sleep 5; ID=$(find_radar); if [ -n "$ID" ] && [ "$ID" != "null" ]; then break 2; fi
       if echo "$OUT" | grep -qi "capacity"; then
         echo "  $AD: gerade ausverkauft"
       else
@@ -67,6 +74,13 @@ EOF
   fi
 fi
 
+echo "Warte, bis der Server läuft…"
+for i in $(seq 1 60); do
+  ST=$(q compute instance get --instance-id "$ID" --query 'data."lifecycle-state"' --raw-output)
+  [ "$ST" = "RUNNING" ] && break
+  if [ "$ST" = "TERMINATED" ]; then echo "Oracle hat den Server wieder entfernt (ausverkauft). Bitte später nochmal starten."; exit 1; fi
+  sleep 10
+done
 IP=$(oci compute instance list-vnics --instance-id "$ID" --query 'data[0]."public-ip"' --raw-output)
 echo
 echo "Server läuft an, Einrichtung dauert ca. 5 Minuten…"
