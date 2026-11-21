@@ -1553,6 +1553,28 @@ class MainActivity : ComponentActivity() {
         tapSong(e.title, e.subtitle, null, e)
     }
 
+    /** Gewünschtes Lied nach dem Antippen: wird gegen den echten Titel im Stream geprüft. */
+    private class Wanted(val song: LiveIndex.Song, val title: String, val others: List<Station>, val at: Long, val preview: Entry?)
+    private var wanted: Wanted? = null
+
+    /** Läuft im Stream etwas anderes als gewünscht? Dann den nächsten Sender versuchen. */
+    private fun checkWanted(live: String?) {
+        val w = wanted ?: return
+        if (System.currentTimeMillis() - w.at > 45_000) { wanted = null; return }
+        if (live == null || !isMusic(live) || Ads.isAd(live)) return
+        if (w.song.matches(Scanner.normalize(live))) { wanted = null; return }
+        val next = w.others.firstOrNull()
+        if (next != null) {
+            wanted = Wanted(w.song, w.title, w.others.drop(1), System.currentTimeMillis(), w.preview)
+            Toast.makeText(this, "Dort läuft schon etwas anderes – versuche ${next.name}", Toast.LENGTH_SHORT).show()
+            play(next.toEntry(), emptyList())
+        } else {
+            wanted = null
+            Toast.makeText(this, "„${w.title}“ ist gerade überall zu Ende", Toast.LENGTH_LONG).show()
+            w.preview?.let { songDialog(it, "Das Lied ist gerade zu Ende gegangen.") }
+        }
+    }
+
     /**
      * Lied antippen: alle Sender suchen, auf denen es gerade läuft, direkt nachsehen, ob es dort
      * wirklich noch läuft, und den besten nehmen – ohne Vorab-Werbung und möglichst frisch angefangen.
@@ -1578,6 +1600,10 @@ class MainActivity : ComponentActivity() {
                 ?: candidates.firstOrNull { c -> checked.none { it.station.id == c.station.id } }
             if (ok != null) {
                 val now = LiveIndex.get(ok.station.id) ?: ok
+                // Merken, was gewünscht war: stimmt der Titel im Stream nicht, nimmt die App den nächsten Sender
+                wanted = Wanted(song, title, candidates.filter { it.station.id != ok.station.id }
+                    .filter { c -> checked.none { it.station.id == c.station.id } || LiveIndex.get(c.station.id)?.let { song.matches(it.normalized) } == true }
+                    .map { it.station }, System.currentTimeMillis(), preview)
                 val ads = Ads.likely(this@MainActivity, ok.station.id, ok.station.url)
                 val left = if (t - now.since > 3 * 60_000L) " (läuft schon länger)" else ""
                 Toast.makeText(this@MainActivity,
@@ -1931,6 +1957,7 @@ class MainActivity : ComponentActivity() {
             ?.takeIf { t0 - it.time < 120_000 && t0 - it.since < 6 * 60_000 }?.title else null
         val title = live ?: indexTitle ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
         if (isStation && live == null) checkStationTitle(item.mediaId, entry)
+        checkWanted(live)
         val ad = adInfo(c, item.mediaId, live)
         val sub = when {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
