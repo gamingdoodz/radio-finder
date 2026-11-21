@@ -1,5 +1,5 @@
 #!/bin/bash
-# Legt in Oracle Cloud den kostenlosen ARM-Server an (4 Kerne, 24 GB) und richtet den Radar-Server ein.
+# Legt in Oracle Cloud den kostenlosen ARM-Server an (2 Kerne, 12 GB) und richtet den Radar-Server ein.
 # In der Oracle Cloud Shell aufrufen:
 #   curl -fsSL https://raw.githubusercontent.com/gamingdoodz/radio-finder/main/server/oracle.sh | bash
 set -e
@@ -49,11 +49,11 @@ export HOME=/root USER=root
 curl -fsSL https://raw.githubusercontent.com/gamingdoodz/radio-finder/main/server/setup.sh | bash
 EOF
   ADS=$(oci iam availability-domain list -c "$T" --query 'data[].name' --raw-output | tr -d '[]", ' | grep -v '^$')
-  echo "Server wird angelegt (4 Kerne, 24 GB, kostenlos)…"
+  echo "Server wird angelegt (2 Kerne, 12 GB, kostenlos)…"
   for try in $(seq 1 40); do
     for AD in $ADS; do
       OUT=$(oci compute instance launch -c "$T" --availability-domain "$AD" --display-name radar \
-        --shape VM.Standard.A1.Flex --shape-config '{"ocpus":4,"memoryInGBs":24}' \
+        --shape VM.Standard.A1.Flex --shape-config '{"ocpus":2,"memoryInGBs":12}' \
         --image-id "$IMG" --subnet-id "$SUB" --assign-public-ip true --boot-volume-size-in-gbs 50 \
         --ssh-authorized-keys-file ~/.ssh/id_rsa.pub --user-data-file /tmp/radar-init.sh \
         --query 'data.id' --raw-output 2>&1) && { ID="$OUT"; break 2; }
@@ -81,6 +81,13 @@ for i in $(seq 1 60); do
   if [ "$ST" = "TERMINATED" ]; then echo "Oracle hat den Server wieder entfernt (ausverkauft). Bitte später nochmal starten."; exit 1; fi
   sleep 10
 done
+# Seit Juni 2026 sind nur noch 2 Kerne / 12 GB dauerhaft kostenlos: größere Server verkleinern
+OCPU=$(q compute instance get --instance-id "$ID" --query 'data."shape-config".ocpus' --raw-output)
+if [ "${OCPU%.*}" -gt 2 ] 2>/dev/null; then
+  echo "Server wird auf die kostenlose Größe (2 Kerne, 12 GB) umgestellt – startet dabei einmal neu…"
+  oci compute instance update --instance-id "$ID" --shape-config '{"ocpus":2,"memoryInGBs":12}' --force \
+    --wait-for-state RUNNING >/dev/null
+fi
 IP=$(oci compute instance list-vnics --instance-id "$ID" --query 'data[0]."public-ip"' --raw-output)
 echo
 echo "Server läuft an, Einrichtung dauert ca. 5 Minuten…"
