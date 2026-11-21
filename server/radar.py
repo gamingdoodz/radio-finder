@@ -142,49 +142,95 @@ async def icy_title(session, u: str):
     return None
 
 
-async def scan_round(session):
-    sem = asyncio.Semaphore(CONCURRENCY)
-    groups: dict = {}
-    for st in stations:
-        groups.setdefault(server_key(st["url"]), []).append(st)
+# Laufende Abfrage statt starrer Runden: Sender mit Liedtiteln werden alle ~75 s
+# neu abgefragt, Sender ohne Titel immer seltener (bis 1x pro Stunde).
+due: list = []                      # Heap: (nächster Zeitpunkt, Sender-ID)
+fails: dict[str, int] = {}
+status_cache: dict[str, tuple] = {}  # Server -> (Zeit, Titel je Pfad)
+stats = {"checked": 0, "since": time.time()}
 
-    async def do_group(key, group):
-        titles = None
-        if key and key not in no_status:
-            async with sem:
-                titles = await icecast_titles(session, key)
-            if titles is None:
-                no_status.add(key)
-        for st in group:
-            t = None
-            if titles:
-                path = urlparse(st["url"]).path or "/"
-                t = titles.get(path) or titles.get(path.rstrip("/"))
-            if t is None:
-                async with sem:
-                    t = await icy_title(session, st["url"])
-            if t:
-                put(st, t)
 
-    started = time.time()
-    await asyncio.gather(*(do_group(k, g) for k, g in groups.items()))
-    last_round.update(seconds=round(time.time() - started), at=int(time.time()))
-    print(f"Runde fertig: {len(stations)} Sender in {last_round['seconds']} s, live: {len(fresh())}", flush=True)
+async def status_for(session, key):
+    if not key or key in no_status:
+        return None
+    hit = status_cache.get(key)
+    if hit and time.time() - hit[0] < 30:
+        return hit[1]
+    titles = await icecast_titles(session, key)
+    if titles is None:
+        no_status.add(key)
+    status_cache[key] = (time.time(), titles)
+    return titles
+
+
+async def check(session, st):
+    key = server_key(st["url"])
+    titles = await status_for(session, key)
+    t = None
+    if titles:
+        path = urlparse(st["url"]).path or "/"
+        t = titles.get(path) or titles.get(path.rstrip("/"))
+    if t is None:
+        t = await icy_title(session, st["url"])
+    stats["checked"] += 1
+    sid = st["id"]
+    if t:
+        put(st, t)
+        fails[sid] = 0
+        return 60 + (hash(sid) % 30)
+    f = fails.get(sid, 0) + 1
+    fails[sid] = f
+    return min(3600, 120 * 2 ** min(f, 5))
+
+
+def schedule_all():
+    import heapq
+    due.clear()
+    t = time.time()
+    for i, st in enumerate(stations):
+        heapq.heappush(due, (t + i * 0.002, st["id"]))
+
+
+async def worker(session, ids):
+    import heapq
+    while True:
+        if not due:
+            await asyncio.sleep(1)
+            continue
+        when, sid = due[0]
+        wait = when - time.time()
+        if wait > 0:
+            await asyncio.sleep(min(wait, 1))
+            continue
+        heapq.heappop(due)
+        st = ids.get(sid)
+        if st is None:
+            continue
+        try:
+            nxt = await check(session, st)
+        except Exception:
+            nxt = 600
+        heapq.heappush(due, (time.time() + nxt, sid))
 
 
 async def scanner():
-    conn = aiohttp.TCPConnector(limit=CONCURRENCY, ttl_dns_cache=600, ssl=False)
+    conn = aiohttp.TCPConnector(limit=CONCURRENCY, limit_per_host=20, ttl_dns_cache=600, ssl=False)
     async with aiohttp.ClientSession(connector=conn, headers={"User-Agent": UA}) as session:
-        last_list = 0.0
+        await load_stations(session)
+        ids = {s["id"]: s for s in stations}
+        schedule_all()
+        workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
         while True:
-            if time.time() - last_list > 24 * 3600 or not stations:
+            await asyncio.sleep(60)
+            el = time.time() - stats["since"]
+            last_round.update(seconds=int(el), at=int(time.time()))
+            print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
+            # Einmal am Tag die Senderliste erneuern (oder sofort, falls sie beim Start fehlte)
+            if el > 24 * 3600 or not stations:
                 await load_stations(session)
-                last_list = time.time()
-            try:
-                await scan_round(session)
-            except Exception as e:
-                print("Fehler:", e, flush=True)
-            await asyncio.sleep(5)
+                ids.clear(); ids.update({s["id"]: s for s in stations})
+                schedule_all()
+                stats.update(checked=0, since=time.time())
 
 
 # ---------------- API ----------------
@@ -209,7 +255,8 @@ def gz(resp):
 
 
 async def h_health(_):
-    return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()), "round": last_round})
+    return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()),
+                              "checked": stats["checked"], "queue": len(due)})
 
 
 async def h_search(req):
