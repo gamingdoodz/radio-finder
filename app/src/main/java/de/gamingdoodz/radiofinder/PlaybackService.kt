@@ -235,7 +235,8 @@ class PlaybackService : MediaLibraryService() {
                 val title = player.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
                     ?: m?.title?.toString()?.takeIf { it.isNotBlank() } ?: m?.artist?.toString() ?: "Hitradar"
                 val sub = HitMix.activeName(this@PlaybackService)?.let { "⚡ Hit-Mix · $it" } ?: m?.artist?.toString().orEmpty()
-                RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying)
+                RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying, item?.let { Favorites.isFav(this@PlaybackService, it.mediaId) } == true)
+                updateWidgetArt(m?.artworkUri?.toString())
             }
 
             /** Fehler abfangen: Lied überspringen bzw. Sender kurz neu verbinden. */
@@ -369,6 +370,20 @@ class PlaybackService : MediaLibraryService() {
             .setIconResId(R.drawable.ic_next)
             .setSessionCommand(nextCommand)
             .build()
+
+    private var widgetArtUrl: String? = null
+
+    /** Bild fürs Widget laden (nur wenn es sich geändert hat). */
+    private fun updateWidgetArt(url: String?) {
+        if (url == widgetArtUrl) return
+        widgetArtUrl = url
+        if (url.isNullOrBlank()) { RadioWidget.art = null; RadioWidget.refresh(this); return }
+        scope.launch {
+            val req = coil.request.ImageRequest.Builder(this@PlaybackService).data(url).size(256).allowHardware(false).build()
+            val bmp = (coil.Coil.imageLoader(this@PlaybackService).execute(req).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            if (url == widgetArtUrl) { RadioWidget.art = bmp; RadioWidget.refresh(this@PlaybackService) }
+        }
+    }
 
     private val stationLogos = HashMap<String, android.net.Uri?>()
 
