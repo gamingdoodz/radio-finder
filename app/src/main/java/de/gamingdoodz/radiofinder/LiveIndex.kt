@@ -32,7 +32,8 @@ object LiveIndex {
     @Volatile var lastRefresh = 0L
         private set
 
-    fun put(s: Station, title: String) {
+    fun put(s: Station, raw: String) {
+        val title = Text.clean(raw)
         val t = System.currentTimeMillis()
         val old = map[s.id]
         val since = if (old != null && old.title == title && t - old.time < MAX_AGE) old.since else t
@@ -40,7 +41,8 @@ object LiveIndex {
     }
 
     /** Vom Server: since = seit wann der Titel dort läuft. */
-    fun putRemote(s: Station, title: String, sinceMs: Long, seenMs: Long = 0L) {
+    fun putRemote(s: Station, raw: String, sinceMs: Long, seenMs: Long = 0L) {
+        val title = Text.clean(raw)
         val now = System.currentTimeMillis()
         // Zeitpunkt, an dem der Server den Titel zuletzt gesehen hat (nicht wann wir ihn geholt haben)
         val t = if (seenMs in 1..now) seenMs else now

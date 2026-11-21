@@ -8,6 +8,7 @@ API:
   GET /now?limit=<n>         -> alles, was gerade läuft (neueste zuerst)
 """
 import asyncio
+import html
 import json
 import os
 import re
@@ -38,6 +39,7 @@ def normalize(s: str) -> str:
 
 
 def put(st: dict, title: str):
+    title = html.unescape(title).strip()
     t = time.time()
     old = now.get(st["id"])
     since = old["since"] if old and old["title"] == title and t - old["time"] < FRESH_SECONDS else t

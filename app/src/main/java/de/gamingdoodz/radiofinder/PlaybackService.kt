@@ -8,6 +8,8 @@ import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -279,7 +281,16 @@ class PlaybackService : MediaLibraryService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        session = MediaLibrarySession.Builder(this, player, LibraryCallback())
+        // Titel für Benachrichtigung, Auto und App säubern
+        val shown = object : ForwardingPlayer(player) {
+            override fun getMediaMetadata(): MediaMetadata {
+                val m = super.getMediaMetadata()
+                val t = m.title?.toString() ?: return m
+                val c = Text.clean(t)
+                return if (c == t) m else m.buildUpon().setTitle(c).build()
+            }
+        }
+        session = MediaLibrarySession.Builder(this, shown, LibraryCallback())
             .setSessionActivity(openApp)
             .build()
         Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
@@ -670,6 +681,20 @@ class PlaybackService : MediaLibraryService() {
                     val idx = list.indexOfFirst { it.mediaId == resolved[0].mediaId }.coerceAtLeast(0)
                     val saved = Positions.get(this@PlaybackService, resolved[0].mediaId).takeIf { it > 0 } ?: C.TIME_UNSET
                     return@future MediaSession.MediaItemsWithStartPosition(list.map { liveTitle(it) ?: it }, idx, saved)
+                }
+            }
+            if (resolved.size == 1 && resolved[0].mediaId.startsWith("st:")) {
+                val chosen = resolved[0]
+                val others = LiveIndex.fresh()
+                    .filter { "st:" + it.station.id != chosen.mediaId && LiveIndex.isMusic(it.title) }
+                    .sortedByDescending { it.since }
+                    .distinctBy { it.normalized }
+                    .take(30)
+                    .map { liveTitle(it.station.toEntry(it.title).toMediaItem()) ?: it.station.toEntry(it.title).toMediaItem() }
+                if (others.isNotEmpty()) {
+                    val before = others.drop(others.size / 2).reversed()
+                    val after = others.take(others.size / 2)
+                    return@future MediaSession.MediaItemsWithStartPosition(before + chosen + after, before.size, C.TIME_UNSET)
                 }
             }
             val index = if (resolved.size == mediaItems.size) startIndex else 0
