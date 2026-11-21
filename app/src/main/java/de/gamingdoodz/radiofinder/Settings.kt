@@ -16,7 +16,15 @@ object Settings {
     fun setSleepEnd(context: Context, end: Long) = prefs(context).edit().putLong("sleepEnd", end).apply()
 
     /** Audioqualität: 0 = Datensparend, 1 = Normal, 2 = Hoch. */
-    fun quality(context: Context) = prefs(context).getInt("quality", 1)
+    /** 0 Sparend, 1 Normal, 2 Hoch, 3 Automatisch (WLAN hoch, mobil normal). */
+    fun quality(context: Context) = prefs(context).getInt("quality", 3)
+
+    /** Gerade hohe Qualität? Bei "Automatisch" je nach WLAN oder mobilen Daten. */
+    fun highQuality(context: Context): Boolean = when (quality(context)) {
+        2 -> true
+        3 -> Net.isUnmetered(context)
+        else -> false
+    }
     fun setQuality(context: Context, q: Int) = prefs(context).edit().putInt("quality", q).apply()
 
     /** Lautstärke zwischen Sendern angleichen. */

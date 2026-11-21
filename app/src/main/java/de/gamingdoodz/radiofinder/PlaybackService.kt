@@ -94,6 +94,7 @@ class PlaybackService : MediaLibraryService() {
         if (endlessLoading || p.mediaItemCount - p.currentMediaItemIndex > 3) return
         endlessLoading = true
         scope.launch {
+            Jamendo.highQuality = Settings.highQuality(this@PlaybackService)
             val more = Jamendo.page(tag, endlessOffset)
             endlessOffset += 200
             if (more.isNotEmpty()) p.addMediaItems(more.map { it.toMediaItem() })
@@ -202,7 +203,7 @@ class PlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         exo = player
-        Jamendo.highQuality = Settings.quality(this) >= 2
+        Jamendo.highQuality = Settings.highQuality(this)
         setupNormalizer(player.audioSessionId)
         player.addListener(object : Player.Listener {
             private var retries = 0

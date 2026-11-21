@@ -274,7 +274,7 @@ class MainActivity : ComponentActivity() {
             updatePlayer()
         }, ContextCompat.getMainExecutor(this))
         ticker.post(tick)
-        Jamendo.highQuality = Settings.quality(this) >= 2
+        Jamendo.highQuality = Settings.highQuality(this)
         startLiveRefresh()
         checkUpdate()
         // Wunschliste vorhanden, aber Wächter läuft nicht mehr (z. B. nach Neustart): weitermachen
@@ -1272,8 +1272,8 @@ class MainActivity : ComponentActivity() {
         val norm = Settings.normalize(this)
         val mine = Services.all.filter { it.key in Services.mine(this) }
         settingsGroup("Wiedergabe", listOf(
-            Row.Setting(R.drawable.ic_eq, "Audioqualität", "Für freie Musik",
-                value = listOf("Sparend", "Normal", "Hoch")[q.coerceIn(0, 2)]) { qualitySheet() },
+            Row.Setting(R.drawable.ic_eq, "Audioqualität", if (q == 3) "Gerade: " + (if (Settings.highQuality(this)) "Hoch (WLAN)" else "Normal (mobil)") else "Für freie Musik",
+                value = listOf("Sparend", "Normal", "Hoch", "Auto")[q.coerceIn(0, 3)]) { qualitySheet() },
             Row.Setting(R.drawable.ic_radio, "Lautstärke angleichen", "Alle Sender gleich laut",
                 toggle = norm, chevron = false) { Settings.setNormalize(this, !norm); render() },
             Row.Setting(R.drawable.ic_note, "Meine Musik-Apps", "Zum Öffnen von Liedern",
@@ -1302,13 +1302,6 @@ class MainActivity : ComponentActivity() {
                 popular = emptyList()
                 loadHome()
                 Toast.makeText(this, "Senderlisten werden neu geladen", Toast.LENGTH_SHORT).show()
-            },
-        ))
-
-        settingsGroup("Android Auto", listOf(
-            Row.Setting(R.drawable.ic_play, "Automatisch weiterspielen",
-                "In Android Auto „Musik automatisch starten“ einschalten", chevron = false) {
-                Toast.makeText(this, "Android Auto → Einstellungen → „Musik automatisch starten“", Toast.LENGTH_LONG).show()
             },
         ))
 
@@ -1344,12 +1337,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun qualitySheet() {
-        val names = listOf("Datensparend" to "96 kbit/s – ideal unterwegs", "Normal" to "96 kbit/s, Standard", "Hoch" to "≈ 192 kbit/s – beste Qualität, mehr Daten")
+        val names = listOf(
+            3 to ("Automatisch" to "Im WLAN hoch, unterwegs normal – empfohlen"),
+            0 to ("Datensparend" to "96 kbit/s – ideal unterwegs"),
+            1 to ("Normal" to "96 kbit/s, Standard"),
+            2 to ("Hoch" to "≈ 192 kbit/s – beste Qualität, mehr Daten"),
+        )
         sheet("Audioqualität", "Für freie Musik", null, "", false, null,
-            names.mapIndexed { i, (n, sub) ->
+            names.map { (i, ns) ->
+                val (n, sub) = ns
                 Option(if (i == Settings.quality(this)) R.drawable.ic_play else R.drawable.ic_eq, n, sub) {
                     Settings.setQuality(this, i)
-                    Jamendo.highQuality = i >= 2
+                    Jamendo.highQuality = Settings.highQuality(this)
                     if (i == 0) Settings.setSaver(this, true)
                     render()
                 }
@@ -1469,7 +1468,7 @@ class MainActivity : ComponentActivity() {
                     "Mit ⏭ springst du jederzeit zum nächsten Hit."),
             Triple(R.drawable.ic_kids, "Kinder, Hörspiele & Auto",
                 "Kinderlieder und Hörspiele haben eigene Bereiche. Der Kinder-Modus zeigt nur Kinderinhalte." to
-                    "Alles läuft auch in Android Auto und im Hintergrund weiter."),
+                    "Alles läuft auch in Android Auto und im Hintergrund weiter. Tipp: In den Android-Auto-Einstellungen „Musik automatisch starten“ einschalten."),
         )
         val (icon, title, texts) = pages[step]
         val last = step == pages.lastIndex

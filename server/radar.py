@@ -8,6 +8,7 @@ API:
   GET /now?limit=<n>         -> alles, was gerade läuft (neueste zuerst)
 """
 import asyncio
+import gzip
 import html
 import json
 import os
@@ -263,21 +264,42 @@ async def h_search(req):
     words = [w for w in normalize(req.query.get("q", "")).split() if w]
     if not words:
         return web.json_response([])
-    ids = by_id()
+    ids = ids_map()
     hits = [item(ids[sid], n) for sid, n in fresh() if sid in ids and all(w in n["norm"] for w in words)]
     hits.sort(key=lambda h: -h["since"])
     return gz(web.json_response(hits[:200]))
 
 
+_now_cache: dict = {}   # (limit, music) -> (Zeit, gzip-Bytes)
+_ids_cache = {"n": -1, "map": {}}
+
+
+def ids_map():
+    # Sender-Verzeichnis nur neu bauen, wenn sich die Liste geändert hat
+    if _ids_cache["n"] != len(stations):
+        _ids_cache.update(n=len(stations), map={s["id"]: s for s in stations})
+    return _ids_cache["map"]
+
+
 async def h_now(req):
     limit = min(int(req.query.get("limit", "5000")), 20000)
-    ids = by_id()
     music = req.query.get("music") == "1"
-    # music=1: nur Liedtitel ("Künstler - Titel"), halb so viele Daten
-    out = [item(ids[sid], n) for sid, n in fresh()
-           if sid in ids and (not music or " - " in n["title"] or " – " in n["title"])]
-    out.sort(key=lambda h: -h["since"])
-    return gz(web.json_response(out[:limit]))
+    key = (limit, music)
+    hit = _now_cache.get(key)
+    # Viele Nutzer: Antwort 15 s lang fertig gepackt wiederverwenden (kostet dann fast nichts)
+    if not hit or time.time() - hit[0] > 15:
+        ids = ids_map()
+        # music=1: nur Liedtitel ("Künstler - Titel"), halb so viele Daten
+        out = [item(ids[sid], n) for sid, n in fresh()
+               if sid in ids and (not music or " - " in n["title"] or " – " in n["title"])]
+        out.sort(key=lambda h: -h["since"])
+        body = gzip.compress(json.dumps(out[:limit], separators=(",", ":")).encode(), 6)
+        hit = (time.time(), body)
+        _now_cache[key] = hit
+    if "gzip" in req.headers.get("Accept-Encoding", ""):
+        return web.Response(body=hit[1], content_type="application/json",
+                            headers={"Content-Encoding": "gzip"})
+    return web.Response(body=gzip.decompress(hit[1]), content_type="application/json")
 
 
 async def main():
