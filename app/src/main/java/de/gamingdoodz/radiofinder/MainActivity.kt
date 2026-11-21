@@ -161,6 +161,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Hell/Dunkel und Schriftgröße aus den Einstellungen anwenden. */
+    override fun attachBaseContext(newBase: Context) {
+        val cfg = android.content.res.Configuration(newBase.resources.configuration)
+        when (Settings.theme(newBase)) {
+            1 -> cfg.uiMode = (cfg.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or android.content.res.Configuration.UI_MODE_NIGHT_NO
+            2 -> cfg.uiMode = (cfg.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }
+        cfg.fontScale = cfg.fontScale * Settings.textScale(newBase)
+        super.attachBaseContext(newBase.createConfigurationContext(cfg))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Radar.init(this)
@@ -257,6 +268,10 @@ class MainActivity : ComponentActivity() {
 
         selectTab(Tab.HOME)
         loadHome()
+        // Gewählter Start-Reiter
+        if (savedInstanceState == null && Settings.startTab(this) != 0 && !kids()) {
+            selectTab(listOf(Tab.HOME, Tab.FIND, Tab.STORIES, Tab.LIB)[Settings.startTab(this).coerceIn(0, 3)])
+        }
     }
 
     override fun onStart() {
@@ -414,8 +429,8 @@ class MainActivity : ComponentActivity() {
     private fun selectTab(t: Tab) {
         tab = t
         page = null
-        val accent = Color.parseColor("#FF2EE6A8")
-        val dim = Color.parseColor("#80FFFFFF")
+        val accent = getColor(R.color.c_ff2ee6a8)
+        val dim = getColor(R.color.c_80ffffff)
         listOf(
             Triple(Tab.HOME, R.id.navHomeIcon, R.id.navHomeLabel),
             Triple(Tab.FIND, R.id.navFindIcon, R.id.navFindLabel),
@@ -1308,6 +1323,31 @@ class MainActivity : ComponentActivity() {
         ))
 
         val alarmOn = Settings.alarmOn(this)
+        val themeName = listOf("Wie das Handy", "Hell", "Dunkel")[Settings.theme(this).coerceIn(0, 2)]
+        val sizeName = listOf("Klein", "Normal", "Groß", "Sehr groß")[Settings.textSize(this).coerceIn(0, 3)]
+        val tabName = listOf("Start", "Musik", "Hörspiele", "Bibliothek")[Settings.startTab(this).coerceIn(0, 3)]
+        val compact = Settings.compact(this)
+        settingsGroup("Darstellung", listOf(
+            Row.Setting(R.drawable.ic_sun, "Design", "Hell, dunkel oder automatisch", value = themeName) {
+                choiceSheet("Design", listOf("Wie das Handy", "Hell", "Dunkel"), Settings.theme(this)) {
+                    Settings.setTheme(this, it); recreate()
+                }
+            },
+            Row.Setting(R.drawable.ic_search, "Schriftgröße", null, value = sizeName) {
+                choiceSheet("Schriftgröße", listOf("Klein", "Normal", "Groß", "Sehr groß"), Settings.textSize(this)) {
+                    Settings.setTextSize(this, it); recreate()
+                }
+            },
+            Row.Setting(R.drawable.ic_library, "Kompakte Ansicht", "Kleinere Karten, mehr auf einen Blick",
+                toggle = compact, chevron = false) { Settings.setCompact(this, !compact); render() },
+            Row.Setting(R.drawable.ic_home, "Startseite anpassen", "Bereiche ein- und ausblenden") { homeSheet() },
+            Row.Setting(R.drawable.ic_play, "Start mit", null, value = tabName) {
+                choiceSheet("App startet mit", listOf("Start", "Musik", "Hörspiele", "Bibliothek"), Settings.startTab(this)) {
+                    Settings.setStartTab(this, it); render()
+                }
+            },
+        ))
+
         settingsGroup("Wecker", listOf(
             Row.Setting(R.drawable.ic_bell, "Radio-Wecker",
                 if (alarmOn) "${if (Settings.alarmWeekdays(this)) "Mo–Fr" else "Täglich"} · ${Settings.alarmLabel(this)}" else "Sanft mit Musik aufwachen",
@@ -1361,6 +1401,24 @@ class MainActivity : ComponentActivity() {
             "Daten und Musik von radio-browser.info, Deezer, Jamendo, Audius, Internet Archive / LibriVox und Apple Podcasts. " +
                 "Alle Rechte an Sendern, Liedern und Hörspielen liegen bei ihren Eigentümern."
         ))
+    }
+
+    /** Auswahl aus einer Liste (aktuelle Wahl markiert). */
+    private fun choiceSheet(title: String, options: List<String>, selected: Int, onPick: (Int) -> Unit) {
+        sheet(title, "", null, "", false, null, options.mapIndexed { i, o ->
+            Option(if (i == selected) R.drawable.ic_play else R.drawable.ic_chevron_right, o, if (i == selected) "Ausgewählt" else null) { onPick(i) }
+        })
+    }
+
+    /** Startseite anpassen: Bereiche an/aus. */
+    private fun homeSheet() {
+        sheet("Startseite anpassen", "Antippen zum Ein- und Ausblenden", null, "", false, null,
+            Settings.homeSections.map { (key, name) ->
+                val on = Settings.homeOn(this, key)
+                Option(if (on) R.drawable.ic_heart else R.drawable.ic_heart_outline, name, if (on) "Wird angezeigt" else "Ausgeblendet") {
+                    Settings.setHomeOn(this, key, !on); homeSheet(); render()
+                }
+            })
     }
 
     private fun qualitySheet() {
@@ -1947,12 +2005,12 @@ class MainActivity : ComponentActivity() {
                     v.findViewById<TextView>(R.id.title).text = row.title
                     v.findViewById<TextView>(R.id.sub).text = row.sub
                     v.setBackgroundResource(if (row.dark) R.drawable.bg_action_dark else R.drawable.bg_action)
-                    val fg = if (row.dark) Color.WHITE else Color.parseColor("#FF08131C")
+                    val fg = if (row.dark) getColor(R.color.c_ffffffff) else Color.parseColor("#FF08131C")
                     v.findViewById<TextView>(R.id.title).setTextColor(fg)
-                    v.findViewById<TextView>(R.id.sub).setTextColor(if (row.dark) Color.parseColor("#B3FFFFFF") else Color.parseColor("#CC08131C"))
+                    v.findViewById<TextView>(R.id.sub).setTextColor(if (row.dark) getColor(R.color.c_b3ffffff) else Color.parseColor("#CC08131C"))
                     v.findViewById<ImageView>(R.id.icon).setImageResource(row.icon)
                     v.findViewById<ImageView>(R.id.icon).imageTintList =
-                        ColorStateList.valueOf(if (row.dark) Color.parseColor("#FF2EE6A8") else Color.parseColor("#FF08131C"))
+                        ColorStateList.valueOf(if (row.dark) getColor(R.color.c_ff2ee6a8) else Color.parseColor("#FF08131C"))
                     v.setOnClickListener { row.onClick() }
                 }
                 is Row.Empty -> (v as TextView).text = row.text
@@ -1976,8 +2034,8 @@ class MainActivity : ComponentActivity() {
                     v.findViewById<Switch>(R.id.toggle).apply {
                         visibility = if (row.toggle == null) View.GONE else View.VISIBLE
                         isChecked = row.toggle == true
-                        thumbTintList = ColorStateList.valueOf(if (row.toggle == true) Color.parseColor("#FF2EE6A8") else Color.parseColor("#FFB0B8C0"))
-                        trackTintList = ColorStateList.valueOf(if (row.toggle == true) Color.parseColor("#802EE6A8") else Color.parseColor("#40FFFFFF"))
+                        thumbTintList = ColorStateList.valueOf(if (row.toggle == true) getColor(R.color.c_ff2ee6a8) else getColor(R.color.c_ffb0b8c0))
+                        trackTintList = ColorStateList.valueOf(if (row.toggle == true) getColor(R.color.c_802ee6a8) else getColor(R.color.c_40ffffff))
                     }
                     v.findViewById<View>(R.id.chevron).visibility = if (row.chevron) View.VISIBLE else View.GONE
                     box.setOnClickListener { row.onClick() }
@@ -2012,7 +2070,7 @@ class MainActivity : ComponentActivity() {
                         t.textSize = 15f
                         t.setTypeface(t.typeface, android.graphics.Typeface.BOLD)
                         val on = i == row.selected
-                        t.setTextColor(if (on) Color.parseColor("#FF2EE6A8") else Color.parseColor("#99FFFFFF"))
+                        t.setTextColor(if (on) getColor(R.color.c_ff2ee6a8) else getColor(R.color.c_99ffffff))
                         if (on) t.setBackgroundResource(R.drawable.bg_segment_on) else t.background = null
                         t.layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
                         t.setOnClickListener { row.onSelect(i) }
@@ -2035,7 +2093,7 @@ class MainActivity : ComponentActivity() {
                         b.layoutParams = lp
                         val iv = ImageView(this@MainActivity)
                         iv.setImageResource(icon)
-                        iv.imageTintList = ColorStateList.valueOf(Color.parseColor("#FF2EE6A8"))
+                        iv.imageTintList = ColorStateList.valueOf(getColor(R.color.c_ff2ee6a8))
                         iv.layoutParams = android.widget.LinearLayout.LayoutParams(dp(22f).toInt(), dp(22f).toInt())
                         val tv = TextView(this@MainActivity)
                         tv.text = label
@@ -2052,7 +2110,7 @@ class MainActivity : ComponentActivity() {
                 }
                 is Row.Top -> {
                     val e = row.entry
-                    bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION, 14f)
+                    bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION && !Covers.isCover(e.artwork), 14f)
                     v.findViewById<TextView>(R.id.label).text = row.label
                     v.findViewById<TextView>(R.id.title).text = e.title
                     v.findViewById<TextView>(R.id.subtitle).text = row.sub
@@ -2071,7 +2129,7 @@ class MainActivity : ComponentActivity() {
                         chip.textSize = 14f
                         chip.setTypeface(chip.typeface, android.graphics.Typeface.BOLD)
                         val on = i == row.selected
-                        chip.setTextColor(if (on) Color.parseColor("#FF2EE6A8") else Color.parseColor("#CCFFFFFF"))
+                        chip.setTextColor(if (on) getColor(R.color.c_ff2ee6a8) else getColor(R.color.c_ccffffff))
                         chip.setBackgroundResource(if (on) R.drawable.bg_chip_sel else R.drawable.bg_chip_off)
                         val ph = dp(16f).toInt(); val pv = dp(9f).toInt()
                         chip.setPadding(ph, pv, ph, pv)
@@ -2099,7 +2157,7 @@ class MainActivity : ComponentActivity() {
 
         private fun bindRow(v: View, row: Row.Item) {
             val e = row.entry
-            bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION, 12f)
+            bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION && !Covers.isCover(e.artwork), 12f)
             v.findViewById<TextView>(R.id.title).text = e.title
             v.findViewById<TextView>(R.id.subtitle).text =
                 if (e.preview && row.liveText == null && e.url.isNotBlank()) "${e.subtitle} · Vorschau" else e.subtitle
@@ -2152,13 +2210,24 @@ class MainActivity : ComponentActivity() {
 
         override fun getItemCount() = entries.size
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
-            VH(LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false))
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
+            if (Settings.compact(this@MainActivity)) {
+                // Kompakte Ansicht: kleinere Karten
+                val w = dp(108f).toInt()
+                v.layoutParams = v.layoutParams.apply { width = w }
+                val box = (v as ViewGroup).getChildAt(0)
+                box.layoutParams = box.layoutParams.apply { width = w; height = w }
+                v.findViewById<TextView>(R.id.title).textSize = 13f
+                v.findViewById<TextView>(R.id.subtitle).textSize = 12f
+            }
+            return VH(v)
+        }
 
         override fun onBindViewHolder(holder: VH, position: Int) {
             val v = holder.itemView
             val e = entries[position]
-            bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION, 16f)
+            bindArt(v.findViewById(R.id.art), v.findViewById(R.id.initials), e.artwork, e.name, e.kind == Kind.STATION && !Covers.isCover(e.artwork), 16f)
             v.findViewById<TextView>(R.id.title).text = e.title
             v.findViewById<TextView>(R.id.subtitle).text = e.subtitle
             v.findViewById<View>(R.id.badge).visibility = if (live) View.VISIBLE else View.GONE

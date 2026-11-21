@@ -11,7 +11,7 @@
         android:id="@+id/text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="#CCFFFFFF"
+        android:textColor="@color/c_ccffffff"
         android:textSize="13sp" />
 
     <ProgressBar
@@ -20,6 +20,6 @@
         android:layout_width="match_parent"
         android:layout_height="6dp"
         android:layout_marginTop="6dp"
-        android:progressBackgroundTint="#33FFFFFF"
-        android:progressTint="#FF2EE6A8" />
+        android:progressBackgroundTint="@color/c_33ffffff"
+        android:progressTint="@color/c_ff2ee6a8" />
 </LinearLayout>

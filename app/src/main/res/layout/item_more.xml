@@ -10,6 +10,6 @@
     android:background="@drawable/bg_chip_off"
     android:foreground="?android:attr/selectableItemBackground"
     android:gravity="center"
-    android:textColor="#FF2EE6A8"
+    android:textColor="@color/c_ff2ee6a8"
     android:textSize="14sp"
     android:textStyle="bold" />

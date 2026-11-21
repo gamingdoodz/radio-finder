@@ -27,7 +27,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-black"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/c_ffffffff"
             android:textSize="20sp" />
 
         <TextView
@@ -35,7 +35,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:textColor="#B3FFFFFF"
+            android:textColor="@color/c_b3ffffff"
             android:textSize="13sp" />
 
         <TextView
@@ -43,7 +43,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:textColor="#FF2EE6A8"
+            android:textColor="@color/c_ff2ee6a8"
             android:textSize="12.5sp" />
     </LinearLayout>
 </LinearLayout>

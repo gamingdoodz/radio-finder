@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Automatisch erzeugt: Farben für dunkles Design -->
+<resources>
+    <color name="c_14ffffff">#14FFFFFF</color>
+    <color name="c_1a2ee6a8">#1A2EE6A8</color>
+    <color name="c_1fffffff">#1FFFFFFF</color>
+    <color name="c_22ffffff">#22FFFFFF</color>
+    <color name="c_262ee6a8">#262EE6A8</color>
+    <color name="c_332ee6a8">#332EE6A8</color>
+    <color name="c_33ffffff">#33FFFFFF</color>
+    <color name="c_402ee6a8">#402EE6A8</color>
+    <color name="c_40ffffff">#40FFFFFF</color>
+    <color name="c_660b1622">#660B1622</color>
+    <color name="c_802ee6a8">#802EE6A8</color>
+    <color name="c_80ffffff">#80FFFFFF</color>
+    <color name="c_99ffffff">#99FFFFFF</color>
+    <color name="c_b3ffffff">#B3FFFFFF</color>
+    <color name="c_ccffffff">#CCFFFFFF</color>
+    <color name="c_d90b1622">#D90B1622</color>
+    <color name="c_e6ffffff">#E6FFFFFF</color>
+    <color name="c_f2132232">#F2132232</color>
+    <color name="c_ff060b11">#FF060B11</color>
+    <color name="c_ff070d14">#FF070D14</color>
+    <color name="c_ff08131c">#FF08131C</color>
+    <color name="c_ff0a0b18">#FF0A0B18</color>
+    <color name="c_ff0a1520">#FF0A1520</color>
+    <color name="c_ff0f1c29">#FF0F1C29</color>
+    <color name="c_ff0f2030">#FF0F2030</color>
+    <color name="c_ff10241f">#FF10241F</color>
+    <color name="c_ff111d2a">#FF111D2A</color>
+    <color name="c_ff122131">#FF122131</color>
+    <color name="c_ff132232">#FF132232</color>
+    <color name="c_ff13302a">#FF13302A</color>
+    <color name="c_ff16283a">#FF16283A</color>
+    <color name="c_ff19b6d2">#FF19B6D2</color>
+    <color name="c_ff22384d">#FF22384D</color>
+    <color name="c_ff2ee6a8">#FF2EE6A8</color>
+    <color name="c_ffb0b8c0">#FFB0B8C0</color>
+    <color name="c_ffffffff">#FFFFFFFF</color>
+</resources>

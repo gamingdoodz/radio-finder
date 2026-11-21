@@ -17,6 +17,29 @@ object Settings {
 
     /** Audioqualität: 0 = Datensparend, 1 = Normal, 2 = Hoch. */
     /** 0 Sparend, 1 Normal, 2 Hoch, 3 Automatisch (WLAN hoch, mobil normal). */
+    /** Design: 0 wie das Handy, 1 hell, 2 dunkel. */
+    fun theme(context: Context) = prefs(context).getInt("theme", 0)
+    fun setTheme(context: Context, v: Int) = prefs(context).edit().putInt("theme", v).apply()
+
+    /** Schriftgröße: 0 klein, 1 normal, 2 groß, 3 sehr groß. */
+    fun textSize(context: Context) = prefs(context).getInt("textsize", 1)
+    fun setTextSize(context: Context, v: Int) = prefs(context).edit().putInt("textsize", v).apply()
+    fun textScale(context: Context) = listOf(0.9f, 1f, 1.15f, 1.3f)[textSize(context).coerceIn(0, 3)]
+
+    /** Kompakte Ansicht: kleinere Karten, mehr auf einen Blick. */
+    fun compact(context: Context) = prefs(context).getBoolean("compact", false)
+    fun setCompact(context: Context, v: Boolean) = prefs(context).edit().putBoolean("compact", v).apply()
+
+    /** Startseite: welche Bereiche angezeigt werden. */
+    val homeSections = listOf("now" to "Jetzt läuft", "quick" to "Schnellstart", "again" to "Weiterhören",
+        "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "charts" to "Deutsche Charts")
+    fun homeOn(context: Context, key: String) = prefs(context).getBoolean("home_$key", true)
+    fun setHomeOn(context: Context, key: String, v: Boolean) = prefs(context).edit().putBoolean("home_$key", v).apply()
+
+    /** Mit welchem Reiter die App startet: 0 Start, 1 Musik, 2 Hörspiele, 3 Bibliothek. */
+    fun startTab(context: Context) = prefs(context).getInt("starttab", 0)
+    fun setStartTab(context: Context, v: Int) = prefs(context).edit().putInt("starttab", v).apply()
+
     fun quality(context: Context) = prefs(context).getInt("quality", 3)
 
     /** Gerade hohe Qualität? Bei "Automatisch" je nach WLAN oder mobilen Daten. */

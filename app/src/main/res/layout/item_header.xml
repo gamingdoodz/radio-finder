@@ -22,7 +22,7 @@
             android:drawableStart="@drawable/bar_accent"
             android:drawablePadding="10dp"
             android:fontFamily="sans-serif-black"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/c_ffffffff"
             android:textSize="20sp" />
 
         <TextView
@@ -31,7 +31,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
             android:layout_marginTop="2dp"
-            android:textColor="#99FFFFFF"
+            android:textColor="@color/c_99ffffff"
             android:textSize="13sp" />
     </LinearLayout>
 
@@ -42,7 +42,7 @@
         android:layout_marginStart="10dp"
         android:letterSpacing="0.05"
         android:padding="4dp"
-        android:textColor="#FF2EE6A8"
+        android:textColor="@color/c_ff2ee6a8"
         android:textSize="12sp"
         android:textStyle="bold" />
 </LinearLayout>

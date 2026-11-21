@@ -14,6 +14,10 @@ object Covers {
     private val cache = ConcurrentHashMap<String, Info>()
     private val missing = ConcurrentHashMap.newKeySet<String>()
     private val NONE = Info("", "", "")
+    private val coverUrls = ConcurrentHashMap.newKeySet<String>()
+
+    /** Ist dieses Bild ein Lied-Cover (und kein Senderlogo)? */
+    fun isCover(url: String) = url in coverUrls
 
     private fun key(radioTitle: String) = Scanner.normalize(radioTitle)
 
@@ -33,7 +37,7 @@ object Covers {
             LiveIndex.Song(e).matches(k)
         }
         if (hit == null || hit.artwork.isBlank()) { missing.add(k); null }
-        else Info(hit.artwork, hit.title, hit.subtitle).also { cache[k] = it }
+        else Info(hit.artwork, hit.title, hit.subtitle).also { cache[k] = it; coverUrls.add(hit.artwork) }
     }
 
     /** Eintrag für einen Sender mit Lied: Cover und schöne Schreibweise, wenn bekannt. */

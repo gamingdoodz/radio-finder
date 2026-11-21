@@ -10,5 +10,5 @@
     android:fontFamily="sans-serif-medium"
     android:letterSpacing="0.08"
     android:textAllCaps="true"
-    android:textColor="#FF2EE6A8"
+    android:textColor="@color/c_ff2ee6a8"
     android:textSize="12sp" />

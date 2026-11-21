@@ -52,7 +52,7 @@
                     android:fontFamily="sans-serif-black"
                     android:maxLines="1"
                     android:text="Hitradar"
-                    android:textColor="#FFFFFFFF"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="28sp" />
 
                 <TextView
@@ -64,7 +64,7 @@
                     android:paddingTop="4dp"
                     android:paddingEnd="10dp"
                     android:paddingBottom="4dp"
-                    android:textColor="#FF2EE6A8"
+                    android:textColor="@color/c_ff2ee6a8"
                     android:textSize="12sp"
                     android:textStyle="bold"
                     android:visibility="gone" />
@@ -96,8 +96,8 @@
                     android:paddingStart="48dp"
                     android:paddingEnd="48dp"
                     android:singleLine="true"
-                    android:textColor="#FFFFFFFF"
-                    android:textColorHint="#80FFFFFF"
+                    android:textColor="@color/c_ffffffff"
+                    android:textColorHint="@color/c_80ffffff"
                     android:textSize="16sp" />
 
                 <ImageButton
@@ -143,7 +143,7 @@
                 android:id="@+id/stripIcon"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
-                android:tint="#FF2EE6A8" />
+                android:tint="@color/c_ff2ee6a8" />
 
             <TextView
                 android:id="@+id/stripText"
@@ -153,7 +153,7 @@
                 android:layout_weight="1"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@color/c_ffffffff"
                 android:textSize="13sp" />
 
             <ImageButton
@@ -186,8 +186,8 @@
                 android:layout_marginStart="18dp"
                 android:layout_marginTop="4dp"
                 android:layout_marginEnd="18dp"
-                android:progressBackgroundTint="#22FFFFFF"
-                android:progressTint="#FF2EE6A8" />
+                android:progressBackgroundTint="@color/c_22ffffff"
+                android:progressTint="@color/c_ff2ee6a8" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -240,7 +240,7 @@
                             android:layout_weight="1"
                             android:ellipsize="end"
                             android:maxLines="1"
-                            android:textColor="#FFFFFFFF"
+                            android:textColor="@color/c_ffffffff"
                             android:textSize="15sp"
                             android:textStyle="bold" />
                     </LinearLayout>
@@ -251,13 +251,13 @@
                         android:layout_height="wrap_content"
                         android:ellipsize="end"
                         android:maxLines="1"
-                        android:textColor="#B3FFFFFF"
+                        android:textColor="@color/c_b3ffffff"
                         android:textSize="13sp" />
                 </LinearLayout>
 
                 <ImageButton
                     android:id="@+id/miniPlay"
-                    android:tint="#FF08131C"
+                    android:tint="@color/c_ff08131c"
                     android:layout_width="46dp"
                     android:layout_height="46dp"
                     android:background="@drawable/bg_play"
@@ -314,7 +314,7 @@
         android:id="@+id/full"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FF0A0B18"
+        android:background="@color/c_ff0a0b18"
         android:clickable="true"
         android:focusable="true"
         android:visibility="gone">
@@ -359,7 +359,7 @@
                     android:layout_weight="1"
                     android:gravity="center"
                     android:letterSpacing="0.1"
-                    android:textColor="#B3FFFFFF"
+                    android:textColor="@color/c_b3ffffff"
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
@@ -372,7 +372,7 @@
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
                     android:text="☾ Timer"
-                    android:textColor="#FFFFFFFF"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -395,7 +395,7 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="↻ Nochmal von vorn hören"
-                    android:textColor="#FF2EE6A8"
+                    android:textColor="@color/c_ff2ee6a8"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:visibility="gone" />
@@ -409,7 +409,7 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="↺ 30 s"
-                    android:textColor="#FFFFFFFF"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
@@ -424,7 +424,7 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="1,0×"
-                    android:textColor="#FF2EE6A8"
+                    android:textColor="@color/c_ff2ee6a8"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
@@ -437,7 +437,7 @@
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
                     android:text="30 s ↻"
-                    android:textColor="#FFFFFFFF"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -475,7 +475,7 @@
                 android:paddingEnd="10dp"
                 android:paddingBottom="3dp"
                 android:text="● LIVE IM RADIO"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@color/c_ffffffff"
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
@@ -488,7 +488,7 @@
                 android:fontFamily="sans-serif-black"
                 android:gravity="center"
                 android:maxLines="3"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@color/c_ffffffff"
                 android:textSize="24sp" />
 
             <TextView
@@ -499,7 +499,7 @@
                 android:ellipsize="end"
                 android:gravity="center"
                 android:maxLines="2"
-                android:textColor="#B3FFFFFF"
+                android:textColor="@color/c_b3ffffff"
                 android:textSize="16sp" />
 
             <de.gamingdoodz.radiofinder.EqualizerView
@@ -517,9 +517,9 @@
                 android:id="@+id/fullSeek"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:progressBackgroundTint="#33FFFFFF"
-                android:progressTint="#FF2EE6A8"
-                android:thumbTint="#FFFFFFFF" />
+                android:progressBackgroundTint="@color/c_33ffffff"
+                android:progressTint="@color/c_ff2ee6a8"
+                android:thumbTint="@color/c_ffffffff" />
 
             <LinearLayout
                 android:id="@+id/fullTimes"
@@ -534,14 +534,14 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:textColor="#B3FFFFFF"
+                    android:textColor="@color/c_b3ffffff"
                     android:textSize="12sp" />
 
                 <TextView
                     android:id="@+id/fullDur"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="#B3FFFFFF"
+                    android:textColor="@color/c_b3ffffff"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -558,7 +558,7 @@
 
                 <ImageButton
                     android:id="@+id/fullPlay"
-                    android:tint="#FF08131C"
+                    android:tint="@color/c_ff08131c"
                     android:layout_width="80dp"
                     android:layout_height="80dp"
                     android:layout_marginStart="10dp"
