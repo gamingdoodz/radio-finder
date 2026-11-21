@@ -62,7 +62,7 @@ sudo tee /usr/local/bin/radar-update > /dev/null <<UPD
 cd $HOME/radio-finder || exit 0
 OLD=\$(git rev-parse HEAD)
 git pull -q || exit 0
-[ "\$OLD" != "\$(git rev-parse HEAD)" ] && ! git diff --quiet \$OLD HEAD -- server/ && systemctl restart radar
+[ "\$OLD" != "\$(git rev-parse HEAD)" ] && ! git diff --quiet \$OLD HEAD -- server/ ':!server/ops' && systemctl restart radar
 exit 0
 UPD
 sudo chmod +x /usr/local/bin/radar-update
