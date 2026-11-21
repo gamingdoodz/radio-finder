@@ -39,6 +39,12 @@ class HitMix(
     /** Genre-Mix (z. B. Weihnachten): jede Musik auf passenden Sendern zählt, nicht nur eine feste Liste. */
     private var genreIds: Set<String> = emptySet()
     private var artistNames: List<String> = emptyList()
+    /** Themen-Mix (Weihnachten, Kinder): nur passende Lieder, keine "ähnlichen" Künstler oder Zufallsmusik. */
+    private var strict = false
+    /** Wörter, an denen man ein Themen-Lied im Titel erkennt (z. B. "Christmas"). */
+    private var themeWords: Regex? = null
+    /** Titel, der beim Umschalten lief – ändert er sich, ist das Lied vorbei. */
+    private var switchedTitle: String? = null
 
     /** Startet den Hit-Mix und gibt den ersten Sender zurück (oder null, wenn gerade nichts passt). */
     suspend fun start(genreKey: String?): MediaItem? {
@@ -71,6 +77,10 @@ class HitMix(
             else -> StationRepository.byTag(genre.radioTag)
         }
         genreIds = genreStations.map { it.id }.toSet()
+        strict = genre?.key == "xmas" || genre?.key == "kids"
+        themeWords = if (genre?.key == "xmas")
+            Regex("(?i)christmas|xmas|weihnacht|santa|jingle|snow|winter|noel|navidad|feliz|rudolph|sleigh|mistletoe|let it snow|silent night|stille nacht|o tannenbaum|advent|nikolaus|lebkuchen|schnee")
+        else null
 
         val base = try { StationRepository.load(context, big = false) } catch (_: Exception) { emptyList() }
         val extra = genreStations + StationRepository.byTag("charts")
@@ -137,17 +147,24 @@ class HitMix(
             if (!p.playWhenReady) continue
             poll(force = false)
             val now = currentStationId?.let { LiveIndex.get(it) }
-            val stillHit = now != null && (
-                songs.any { it.key == currentSongKey && it.matches(now.normalized) } ||
-                    // Genre-Mix: auf dem Sender bleiben, solange dort Musik läuft
-                    (currentStationId in genreIds && LiveIndex.isMusic(now.title))
-                )
+            // Läuft noch dasselbe Lied wie beim Umschalten? Dann bleiben.
+            val stillHit = now != null && (switchedTitle == null || now.normalized == switchedTitle) &&
+                LiveIndex.isMusic(now.title)
             val broken = p.playbackState == Player.STATE_IDLE || p.playerError != null
             // Hit vorbei (anderes Lied, Werbung, Moderation) oder Sender kaputt -> weiter
             if (waitingForNext || !stillHit || broken || System.currentTimeMillis() - songStartedAt > 7 * 60_000L) {
-                (pickNext() ?: if (broken || waitingForNext) pickNext(allowRepeats = true) else null)?.let {
+                val next = pickNext() ?: if (broken || waitingForNext) pickNext(allowRepeats = true) else null
+                if (next != null) {
                     waitingForNext = false
-                    switchTo(it)
+                    switchTo(next)
+                } else if (now != null && LiveIndex.isMusic(now.title) && fits(now)) {
+                    // Nichts Neues gefunden, aber hier läuft wieder ein passendes Lied: bleiben
+                    switchedTitle = now.normalized
+                    songStartedAt = now.since
+                    waitingForNext = false
+                } else if (!broken) {
+                    // Hier läuft gerade nichts Passendes: sobald woanders eins anfängt, springen
+                    waitingForNext = true
                 }
             }
         }
@@ -190,13 +207,14 @@ class HitMix(
         }
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
 
+        fun theme(n: LiveIndex.Now) = themeWords?.containsMatchIn(n.title) == true
         val fromList = pool.mapNotNull { n -> songs.firstOrNull { it.matches(n.normalized) }?.let { n to it.key } }
             .filter { (_, k) -> ok(k) }
-        val fromGenre = pool.filter { it.station.id in genreIds }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
+        val fromGenre = pool.filter { it.station.id in genreIds || theme(it) }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
         val artistWords = artistNames.map { Scanner.words(it) }.filter { it.isNotEmpty() }
-        val fromArtist = pool.filter { n -> artistWords.any { w -> w.all { n.normalized.contains(it) } } }
+        val fromArtist = if (strict) emptyList() else pool.filter { n -> artistWords.any { w -> w.all { n.normalized.contains(it) } } }
             .map { it to it.normalized }.filter { (_, k) -> ok(k) }
-        val fromAny = if (anyMusic) pool.map { it to it.normalized }.filter { (_, k) -> ok(k) } else emptyList()
+        val fromAny = if (anyMusic && !strict) pool.map { it to it.normalized }.filter { (_, k) -> ok(k) } else emptyList()
 
         val best = listOf(fromList, fromGenre, fromArtist, fromAny).firstOrNull { it.isNotEmpty() }
             ?.minByOrNull { (n, _) ->
@@ -206,12 +224,18 @@ class HitMix(
         val (n, key) = best
         currentStationId = n.station.id
         currentSongKey = key
+        switchedTitle = n.normalized
         songStartedAt = n.since
         played.addLast(key)
         while (played.size > 25) played.removeFirst()
         prefs(context).edit().putString("now", "${n.title} · ${n.station.name}").apply()
         return n.station.toEntry(n.title).toMediaItem()
     }
+
+    /** Passt dieses Lied zum Mix? */
+    private fun fits(n: LiveIndex.Now): Boolean =
+        songs.any { it.matches(n.normalized) } || n.station.id in genreIds ||
+            themeWords?.containsMatchIn(n.title) == true
 
     private fun switchTo(item: MediaItem) {
         val p = player() ?: return
