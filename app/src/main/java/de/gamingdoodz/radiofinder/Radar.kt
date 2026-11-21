@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
 import java.net.URLEncoder
 
 /**
@@ -63,6 +64,37 @@ object Radar {
         }
     }
 
+    /** Was der Server zuletzt gemeldet hat: Sender-ID -> (Sender, Titel, seit, gesehen). */
+    private class Live(val station: Station, var title: String, var since: Long, var seen: Long)
+    private val known = HashMap<String, Live>()
+    @Volatile private var version = 0L
+
+    /** Abgleich über /sync: beim ersten Mal alles, danach nur Änderungen. true = geklappt. */
+    private fun applySync(text: String): Boolean {
+        val o = JSONObject(text)
+        val full = o.optInt("full", 0) == 1
+        val t = o.optLong("t") * 1000L
+        if (full) known.clear()
+        val rows = o.optJSONArray("rows") ?: return false
+        for (i in 0 until rows.length()) {
+            val r = rows.optJSONArray(i) ?: continue
+            val id = r.optString(0)
+            if (r.length() >= 7) {
+                val st = Station(id, r.optString(1, "Radio"), r.optString(2), r.optString(3), false)
+                known[id] = Live(st, r.optString(4), r.optLong(5) * 1000L, r.optLong(6) * 1000L)
+            } else if (r.length() >= 4) {
+                val k = known[id] ?: continue
+                k.title = r.optString(1); k.since = r.optLong(2) * 1000L; k.seen = r.optLong(3) * 1000L
+            }
+        }
+        o.optJSONArray("gone")?.let { g -> for (i in 0 until g.length()) known.remove(g.optString(i)) }
+        // Unveränderte Einträge sind laut Server weiterhin aktuell
+        if (!full) known.values.forEach { if (it.seen < t) it.seen = t }
+        known.values.forEach { LiveIndex.putRemote(it.station, it.title, it.since, it.seen) }
+        version = o.optLong("v")
+        return known.isNotEmpty()
+    }
+
     /** Holt alles, was gerade läuft, in den LiveIndex (höchstens einmal pro Intervall). */
     suspend fun sync(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         val t = System.currentTimeMillis()
@@ -72,10 +104,17 @@ object Radar {
         if (!lock.tryLock()) return@withContext ok
         try {
             lastTry = t
-            val text = fetch("/now?limit=8000&music=1", 15_000, 10_000_000)
-            val list = text?.let { runCatching { parse(it) }.getOrNull() }
-            if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
-            list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
+            // Neu: nur Änderungen holen (viel weniger Daten). Alter Server: wie bisher alles.
+            val synced = fetch("/sync?from=$version", 15_000, 10_000_000)
+                ?.let { runCatching { applySync(it) }.getOrDefault(false) } == true
+            if (!synced) {
+                version = 0L
+                val text = fetch("/now?limit=8000&music=1", 15_000, 10_000_000)
+                val list = text?.let { runCatching { parse(it) }.getOrNull() }
+                if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
+                list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
+            }
+            LiveIndex.invalidate()
             lastOk = System.currentTimeMillis()
             true
         } finally {

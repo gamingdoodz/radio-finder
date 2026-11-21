@@ -38,6 +38,7 @@ object LiveIndex {
         val old = map[s.id]
         val since = if (old != null && old.title == title && t - old.time < MAX_AGE) old.since else t
         map[s.id] = Now(s, title, t, since)
+        freshCache = null
     }
 
     /** Vom Server: since = seit wann der Titel dort läuft. */
@@ -64,11 +65,23 @@ object LiveIndex {
     fun isFresh(s: Station) = map[s.id]?.let { System.currentTimeMillis() - it.time < MAX_AGE } == true
 
     /** Wie viele Sender spielen dieses Lied gerade? Bekannte Hits laufen auf vielen gleichzeitig. */
-    fun popularity(): Map<String, Int> = fresh().groupingBy { it.normalized }.eachCount()
+    /** Nach einem Server-Abgleich: Zwischenspeicher leeren. */
+    fun invalidate() { freshCache = null; popCache = null }
 
+    @Volatile private var popCache: Pair<Long, Map<String, Int>>? = null
+    fun popularity(): Map<String, Int> {
+        val t = System.currentTimeMillis()
+        popCache?.let { (at, m) -> if (t - at < 5_000) return m }
+        return fresh().groupingBy { it.normalized }.eachCount().also { popCache = t to it }
+    }
+
+    @Volatile private var freshCache: Pair<Long, List<Now>>? = null
+
+    /** Alles, was gerade läuft. Wird 2 Sekunden zwischengespeichert (beim Anzeigen sehr oft gebraucht). */
     fun fresh(): List<Now> {
         val t = System.currentTimeMillis()
-        return map.values.filter { t - it.time < MAX_AGE }
+        freshCache?.let { (at, l) -> if (t - at < 2_000) return l }
+        return map.values.filter { t - it.time < MAX_AGE }.also { freshCache = t to it }
     }
 
     fun find(query: String): List<Now> {

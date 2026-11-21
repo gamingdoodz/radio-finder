@@ -311,9 +311,69 @@ async def h_now(req):
     return web.Response(body=gzip.decompress(hit[1]), content_type="application/json")
 
 
+# ---------------- Schnelles Abgleichen (nur Änderungen) ----------------
+# Alle 15 s ein Schnappschuss mit Versionsnummer. Die App schickt ihre letzte Version mit
+# und bekommt nur, was sich seitdem geändert hat – bei bekannten Sendern ohne Name/Adresse.
+_snaps: list = []          # [(Version, Zeit, {sid: (title, since, seen)})]
+_diff_cache: dict = {}     # (from, to) -> gzip-Bytes
+_ver = {"n": 0}
+
+
+def is_song(t: str) -> bool:
+    return " - " in t or " – " in t
+
+
+def snapshot():
+    t = time.time()
+    if _snaps and t - _snaps[-1][1] < 15:
+        return _snaps[-1]
+    snap = {sid: (n["title"], int(n["since"]), int(n["time"])) for sid, n in fresh() if is_song(n["title"])}
+    _ver["n"] += 1
+    _snaps.append((_ver["n"], t, snap))
+    del _snaps[:-60]  # ca. 15 Minuten Verlauf
+    _diff_cache.clear()
+    return _snaps[-1]
+
+
+async def h_sync(req):
+    ver, t, snap = snapshot()
+    try:
+        frm = int(req.query.get("from", "0"))
+    except ValueError:
+        frm = 0
+    key = (frm, ver)
+    body = _diff_cache.get(key)
+    if body is None:
+        ids = ids_map()
+        old = next((s for v, _, s in _snaps if v == frm), None)
+        if old is None:
+            # Erstes Mal oder zu alt: alles, mit Senderdaten
+            rows = [[sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val]
+                    for sid, val in snap.items() if sid in ids]
+            out = {"v": ver, "t": int(t), "full": 1, "rows": rows}
+        else:
+            rows = []
+            for sid, val in snap.items():
+                o = old.get(sid)
+                if o is not None and o[0] == val[0]:
+                    continue  # unverändert
+                if o is not None:
+                    rows.append([sid, *val])  # Sender kennt die App schon
+                elif sid in ids:
+                    rows.append([sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val])
+            gone = [sid for sid in old if sid not in snap]
+            out = {"v": ver, "t": int(t), "rows": rows, "gone": gone}
+        body = gzip.compress(json.dumps(out, separators=(",", ":"), ensure_ascii=False).encode(), 6)
+        _diff_cache[key] = body
+    if "gzip" in req.headers.get("Accept-Encoding", ""):
+        return web.Response(body=body, content_type="application/json", headers={"Content-Encoding": "gzip"})
+    return web.Response(body=gzip.decompress(body), content_type="application/json")
+
+
 async def main():
     app = web.Application()
-    app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now)])
+    app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
+                    web.get("/sync", h_sync)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
