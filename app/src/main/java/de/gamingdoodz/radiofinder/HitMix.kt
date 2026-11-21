@@ -60,10 +60,14 @@ class HitMix(
         val favMix = genreKey == "favs"
         val chartsMix = genreKey == "radiocharts"
         val similarTo = genreKey?.takeIf { it.startsWith("similar:") }?.removePrefix("similar:")
+        val playlist = genreKey?.takeIf { it.startsWith("pl:") }?.removePrefix("pl:")
+        val myList = genreKey?.takeIf { it.startsWith("my:") }?.removePrefix("my:")
         val name = when {
             genreKey == "mine" -> "Mein Mix"
             favMix -> "Lieblingssender"
             chartsMix -> "Meistgespielt im Radio"
+            playlist != null -> Playlists.curated.firstOrNull { it.second == playlist }?.first ?: playlist
+            myList != null -> myList
             similarTo != null -> "Mehr wie „${similarTo.substringAfter(" - ").substringAfter(" – ").take(24)}“"
             else -> artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
         }
@@ -73,6 +77,8 @@ class HitMix(
 
         val hits = when {
             genreKey == "mine" -> mySongs()
+            playlist != null -> Deezer.playlistByName(playlist).ifEmpty { Deezer.topGermany(100) }
+            myList != null -> Playlists.get(context, myList).ifEmpty { Deezer.topGermany(100) }
             similarTo != null -> {
                 // Ähnliche Lieder vom Server + weitere Lieder desselben Künstlers
                 val artist = similarTo.substringBefore(" - ").substringBefore(" – ").trim()

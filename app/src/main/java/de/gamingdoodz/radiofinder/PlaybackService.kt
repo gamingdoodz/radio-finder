@@ -300,7 +300,11 @@ class PlaybackService : MediaLibraryService() {
                 if (!isStory(mediaItem?.mediaId)) session?.player?.setPlaybackSpeed(1f)
                 if (mediaItem?.mediaId?.startsWith("jm:") == true) checkEndless() else if (mediaItem != null) endlessTag = null
                 updateFavButton()
-                mediaItem?.let { Entry.fromMediaItem(it) }?.let { Recent.add(this@PlaybackService, it) }
+                // "Zuletzt gehört": erst nach 20 Sekunden (nicht beim schnellen Durchschalten),
+                // Sender ohne das damals laufende Lied speichern (sonst steht dort ein altes Lied)
+                sleepHandler.removeCallbacks(recentRunnable)
+                recentItem = mediaItem
+                if (mediaItem != null) sleepHandler.postDelayed(recentRunnable, 20_000)
             }
         })
 
@@ -391,6 +395,15 @@ class PlaybackService : MediaLibraryService() {
             val bmp = (coil.Coil.imageLoader(this@PlaybackService).execute(req).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
             if (url == widgetArtUrl) { RadioWidget.art = bmp; RadioWidget.refresh(this@PlaybackService) }
         }
+    }
+
+    private var recentItem: MediaItem? = null
+    private val recentRunnable = Runnable {
+        val item = recentItem ?: return@Runnable
+        val p = session?.player ?: return@Runnable
+        if (p.currentMediaItem?.mediaId != item.mediaId || !p.isPlaying) return@Runnable
+        val e = Entry.fromMediaItem(item) ?: return@Runnable
+        Recent.add(this, if (e.kind == Kind.STATION) e.copy(title = e.name, subtitle = "Internetradio") else e)
     }
 
     private var heardTitle = ""

@@ -185,6 +185,22 @@ object Radar {
         }.getOrNull()
     }
 
+    /** Radiosender nach Namen suchen (alle ~50.000 auf dem Server). null = Server nicht erreichbar. */
+    suspend fun stations(query: String): List<Entry>? = withContext(Dispatchers.IO) {
+        val text = fetch("/stations?q=" + URLEncoder.encode(query, "UTF-8"), 8000, 2_000_000) ?: return@withContext null
+        runCatching {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val st = Station(o.optString("id"), StationRepository.cleanName(o.optString("name")), o.optString("url"), o.optString("favicon"), false)
+                val t = Text.clean(o.optString("title"))
+                if (t.isNotBlank()) LiveIndex.put(st, t)
+                // Als Sender anzeigen (Titel = Sendername), das laufende Lied in der Unterzeile
+                Entry("st:" + st.id, Kind.STATION, st.name, if (LiveIndex.isMusic(t)) "▶ $t" else "Internetradio", st.url, st.favicon, st.name)
+            }
+        }.getOrNull()
+    }
+
     /** Sucht ein Lied auf dem Server. null = Server nicht erreichbar. */
     suspend fun search(query: String): List<Scanner.Hit>? = withContext(Dispatchers.IO) {
         // Suche ist vom Nutzer gewollt: immer fragen, bei einem Aussetzer einmal kurz nachfassen

@@ -134,6 +134,28 @@ async def h_similar(req):
     return gz(web.json_response(out))
 
 
+# ---------------- Sender nach Namen suchen (alle ~50.000) ----------------
+_station_names = {"n": -1, "list": []}
+
+
+async def h_stations(req):
+    words = [w for w in normalize(req.query.get("q", "")).split() if w]
+    if not words:
+        return web.json_response([])
+    if _station_names["n"] != len(stations):
+        _station_names.update(n=len(stations), list=[(normalize(st["name"]), st) for st in stations])
+    out = []
+    # Liste ist nach Beliebtheit sortiert: die ersten Treffer sind die bekanntesten Sender
+    for name, st in _station_names["list"]:
+        if all(w in name for w in words):
+            n = now.get(st["id"])
+            out.append({"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"],
+                        "title": n["title"] if n and time.time() - n["time"] < FRESH_SECONDS else ""})
+            if len(out) >= 30:
+                break
+    return gz(web.json_response(out))
+
+
 # ---------------- Werbung am Senderanfang: von allen Apps gemeldet, für alle gemerkt ----------------
 ADS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ads.json")
 ads: dict = {}   # Sender-ID -> [Durchschnitt ms, Anzahl Meldungen]
@@ -707,7 +729,7 @@ async def main():
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
                     web.get("/sync", h_sync), web.get("/charts", h_charts),
                     web.get("/similar", h_similar), web.get("/wish", h_wish),
-                    web.get("/ad", h_ad), web.get("/ads", h_ads)])
+                    web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

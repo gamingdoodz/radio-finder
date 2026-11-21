@@ -42,7 +42,7 @@ object Covers {
 
     /** Eintrag für einen Sender mit Lied: Cover und schöne Schreibweise, wenn bekannt. */
     fun dress(e: Entry): Entry {
-        if (e.kind != Kind.STATION || e.subtitle == "Internetradio") return e
+        if (e.kind != Kind.STATION || e.title == e.name) return e
         val i = get(e.title) ?: return e
         return e.copy(title = "${i.artist} - ${i.title}", artwork = i.artwork)
     }

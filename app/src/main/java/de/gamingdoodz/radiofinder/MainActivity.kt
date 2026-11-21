@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
     private sealed class Page {
         data class GenrePage(val genre: Genre) : Page()
         object RadioChartsPage : Page()
+        data class PlaylistPage(val name: String, val query: String?, val own: Boolean) : Page()
         object ChartsPage : Page()
         object GenresPage : Page()
         data class ShowPage(val show: Entry) : Page()
@@ -229,6 +230,12 @@ class MainActivity : ComponentActivity() {
         })
         clear.setOnClickListener { input.setText(""); startSearch() }
         findViewById<View>(R.id.mic).setOnClickListener { listen(wish = false) }
+        // ✨ Wünsch dir was: mit Text = Wunsch erfüllen, ohne Text = sprechen
+        findViewById<View>(R.id.wishBtn).setOnClickListener {
+            val t = input.text.toString().trim()
+            if (t.isNotEmpty()) handleWish(t) else listen(wish = true)
+        }
+        findViewById<View>(R.id.fullStopMix).setOnClickListener { stopHitMix(); updatePlayer() }
         back.setOnClickListener { backCallback.handleOnBackPressed() }
 
         findViewById<View>(R.id.navHome).setOnClickListener { selectTab(Tab.HOME) }
@@ -498,6 +505,7 @@ class MainActivity : ComponentActivity() {
             is Page.GenrePage -> p.genre.name
             Page.ChartsPage -> "Deutsche Charts"
             Page.RadioChartsPage -> "Meistgespielt im Radio"
+            is Page.PlaylistPage -> p.name
             Page.GenresPage -> "Alle Genres"
             is Page.ShowPage -> p.show.name
             null -> when (tab) {
@@ -575,10 +583,12 @@ class MainActivity : ComponentActivity() {
                 val words = Scanner.words(q)
                 stationHits = all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() }
                 render()
+                Radar.stations(q)?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } }
                 return@launch
             }
             val words = Scanner.words(q)
             stationHits = all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() }
+            launch { Radar.stations(q)?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } } }
             val toScan = all.filter { !LiveIndex.isFresh(it) }
             scanTotal = toScan.size
             render()
@@ -621,6 +631,7 @@ class MainActivity : ComponentActivity() {
             is Page.GenrePage -> renderGenre(p.genre)
             Page.ChartsPage -> renderCharts()
             Page.RadioChartsPage -> renderRadioCharts()
+            is Page.PlaylistPage -> renderPlaylist(p)
             Page.GenresPage -> Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
             is Page.ShowPage -> renderShow(p.show)
             null -> when (tab) {
@@ -837,30 +848,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Schmaler Balken über dem Player: was gerade im Hintergrund läuft. */
+    /** Wächter oben als kleine Glocke (statt Balken über dem Player, der Inhalte verdeckt). */
     private fun updateStrip() {
-        val strip = findViewById<View>(R.id.strip)
-        val icon = findViewById<ImageView>(R.id.stripIcon)
-        val text = findViewById<TextView>(R.id.stripText)
-        val close = findViewById<View>(R.id.stripClose)
-        val wish = WatchService.activeQuery(this)
-        val mix = HitMix.activeName(this)
-        when {
-            wish != null && !kids() -> {
-                strip.visibility = View.VISIBLE
-                icon.setImageResource(R.drawable.ic_bell)
-                text.text = "Wächter: $wish · ${WatchService.status(this)}"
-                strip.setOnClickListener { watchSheet() }
-                close.setOnClickListener { WatchService.stop(this) }
-            }
-            mix != null -> {
-                strip.visibility = View.VISIBLE
-                icon.setImageResource(R.drawable.ic_bolt)
-                text.text = "Hit-Mix: $mix" + (HitMix.nowPlaying(this)?.let { " · $it" } ?: "")
-                strip.setOnClickListener { showFull(true) }
-                close.setOnClickListener { stopHitMix() }
-            }
-            else -> strip.visibility = View.GONE
-        }
+        findViewById<View>(R.id.strip).visibility = View.GONE
+        val btn = findViewById<TextView>(R.id.watchBtn)
+        val n = WatchService.queries(this).size
+        btn.visibility = if (n > 0 && !kids()) View.VISIBLE else View.GONE
+        btn.text = if (n > 1) "$n" else "Wächter"
+        btn.setOnClickListener { watchSheet() }
     }
 
     private var updateUrl: String? = null
@@ -934,7 +929,7 @@ class MainActivity : ComponentActivity() {
 
     /** Cover für laufende Lieder nachladen und dann neu anzeigen. */
     private fun loadCovers(list: List<Entry>) {
-        val todo = list.filter { it.kind == Kind.STATION && it.subtitle != "Internetradio" && !Covers.known(it.title) }
+        val todo = list.filter { it.kind == Kind.STATION && it.title != it.name && !Covers.known(it.title) }
         if (todo.isEmpty() || coverJob?.isActive == true) return
         coverJob = lifecycleScope.launch {
             var found = false
@@ -948,7 +943,7 @@ class MainActivity : ComponentActivity() {
      * Gleiche Songs werden zu einem Eintrag zusammengefasst ("SWR3 + 3 weitere").
      */
     private fun dedupe(list: List<Entry>): List<Entry> =
-        list.groupBy { if (it.kind == Kind.STATION && it.subtitle != "Internetradio") Scanner.normalize(it.title) else it.id }
+        list.groupBy { if (it.kind == Kind.STATION && it.title != it.name) Scanner.normalize(it.title) else it.id }
             .values.map { group ->
                 val first = group.first()
                 if (group.size == 1) first else first.copy(subtitle = "${first.subtitle} + ${group.size - 1} weitere")
@@ -985,7 +980,6 @@ class MainActivity : ComponentActivity() {
 
     private fun renderHome() {
         if (!Net.online(this)) rows.add(Row.Empty("⚠ Keine Internetverbindung – Radio und Suche gehen gerade nicht."))
-        rows.add(Row.Header(Moments.greeting()))
 
         // Schnellstart
         if (Settings.homeOn(this, "quick")) {
@@ -997,8 +991,6 @@ class MainActivity : ComponentActivity() {
                 Triple(R.drawable.ic_kids, "Kinder", { musicAudience = 1; loadKids(); selectTab(Tab.FIND) }),
             )))
         }
-
-        if (!kids()) rows.add(Row.More("✨ Wünsch dir was – sag, worauf du Lust hast") { wishDialog() })
 
         // Weiterhören: die zuletzt gehörten Lieder (mit Cover), dazu angefangene freie Musik und Hörspiele
         if (Settings.homeOn(this, "again")) {
@@ -1042,6 +1034,65 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val playlistCovers = HashMap<String, String>()
+    private val playlistSongs = HashMap<String, List<Entry>>()
+    private var playlistCoversLoading = false
+
+    /** Cover der fertigen Playlists (erstes Lied) im Hintergrund laden. */
+    private fun loadPlaylistCovers() {
+        if (playlistCoversLoading || playlistCovers.size >= Playlists.curated.size) return
+        playlistCoversLoading = true
+        lifecycleScope.launch {
+            Playlists.curated.forEach { (_, q) ->
+                val songs = Deezer.playlistByName(q)
+                if (songs.isNotEmpty()) { playlistSongs[q] = songs; playlistCovers[q] = songs.first().artwork }
+            }
+            playlistCoversLoading = false
+            render()
+        }
+    }
+
+    private fun renderPlaylist(p: Page.PlaylistPage) {
+        val songs = if (p.own) Playlists.get(this, p.name) else playlistSongs[p.query].orEmpty()
+        if (!p.own && songs.isEmpty()) {
+            rows.add(Row.Empty("Lade Playlist…"))
+            lifecycleScope.launch { p.query?.let { playlistSongs[it] = Deezer.playlistByName(it) }; render() }
+            return
+        }
+        if (songs.isNotEmpty()) {
+            rows.add(button(R.drawable.ic_bolt, "Als Radio-Mix abspielen") {
+                startHitMix(if (p.own) "my:${p.name}" else "pl:${p.query}", "– ${p.name}")
+            })
+            rows.add(Row.Empty("Hitradar spielt die Lieder, sobald sie irgendwo im Radio anfangen – komplett und kostenlos."))
+        } else rows.add(Row.Empty("Noch leer. Halte bei einem Lied den Finger drauf → „Zur Playlist hinzufügen“."))
+        if (p.own) rows.add(Row.More("Playlist löschen") {
+            android.app.AlertDialog.Builder(this).setTitle("„${p.name}“ löschen?")
+                .setPositiveButton("Löschen") { _, _ -> Playlists.delete(this, p.name); page = null; render(); updateBack() }
+                .setNegativeButton("Abbrechen", null).show()
+        })
+        rows.add(Row.Header("Lieder", "${songs.size} Lieder · Tippen: im Radio hören, Vorschau oder Wächter"))
+        songs.forEach { e -> rows.add(Row.Item(e, songs, liveText(e))) }
+    }
+
+    /** Lied zu einer eigenen Playlist hinzufügen (vorhandene wählen oder neue anlegen). */
+    private fun addToPlaylist(song: Entry) {
+        val names = Playlists.mine(this).keys.toList()
+        fun newList() {
+            val edit = EditText(this).apply { hint = "Name der Playlist"; setSingleLine() }
+            android.app.AlertDialog.Builder(this).setTitle("Neue Playlist").setView(edit)
+                .setPositiveButton("Anlegen") { _, _ ->
+                    val n = edit.text.toString().trim()
+                    if (n.isNotEmpty()) { Playlists.create(this, n); Playlists.add(this, n, song); Toast.makeText(this, "Zu „$n“ hinzugefügt", Toast.LENGTH_SHORT).show(); render() }
+                }.setNegativeButton("Abbrechen", null).show()
+        }
+        if (names.isEmpty()) { newList(); return }
+        sheet("Zur Playlist hinzufügen", song.title, song.artwork.ifBlank { null }, song.name, false, null,
+            names.map { n -> Option(R.drawable.ic_note, n, "${Playlists.get(this, n).size} Lieder") {
+                val ok = Playlists.add(this, n, song)
+                Toast.makeText(this, if (ok) "Zu „$n“ hinzugefügt" else "Ist schon in „$n“", Toast.LENGTH_SHORT).show()
+            } } + Option(R.drawable.ic_heart_outline, "Neue Playlist…", null) { newList() })
+    }
+
     private fun renderRadioCharts() {
         rows.add(Row.Header("Meistgespielt im Radio", "Die letzten 24 Stunden · alle Sender aus DE/AT/CH"))
         loadRadioCharts()
@@ -1066,7 +1117,12 @@ class MainActivity : ComponentActivity() {
         if (!kids()) rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
         if (musicAudience == 1) { renderKidsMusic(); return }
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
-        rows.add(Row.More("✨ Wünsch dir was – sag, worauf du Lust hast") { wishDialog() })
+        // Playlists mit bekannten Liedern (als Radio-Mix)
+        loadPlaylistCovers()
+        rows.add(Row.Header("Playlists", "Bekannte Lieder – komplett aus dem Radio"))
+        rows.add(Row.Carousel(Playlists.curated.map { (name, q) ->
+            Entry("pl:$q", Kind.SHOW, name, "Playlist", "", playlistCovers[q].orEmpty(), name)
+        }))
         val genres = Genres.all.filter { it.key != "kids" }
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix", "ALLE ${genres.size}") { openPage(Page.GenresPage) })
         genres.take(6).chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
@@ -1165,8 +1221,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (stationHits.isNotEmpty()) {
-            rows.add(Row.Header("Sender"))
-            rows.add(Row.Carousel(stationHits))
+            rows.add(Row.Header("Sender", "Tippen: Sender hören"))
+            limited("stations", stationHits, if (searchFilter == 0) 4 else 30) { rows.add(Row.Item(it, stationHits)) }
         }
         }
         if (showSongs) {
@@ -1227,11 +1283,7 @@ class MainActivity : ComponentActivity() {
     private fun renderStories() {
         if (!kids()) rows.add(audienceChips(storyAudience) { storyAudience = it; storySection = 0; render() })
         val cats = if (storyAudience == 1) Podcasts.kidsCategories else Podcasts.adultCategories
-        val quick = mutableListOf<Triple<Int, String, () -> Unit>>(
-            Triple(R.drawable.ic_star, "Bekannte Serien", { famousSheet(storyAudience == 1) })
-        )
-        if (storyAudience == 1) quick.add(0, Triple(R.drawable.ic_sun, "Einschlafen", { bedtimeSheet() }))
-        rows.add(Row.Quick(quick))
+        if (storyAudience == 1) rows.add(button(R.drawable.ic_sun, "Einschlafen mit Geschichten") { bedtimeSheet() })
         // Angefangene Folgen mit Restzeit
         if (!kids()) {
             val started = Recent.all(this)
@@ -1328,6 +1380,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderLib() {
+        val mine = Playlists.mine(this)
+        rows.add(Row.Header("Meine Playlists", if (mine.isEmpty()) "Lieder sammeln und als Radio-Mix hören" else null))
+        if (mine.isNotEmpty()) rows.add(Row.Carousel(mine.map { (n, list) ->
+            Entry("mp:$n", Kind.SHOW, n, "${list.size} Lieder", "", list.firstOrNull { it.artwork.isNotBlank() }?.artwork.orEmpty(), n)
+        }))
+        rows.add(button(R.drawable.ic_heart_outline, "Neue Playlist anlegen") {
+            val edit = EditText(this).apply { hint = "Name der Playlist"; setSingleLine() }
+            android.app.AlertDialog.Builder(this).setTitle("Neue Playlist").setView(edit)
+                .setPositiveButton("Anlegen") { _, _ -> edit.text.toString().trim().takeIf { it.isNotEmpty() }?.let { Playlists.create(this, it); render() } }
+                .setNegativeButton("Abbrechen", null).show()
+        })
         val favs = Favorites.all(this)
         val stations = favs.filter { it.kind == Kind.STATION }
         val tracks = favs.filter { it.kind == Kind.TRACK }
@@ -1343,10 +1406,17 @@ class MainActivity : ComponentActivity() {
         if (stations.isEmpty()) rows.add(Row.Empty("Tipp bei einem Sender auf ♥ oder halte ihn gedrückt.")) else rows.add(Row.Carousel(stations))
         rows.add(Row.Header("Lieblingslieder"))
         if (tracks.isEmpty()) rows.add(Row.Empty("Noch keine.")) else tracks.forEach { rows.add(Row.Item(it, tracks)) }
-        val recent = Recent.all(this)
+        // Zuletzt gehört: Sender mit dem Lied, das dort JETZT läuft (nicht dem von damals)
+        val recent = Recent.all(this).map { e ->
+            if (e.kind != Kind.STATION) e
+            else {
+                val now = LiveIndex.get(e.id.removePrefix("st:"))?.title?.takeIf { isMusic(it) }
+                e.copy(title = e.name, subtitle = now?.let { "▶ $it" } ?: "Internetradio")
+            }
+        }
         if (recent.isNotEmpty()) {
-            rows.add(Row.Header("Zuletzt gehört"))
-            recent.forEach { rows.add(Row.Item(it, recent.filter { r -> r.kind == Kind.TRACK })) }
+            rows.add(Row.Header("Zuletzt gehört", "Sender und Lieder, die du zuletzt gestartet hast"))
+            limited("recent", recent, 8) { rows.add(Row.Item(it, recent.filter { r -> r.kind == Kind.TRACK })) }
         }
         val heard = Heard.all(this).take(50)
         if (heard.isNotEmpty()) {
@@ -1458,6 +1528,10 @@ class MainActivity : ComponentActivity() {
         ))
 
         settingsGroup("Hilfe", listOf(
+            Row.Setting(R.drawable.ic_star, "Neuerungen", "Was ist neu in Hitradar?") {
+                val text = Changes.list.joinToString("\n\n") { (title, items) -> title + "\n" + items.joinToString("\n") { "•  $it" } }
+                android.app.AlertDialog.Builder(this).setTitle("✨ Neuerungen").setMessage(text).setPositiveButton("OK", null).show()
+            },
             Row.Setting(R.drawable.ic_radar, "So funktioniert's", "Kurze Einführung in 4 Schritten") { intro(0) },
         ))
 
@@ -1542,9 +1616,11 @@ class MainActivity : ComponentActivity() {
     // ================= Abspielen =================
 
     private fun onEntryTap(e: Entry, section: List<Entry>) {
+        if (e.id.startsWith("pl:")) { openPage(Page.PlaylistPage(e.title, e.id.removePrefix("pl:"), false)); return }
+        if (e.id.startsWith("mp:")) { openPage(Page.PlaylistPage(e.title, null, true)); return }
         if (e.kind == Kind.SHOW) { if ((page as? Page.ShowPage)?.show?.id != e.id) openPage(Page.ShowPage(e)); return }
         // Sender mit laufendem Lied: das Lied am besten Ort hören (ohne Werbung, frisch angefangen)
-        if (e.kind == Kind.STATION && e.subtitle != "Internetradio" && isMusic(e.title)) {
+        if (e.kind == Kind.STATION && e.title != e.name && isMusic(e.title)) {
             val artist = e.title.substringBefore(" - ").substringBefore(" – ").trim()
             val title = e.title.substringAfter(" - ").substringAfter(" – ").trim()
             tapSong(title, artist, e, null)
@@ -1743,7 +1819,7 @@ class MainActivity : ComponentActivity() {
 
     /** Menü beim langen Drücken auf einen Eintrag. */
     private fun itemMenu(e: Entry, section: List<Entry>) {
-        val liveSong = e.kind == Kind.STATION && e.subtitle != "Internetradio"
+        val liveSong = e.kind == Kind.STATION && e.title != e.name
         val song = when {
             liveSong -> e.title
             e.kind == Kind.TRACK && (e.preview || e.id.startsWith("hd:")) ->
@@ -1766,6 +1842,15 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this, "Wächter läuft", Toast.LENGTH_SHORT).show()
                         render()
                     }
+                },
+                if (song != null) Option(R.drawable.ic_note, "Zur Playlist hinzufügen", null) {
+                    val artist = if (liveSong) e.title.substringBefore(" - ").substringBefore(" – ").trim() else e.subtitle
+                    val title = if (liveSong) e.title.substringAfter(" - ").substringAfter(" – ").trim() else e.title
+                    addToPlaylist(Entry("dz:" + Scanner.normalize("$artist $title").hashCode(), Kind.TRACK, title, artist,
+                        if (e.preview) e.url else "", if (Covers.isCover(e.artwork) || e.preview) e.artwork else "", title, preview = true))
+                } else null,
+                (page as? Page.PlaylistPage)?.takeIf { it.own }?.let { pl ->
+                    Option(R.drawable.ic_close, "Aus „${pl.name}“ entfernen", null) { Playlists.remove(this, pl.name, e); render() }
                 },
                 if (song != null && !kids()) Option(R.drawable.ic_bolt, "✨ Mehr wie dieses", "Mix mit Liedern, die Sender oft dazu spielen") {
                     moreLike(if (liveSong) e.title else "${e.subtitle} - ${e.title}")
@@ -1964,6 +2049,7 @@ class MainActivity : ComponentActivity() {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
             ad != null -> adText(ad)
             c.playerError != null -> "Nicht erreichbar – tippe auf Play"
+            isStation && HitMix.activeName(this) != null -> "⚡ ${HitMix.activeName(this)} · ${entry?.name ?: ""}"
             isStation && live == null && indexTitle != null -> (entry?.name ?: "") + " · Titel laut Senderliste"
             isStation -> entry?.name ?: (m.artist?.toString() ?: "")
             entry?.preview == true -> "${m.artist ?: ""} · Vorschau"
@@ -2009,6 +2095,9 @@ class MainActivity : ComponentActivity() {
             findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk || canShare) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullShare).visibility = if (canShare) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullSimilar).visibility = if (canShare && !kids()) View.VISIBLE else View.GONE
+            val mixOn = HitMix.activeName(this) != null
+            findViewById<View>(R.id.fullStopMix).visibility = if (mixOn) View.VISIBLE else View.GONE
+            if (mixOn) findViewById<View>(R.id.fullStoryBar).visibility = View.VISIBLE
             findViewById<View>(R.id.fullAgain).visibility = if (againOk && !story) View.VISIBLE else View.GONE
             listOf(R.id.fullBack30, R.id.fullSpeed, R.id.fullFwd30).forEach {
                 findViewById<View>(it).visibility = if (story) View.VISIBLE else View.GONE

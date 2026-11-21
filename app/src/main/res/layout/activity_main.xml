@@ -56,6 +56,25 @@
                     android:textSize="28sp" />
 
                 <TextView
+                    android:id="@+id/watchBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_chip"
+                    android:drawableStart="@drawable/ic_bell"
+                    android:drawablePadding="4dp"
+                    android:drawableTint="@color/c_ff2ee6a8"
+                    android:gravity="center_vertical"
+                    android:paddingStart="8dp"
+                    android:paddingTop="4dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="4dp"
+                    android:textColor="@color/c_ff2ee6a8"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <TextView
                     android:id="@+id/liveChip"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -99,6 +118,17 @@
                     android:textColor="@color/c_ffffffff"
                     android:textColorHint="@color/c_80ffffff"
                     android:textSize="16sp" />
+
+                <ImageButton
+                    android:id="@+id/wishBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="center_vertical|end"
+                    android:layout_marginEnd="48dp"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Wünsch dir was"
+                    android:src="@drawable/ic_star"
+                    android:tint="@color/c_ff2ee6a8" />
 
                 <ImageButton
                     android:id="@+id/mic"
@@ -413,6 +443,21 @@
                     android:paddingEnd="14dp"
                     android:text="↻ Nochmal von vorn hören"
                     android:textColor="@color/c_ff2ee6a8"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/fullStopMix"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_search"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="⚡ Mix beenden"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:visibility="gone" />

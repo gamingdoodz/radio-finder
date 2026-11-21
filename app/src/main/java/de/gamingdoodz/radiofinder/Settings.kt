@@ -33,7 +33,7 @@ object Settings {
     /** Startseite: welche Bereiche angezeigt werden. */
     val homeSections = listOf("quick" to "Schnellstart", "again" to "Weiterhören",
         "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "charts" to "Deutsche Charts")
-    fun homeOn(context: Context, key: String) = prefs(context).getBoolean("home_$key", true)
+    fun homeOn(context: Context, key: String) = prefs(context).getBoolean("home_$key", key != "again")
     fun setHomeOn(context: Context, key: String, v: Boolean) = prefs(context).edit().putBoolean("home_$key", v).apply()
 
     /** Mit welchem Reiter die App startet: 0 Start, 1 Musik, 2 Hörspiele, 3 Bibliothek. */
