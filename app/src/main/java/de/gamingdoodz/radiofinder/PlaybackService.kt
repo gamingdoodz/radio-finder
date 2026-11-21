@@ -416,6 +416,8 @@ class PlaybackService : MediaLibraryService() {
             sameItemReplace = true
             p.replaceMediaItem(p.currentMediaItemIndex,
                 cur.buildUpon().setMediaMetadata(cur.mediaMetadata.buildUpon().setArtworkUri(target).build()).build())
+            // Falls kein Wechsel-Ereignis kam: Merker nicht stehen lassen (sonst würde ein echter Senderwechsel übersehen)
+            sleepHandler.postDelayed({ sameItemReplace = false }, 500)
         }
     }
 

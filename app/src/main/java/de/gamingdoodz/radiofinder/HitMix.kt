@@ -48,6 +48,8 @@ class HitMix(
     private var themeWords: Regex? = null
     /** Titel, der beim Umschalten lief – ändert er sich, ist das Lied vorbei. */
     private var switchedTitle: String? = null
+    /** Nur die eigene Senderliste verwenden (Lieblingssender-Mix oder ohne Server). */
+    private var onlyListed = true
 
     /** Startet den Hit-Mix und gibt den ersten Sender zurück (oder null, wenn gerade nichts passt). */
     suspend fun start(genreKey: String?): MediaItem? {
@@ -113,14 +115,24 @@ class HitMix(
         themeWords = if (genre?.key == "kids")
             Regex("(?i)kinderlied|zuckowski|sommerland|deine freunde|volker rosin|jöcker|lichterkinder|bibi blocksberg|bibi und tina|benjamin blümchen|schlümpfe|biene maja|pippi|kikaninchen|sternschnuppe|frederik vahle|paw patrol|sandmännchen|die maus|kinderdisco")
         else if (genre?.key == "xmas")
-            Regex("(?i)christmas|xmas|weihnacht|santa|jingle|snow|winter|noel|navidad|feliz|rudolph|sleigh|mistletoe|let it snow|silent night|stille nacht|o tannenbaum|advent|nikolaus|lebkuchen|schnee")
+            Regex("(?i)christmas|xmas|weihnacht|santa claus|jingle bell|noel|navidad|rudolph|sleigh|mistletoe|let it snow|snowman|winter wonderland|silent night|stille nacht|tannenbaum|advent|nikolaus|lebkuchen|schneeflöckchen|leise rieselt|kling glöckchen|feliz navidad|little drummer|frosty")
         else null
 
-        val base = try { StationRepository.load(context, big = false) } catch (_: Exception) { emptyList() }
-        val extra = genreStations + StationRepository.byTag("charts")
-        val wifi = Net.isUnmetered(context)
-        val big = if (wifi) (try { StationRepository.load(context, big = true) } catch (_: Exception) { emptyList() }) else emptyList()
-        stations = if (favMix) favStations else (extra + base + big).distinctBy { it.id }.take(if (wifi) 700 else 220)
+        // Mit Server: alle ~30.000 laufenden Sender kommen infrage (kein Laden langer Senderlisten nötig).
+        // Ohne Server: eine Auswahl, die die App selbst abfragen kann.
+        Radar.sync()
+        onlyListed = favMix || !Radar.ok
+        stations = when {
+            favMix -> favStations
+            Radar.ok -> genreStations
+            else -> {
+                val base = try { StationRepository.load(context, big = false) } catch (_: Exception) { emptyList() }
+                val extra = genreStations + StationRepository.byTag("charts")
+                val wifi = Net.isUnmetered(context)
+                val big = if (wifi) (try { StationRepository.load(context, big = true) } catch (_: Exception) { emptyList() }) else emptyList()
+                (extra + base + big).distinctBy { it.id }.take(if (wifi) 700 else 220)
+            }
+        }
 
         poll(force = true)
         val first = withContext(Dispatchers.Default) { pickNext() }
@@ -247,10 +259,10 @@ class HitMix(
      */
     private fun pickNext(allowRepeats: Boolean = false, anyMusic: Boolean = false): MediaItem? {
         val t = System.currentTimeMillis()
-        val ids = stations.map { it.id }.toHashSet()
+        val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
         val pool = LiveIndex.fresh().filter {
-            it.station.id in ids && it.station.id != currentStationId && it.normalized != currentTitle && LiveIndex.isMusic(it.title)
+            (ids == null || it.station.id in ids) && it.station.id != currentStationId && it.normalized != currentTitle && LiveIndex.isMusic(it.title)
         }
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
 
