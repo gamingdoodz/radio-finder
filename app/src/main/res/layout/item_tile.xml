@@ -29,7 +29,7 @@
         android:paddingStart="14dp"
         android:paddingEnd="10dp"
         android:paddingBottom="16dp"
-        android:textColor="#FFFFFFFF"
+        android:textColor="@color/c_ffffffff"
         android:textSize="15sp" />
 
     <View
