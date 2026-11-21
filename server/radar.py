@@ -197,7 +197,7 @@ by_id = lambda: {s["id"]: s for s in stations}
 
 def item(st, n):
     return {"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"],
-            "title": n["title"], "since": int(n["since"])}
+            "title": n["title"], "since": int(n["since"]), "seen": int(n["time"])}
 
 
 def gz(resp):

@@ -35,7 +35,7 @@ object Radar {
         }
     }
 
-    private fun parse(text: String): List<Pair<Station, Pair<String, Long>>> {
+    private fun parse(text: String): List<Pair<Station, Triple<String, Long, Long>>> {
         val arr = JSONArray(text)
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
@@ -43,7 +43,7 @@ object Radar {
             val url = o.optString("url").ifBlank { return@mapNotNull null }
             val title = o.optString("title").ifBlank { return@mapNotNull null }
             Station(id, o.optString("name", "Radio"), url, o.optString("favicon"), false) to
-                (title to o.optLong("since") * 1000L)
+                Triple(title, o.optLong("since") * 1000L, o.optLong("seen") * 1000L)
         }
     }
 
@@ -59,7 +59,7 @@ object Radar {
             val text = Net.get("$BASE/now?limit=6000", 4000, 15_000, 8_000_000)
             val list = text?.let { runCatching { parse(it) }.getOrNull() }
             if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
-            list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second) }
+            list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
             lastOk = System.currentTimeMillis()
             true
         } finally {
@@ -75,7 +75,7 @@ object Radar {
         val list = runCatching { parse(text) }.getOrNull() ?: return@withContext null
         lastOk = System.currentTimeMillis()
         list.map { (s, n) ->
-            LiveIndex.putRemote(s, n.first, n.second)
+            LiveIndex.putRemote(s, n.first, n.second, n.third)
             Scanner.Hit(s, n.first)
         }
     }

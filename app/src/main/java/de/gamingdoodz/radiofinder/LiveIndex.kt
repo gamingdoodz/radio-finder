@@ -40,9 +40,12 @@ object LiveIndex {
     }
 
     /** Vom Server: since = seit wann der Titel dort läuft. */
-    fun putRemote(s: Station, title: String, sinceMs: Long) {
-        val t = System.currentTimeMillis()
+    fun putRemote(s: Station, title: String, sinceMs: Long, seenMs: Long = 0L) {
+        val now = System.currentTimeMillis()
+        // Zeitpunkt, an dem der Server den Titel zuletzt gesehen hat (nicht wann wir ihn geholt haben)
+        val t = if (seenMs in 1..now) seenMs else now
         val old = map[s.id]
+        if (old != null && old.time > t) return
         val since = if (old != null && old.title == title && t - old.time < MAX_AGE) minOf(old.since, sinceMs)
         else if (sinceMs in 1..t) sinceMs else t
         map[s.id] = Now(old?.station ?: s, title, t, since)
@@ -70,9 +73,13 @@ object LiveIndex {
     }
 
     /** Läuft dieser Song (Titel + Künstler) gerade irgendwo? */
-    fun findSong(title: String, artist: String): Now? {
+    fun findSong(title: String, artist: String): Now? = findSongs(title, artist).firstOrNull()
+
+    /** Alle Sender mit diesem Song, zuletzt angefangene zuerst. Länger als 5 Minuten = wohl schon vorbei. */
+    fun findSongs(title: String, artist: String): List<Now> {
         val song = Song(Entry("", Kind.TRACK, title, artist, "", "", title))
-        return fresh().firstOrNull { song.matches(it.normalized) }
+        val t = System.currentTimeMillis()
+        return fresh().filter { song.matches(it.normalized) && t - it.since < 5 * 60_000L }.sortedByDescending { it.since }
     }
 
     /** Aktualisiert die Liste für die angegebenen Sender (nur einmal gleichzeitig). */

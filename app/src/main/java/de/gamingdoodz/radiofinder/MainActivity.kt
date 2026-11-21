@@ -1280,13 +1280,27 @@ class MainActivity : ComponentActivity() {
     private fun onEntryTap(e: Entry, section: List<Entry>) {
         if (e.kind == Kind.SHOW) { if ((page as? Page.ShowPage)?.show?.id != e.id) openPage(Page.ShowPage(e)); return }
         if (!e.preview) { play(e, section); return }
-        val live = LiveIndex.findSong(e.title, e.subtitle)
-        if (live != null) {
-            Toast.makeText(this, "Läuft gerade auf ${live.station.name} – los geht's!", Toast.LENGTH_SHORT).show()
-            play(live.station.toEntry(live.title), emptyList())
-            return
+        val candidates = LiveIndex.findSongs(e.title, e.subtitle).distinctBy { it.station.id }.take(5)
+        if (candidates.isEmpty()) { songDialog(e); return }
+        // Kurz direkt beim Sender nachsehen, ob das Lied wirklich noch läuft
+        Toast.makeText(this, "Prüfe, ob das Lied noch läuft…", Toast.LENGTH_SHORT).show()
+        val song = LiveIndex.Song(e)
+        lifecycleScope.launch {
+            val t0 = System.currentTimeMillis()
+            Scanner.titles(candidates.map { it.station }) { _, _ -> }
+            val checked = candidates.filter { c -> (LiveIndex.get(c.station.id)?.time ?: 0L) >= t0 }
+            // Bestätigt läuft es noch – oder der Sender verrät nichts, dann trotzdem versuchen
+            val ok = checked.firstOrNull { c -> LiveIndex.get(c.station.id)?.let { song.matches(it.normalized) } == true }
+                ?: candidates.firstOrNull { c -> checked.none { it.station.id == c.station.id } }
+            if (ok != null) {
+                val now = LiveIndex.get(ok.station.id) ?: ok
+                Toast.makeText(this@MainActivity, "Läuft gerade auf ${ok.station.name} – los geht's!", Toast.LENGTH_SHORT).show()
+                play(ok.station.toEntry(now.title), emptyList())
+            } else {
+                render()
+                songDialog(e, "Das Lied ist gerade zu Ende gegangen.")
+            }
         }
-        songDialog(e)
     }
 
     private class Option(val icon: Int, val label: String, val sub: String?, val action: () -> Unit)
@@ -1326,12 +1340,12 @@ class MainActivity : ComponentActivity() {
         d.show()
     }
 
-    private fun songDialog(e: Entry) {
+    private fun songDialog(e: Entry, hint: String = "Läuft gerade auf keinem bekannten Sender.") {
         val clean = e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim()
         val firstArtist = e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
         sheet(
             clean, e.subtitle, e.artwork, e.name, false,
-            "Läuft gerade auf keinem bekannten Sender.",
+            hint,
             listOfNotNull(
                 Option(R.drawable.ic_bell, "Wächter starten", "Spielt das Lied komplett ab, sobald es im Radio kommt") {
                     WatchService.start(this, "$clean $firstArtist")
