@@ -38,7 +38,7 @@ object LiveIndex {
         val old = map[s.id]
         val since = if (old != null && old.title == title && t - old.time < MAX_AGE) old.since else t
         map[s.id] = Now(s, title, t, since)
-        freshCache = null
+        gen++
     }
 
     /** Vom Server: since = seit wann der Titel dort läuft. */
@@ -66,32 +66,51 @@ object LiveIndex {
 
     /** Wie viele Sender spielen dieses Lied gerade? Bekannte Hits laufen auf vielen gleichzeitig. */
     /** Nach einem Server-Abgleich: Zwischenspeicher leeren. */
-    fun invalidate() { freshCache = null; popCache = null }
+    /** Zählt jede Änderung. Zwischenspeicher gelten, bis sich etwas ändert (höchstens 30 s). */
+    @Volatile private var gen = 0L
 
-    @Volatile private var popCache: Pair<Long, Map<String, Int>>? = null
-    fun popularity(): Map<String, Int> {
-        val t = System.currentTimeMillis()
-        popCache?.let { (at, m) -> if (t - at < 5_000) return m }
-        return fresh().groupingBy { it.normalized }.eachCount().also { popCache = t to it }
+    /** Nach einem Server-Abgleich: Zwischenspeicher neu berechnen lassen. */
+    fun invalidate() { gen++ }
+
+    /** Alles vorberechnen (im Hintergrund aufrufen, damit die Anzeige nicht ruckelt). */
+    fun warm() { fresh(); popularity(); index(); topMusic() }
+
+    private class Cache<T>(val gen: Long, val at: Long, val value: T)
+    @Volatile private var freshCache: Cache<List<Now>>? = null
+    @Volatile private var popCache: Cache<Map<String, Int>>? = null
+    @Volatile private var topCache: Cache<List<Now>>? = null
+
+    private fun <T> valid(c: Cache<T>?): T? {
+        if (c == null) return null
+        return if (c.gen == gen && System.currentTimeMillis() - c.at < 30_000) c.value else null
     }
 
-    @Volatile private var freshCache: Pair<Long, List<Now>>? = null
-
-    /** Alles, was gerade läuft. Wird 2 Sekunden zwischengespeichert (beim Anzeigen sehr oft gebraucht). */
+    /** Alles, was gerade läuft. */
     fun fresh(): List<Now> {
+        valid(freshCache)?.let { return it }
+        val g = gen
         val t = System.currentTimeMillis()
-        freshCache?.let { (at, l) -> if (t - at < 2_000) return l }
-        return map.values.filter { t - it.time < MAX_AGE }.also { freshCache = t to it }
+        return map.values.filter { t - it.time < MAX_AGE }.also { freshCache = Cache(g, t, it) }
     }
 
-    fun find(query: String): List<Now> {
-        val words = Scanner.words(query)
-        if (words.isEmpty()) return emptyList()
-        return fresh().filter { n -> words.all { n.normalized.contains(it) } }
+    /** Wie viele Sender spielen dieses Lied gerade? Bekannte Hits laufen auf vielen gleichzeitig. */
+    fun popularity(): Map<String, Int> {
+        valid(popCache)?.let { return it }
+        val g = gen
+        return fresh().groupingBy { it.normalized }.eachCount().also { popCache = Cache(g, System.currentTimeMillis(), it) }
     }
 
-    /** Läuft dieser Song (Titel + Künstler) gerade irgendwo? */
-    fun findSong(title: String, artist: String): Now? = findSongs(title, artist).firstOrNull()
+    /** Laufende Lieder: bekannte zuerst, dann frisch angefangene (je Lied nur einmal). */
+    fun topMusic(): List<Now> {
+        valid(topCache)?.let { return it }
+        val g = gen
+        val pop = popularity()
+        return fresh().filter { isMusic(it.title) }
+            .sortedWith(compareByDescending<Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+            .distinctBy { it.normalized }
+            .take(300)
+            .also { topCache = Cache(g, System.currentTimeMillis(), it) }
+    }
 
     /** Wort -> laufende Titel mit diesem Wort. Damit muss nicht jedes Mal über alle 8.000 Einträge gesucht werden. */
     @Volatile private var wordIndex: Pair<List<Now>, Map<String, List<Now>>>? = null

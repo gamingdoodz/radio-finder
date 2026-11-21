@@ -37,6 +37,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
@@ -652,10 +653,7 @@ class PlaybackService : MediaLibraryService() {
                         val stations = StationRepository.load(applicationContext, big = false).take(80)
                         withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
                     }
-                    val pop = LiveIndex.popularity()
-                    val list = LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) }
-                        .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
-                        .distinctBy { it.normalized }.take(60)
+                    val list = withContext(Dispatchers.Default) { LiveIndex.topMusic().take(60) }
                     withCovers(list.map { it.station.toEntry(it.title) })
                 }
                 RADIOCHARTS_ID -> {
@@ -819,17 +817,13 @@ class PlaybackService : MediaLibraryService() {
             }
             if (resolved.size == 1 && resolved[0].mediaId.startsWith("st:")) {
                 val chosen = resolved[0]
-                val others = LiveIndex.fresh()
-                    .filter { "st:" + it.station.id != chosen.mediaId && LiveIndex.isMusic(it.title) }
-                    // Weiter/Zurück: keine Sender, bei denen beim Umschalten Werbung kommt
-                    .filter { !Ads.likely(this@PlaybackService, it.station.id, it.station.url) }
-                    .let { list ->
-                        val pop = LiveIndex.popularity()
-                        // Bekannte Lieder (laufen auf vielen Sendern) zuerst, dann frisch angefangene
-                        list.sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
-                    }
-                    .distinctBy { it.normalized }
-                    .take(30)
+                // Bekannte Lieder zuerst (vorberechnet), keine Sender mit Werbung beim Umschalten
+                val others = withContext(Dispatchers.Default) {
+                    LiveIndex.topMusic()
+                        .filter { "st:" + it.station.id != chosen.mediaId }
+                        .filter { !Ads.likely(this@PlaybackService, it.station.id, it.station.url) }
+                        .take(30)
+                }
                     .map { liveTitle(it.station.toEntry(it.title).toMediaItem()) ?: it.station.toEntry(it.title).toMediaItem() }
                 if (others.isNotEmpty()) {
                     val before = others.drop(others.size / 2).reversed()

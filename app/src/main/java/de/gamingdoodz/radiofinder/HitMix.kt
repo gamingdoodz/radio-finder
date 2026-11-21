@@ -8,6 +8,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Hit-Mix: spielt nur aktuelle Hits aus dem Radio.
@@ -107,7 +110,7 @@ class HitMix(
         stations = if (favMix) favStations else (extra + base + big).distinctBy { it.id }.take(if (wifi) 700 else 220)
 
         poll(force = true)
-        val first = pickNext()
+        val first = withContext(Dispatchers.Default) { pickNext() }
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
         job = scope.launch { loop() }
         return first?.let { prepareItem(it) }
@@ -144,10 +147,14 @@ class HitMix(
 
     /** Sofort zum nächsten Hit springen. Gibt false zurück, wenn wirklich nichts Passendes läuft. */
     suspend fun next(): Boolean {
-        // Beim Drücken auf "Weiter" die wichtigsten Sender sofort frisch abfragen
-        val priority = (stations.filter { it.id in genreIds } + stations).distinctBy { it.id }.take(80)
-        LiveIndex.refresh(priority, maxAgeMs = 10_000L)
-        val item = pickNext() ?: pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true)
+        // Weiter: Server-Stand kurz auffrischen (nur Änderungen, geht schnell). Ohne Server selbst nachsehen.
+        if (!Radar.sync(force = true)) {
+            val priority = (stations.filter { it.id in genreIds } + stations).distinctBy { it.id }.take(40)
+            withTimeoutOrNull(4_000) { LiveIndex.refresh(priority, maxAgeMs = 10_000L) }
+        }
+        val item = withContext(Dispatchers.Default) {
+            pickNext() ?: pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true)
+        }
         if (item == null) {
             waitingForNext = true
             prefs(context).edit().putString("now", "Gerade läuft kein anderer Hit – ich springe, sobald einer anfängt").apply()
@@ -172,7 +179,9 @@ class HitMix(
             val broken = p.playbackState == Player.STATE_IDLE || p.playerError != null
             // Hit vorbei (anderes Lied, Werbung, Moderation) oder Sender kaputt -> weiter
             if (waitingForNext || !stillHit || broken || System.currentTimeMillis() - songStartedAt > 7 * 60_000L) {
-                val next = pickNext() ?: if (broken || waitingForNext) pickNext(allowRepeats = true) else null
+                val next = withContext(Dispatchers.Default) {
+                    pickNext() ?: if (broken || waitingForNext) pickNext(allowRepeats = true) else null
+                }
                 if (next != null) {
                     waitingForNext = false
                     switchTo(next)

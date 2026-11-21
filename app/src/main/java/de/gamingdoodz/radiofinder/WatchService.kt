@@ -169,9 +169,11 @@ class WatchService : Service() {
             // Das ist für den Server fast kostenlos, auch wenn tausende Wächter laufen.
             val serverOk = Radar.sync(force = true)
             if (serverOk) {
-                val live = LiveIndex.fresh()
-                found = matchers.firstNotNullOfOrNull { (q, w) ->
-                    live.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
+                found = kotlinx.coroutines.withContext(Dispatchers.Default) {
+                    val live = LiveIndex.fresh()
+                    matchers.firstNotNullOfOrNull { (q, w) ->
+                        live.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
+                    }
                 }
             }
             val stations = if (found != null || serverOk) emptyList()

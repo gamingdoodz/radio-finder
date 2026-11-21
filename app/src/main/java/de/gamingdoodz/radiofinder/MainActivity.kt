@@ -907,8 +907,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun liveEntries(stations: List<Station>): List<Entry> {
-        val now = LiveIndex.fresh().associateBy { it.station.id }
-        return dedupe(stations.mapNotNull { s -> now[s.id]?.takeIf { isMusic(it.title) }?.let { s.toEntry(it.title) } })
+        return dedupe(stations.mapNotNull { s -> LiveIndex.get(s.id)?.takeIf { isMusic(it.title) }?.let { s.toEntry(it.title) } })
     }
 
     private fun isMusic(title: String) = LiveIndex.isMusic(title)
@@ -1011,10 +1010,7 @@ class MainActivity : ComponentActivity() {
         if (Settings.homeOn(this, "live")) {
             val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
                 .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
-            val pop = LiveIndex.popularity()
-            val liveOthers = LiveIndex.fresh().filter { isMusic(it.title) }
-                .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
-                .take(60).map { it.station.toEntry(it.title) }
+            val liveOthers = LiveIndex.topMusic().take(60).map { it.station.toEntry(it.title) }
             val live = dedupe(chartsLive + liveEntries(popular.take(80)) + liveOthers).take(25)
             loadCovers(live)
             rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
