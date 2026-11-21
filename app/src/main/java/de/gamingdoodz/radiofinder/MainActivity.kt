@@ -874,6 +874,19 @@ class MainActivity : ComponentActivity() {
 
     private fun isMusic(title: String) = LiveIndex.isMusic(title)
 
+    private var coverJob: Job? = null
+
+    /** Cover für laufende Lieder nachladen und dann neu anzeigen. */
+    private fun loadCovers(list: List<Entry>) {
+        val todo = list.filter { it.kind == Kind.STATION && it.subtitle != "Internetradio" && !Covers.known(it.title) }
+        if (todo.isEmpty() || coverJob?.isActive == true) return
+        coverJob = lifecycleScope.launch {
+            var found = false
+            todo.take(25).forEach { if (Covers.load(it.title) != null) found = true }
+            if (found) render()
+        }
+    }
+
     /**
      * Viele Sender gehören zum selben Netzwerk und spielen dasselbe.
      * Gleiche Songs werden zu einem Eintrag zusammengefasst ("SWR3 + 3 weitere").
@@ -902,10 +915,17 @@ class MainActivity : ComponentActivity() {
         rows.add(Row.Moments(moments))
 
         // 2. Weiterhören (Favoriten zuerst)
-        val again = (Favorites.all(this) + Recent.all(this)).distinctBy { it.id }.take(15)
+        // Bei Sendern zeigen, welches Lied dort gerade läuft (mit Cover)
+        val again = (Favorites.all(this) + Recent.all(this)).distinctBy { it.id }.take(15).map { e ->
+            if (e.kind != Kind.STATION) e
+            else LiveIndex.get(e.id.removePrefix("st:"))?.takeIf { isMusic(it.title) }?.let {
+                Station(e.id.removePrefix("st:"), e.name, e.url, e.artwork, false).toEntry(it.title)
+            } ?: e
+        }
         if (again.isNotEmpty()) {
+            loadCovers(again)
             rows.add(Row.Header("Weiterhören"))
-            rows.add(Row.Carousel(again))
+            rows.add(Row.Carousel(again.map { Covers.dress(it) }))
         }
 
         // 3. Jetzt im Radio: erst Chart-Hits, dann andere Musik – eine Liste statt zwei
@@ -917,8 +937,9 @@ class MainActivity : ComponentActivity() {
             .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
             .take(60).map { it.station.toEntry(it.title) }
         val live = dedupe(chartsLive + liveEntries(popular.take(80)) + others).take(25)
+        loadCovers(live)
         rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
-        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live, live = true))
+        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
 
         // 4. Charts kurz, Rest auf eigener Seite
         rows.add(Row.Header("Deutsche Charts", null, "ALLE") { openPage(Page.ChartsPage) })
@@ -1005,7 +1026,8 @@ class MainActivity : ComponentActivity() {
             }))
         } else {
             val list = dedupe(radioHits.toList())
-            limited("radio", list, n) { rows.add(Row.Item(it, list, "● LIVE")) }
+            loadCovers(list)
+            limited("radio", list, n) { rows.add(Row.Item(Covers.dress(it), list, "● LIVE")) }
         }
         if (WatchService.activeQuery(this) == null) {
             rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
