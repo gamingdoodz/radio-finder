@@ -626,17 +626,18 @@ class MainActivity : ComponentActivity() {
         }
         if (list.size == 1) { go(list[0]); return }
         sheet("Öffnen in …", query, null, "", false,
-            if (Services.mine(this).isEmpty()) "Tipp: Unter Mehr → Meine Musik-Dienste wählst du deine Apps aus." else null,
+            null,
             list.map { sv -> Option(R.drawable.ic_note, sv.name, null) { go(sv) } })
     }
 
     private fun servicesSheet() {
         val mine = Services.mine(this)
-        sheet("Meine Musik-Dienste", "Welche Apps hast du?", null, "", false,
-            "Antippen zum An- und Abwählen. Die App zeigt dir dann nur diese an.",
-            Services.all.map { sv ->
+        sheet("Meine Musik-Apps", "Zum Öffnen von Liedern und Hörspielen", null, "", false,
+            "Ohne Auswahl zeigt Hitradar automatisch die Apps, die auf deinem Handy installiert sind. Antippen, um selbst auszuwählen.",
+            Services.all.sortedByDescending { Services.installed(this, it) }.map { sv ->
+                val inst = Services.installed(this, sv)
                 Option(if (sv.key in mine) R.drawable.ic_heart else R.drawable.ic_heart_outline, sv.name,
-                    if (sv.key in mine) "Ausgewählt" else null) {
+                    listOfNotNull(if (sv.key in mine) "Ausgewählt" else null, if (inst) "installiert" else null).joinToString(" · ").ifEmpty { null }) {
                     Services.toggle(this, sv.key); servicesSheet(); render()
                 }
             })
@@ -1299,7 +1300,11 @@ class MainActivity : ComponentActivity() {
             Row.Setting(R.drawable.ic_radio, "Lautstärke angleichen", "Alle Sender gleich laut",
                 toggle = norm, chevron = false) { Settings.setNormalize(this, !norm); render() },
             Row.Setting(R.drawable.ic_note, "Meine Musik-Apps", "Zum Öffnen von Liedern",
-                value = when (mine.size) { 0 -> "Wählen"; 1 -> mine[0].name; else -> "${mine.size} Apps" }) { servicesSheet() },
+                value = when (mine.size) {
+                    0 -> Services.all.count { Services.installed(this, it) }.let { if (it == 0) "Wählen" else "Auto ($it)" }
+                    1 -> mine[0].name
+                    else -> "${mine.size} Apps"
+                }) { servicesSheet() },
         ))
 
         val alarmOn = Settings.alarmOn(this)

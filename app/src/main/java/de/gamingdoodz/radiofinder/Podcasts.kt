@@ -18,6 +18,7 @@ object Podcasts {
     data class Category(val key: String, val name: String, val term: String, val kids: Boolean)
 
     val kidsCategories = listOf(
+        Category("kidsbest", "Beliebte Kinder-Hörspiele", "Ohrenbär|Kakadu|Figarino|Die Maus Hörspiel|Kinderhörspiel ARD|Gute Nacht Geschichten|Sandmännchen", true),
         Category("gutenacht", "Gute-Nacht-Geschichten", "Gute Nacht Geschichten Kinder", true),
         Category("maerchen", "Märchen", "Märchen für Kinder", true),
         Category("kinderhoerspiel", "Hörspiele für Kinder", "Kinderhörspiel", true),
@@ -26,6 +27,7 @@ object Podcasts {
     )
 
     val adultCategories = listOf(
+        Category("best", "Beliebte Hörspiele", "ARD Hörspiel|Radio Tatort|ARD Krimi Hörspiel|Hörspiel Deutschlandfunk|SWR2 Hörspiel|WDR Hörspiel Speicher|Sherlock Holmes Hörspiel", false),
         Category("krimi", "Krimi & Hörspiel", "Krimi Hörspiel", false),
         Category("klassiker", "Klassiker (frei)", "librivox:", false),
         Category("hoerbuch", "Hörbuch-Podcasts", "Hörbuch", false),
@@ -42,8 +44,12 @@ object Podcasts {
     /** Shows zu einer Kategorie (bei Kindern ohne als "explicit" markierte). */
     suspend fun shows(cat: Category): List<Entry> {
         synchronized(showCache) { showCache[cat.key]?.let { return it } }
-        val list = if (cat.term.startsWith("librivox:")) Archive.librivox(cat.term.removePrefix("librivox:"))
-        else search(cat.term, cat.kids)
+        val list = when {
+            cat.term.startsWith("librivox:") -> Archive.librivox(cat.term.removePrefix("librivox:"))
+            // Mehrere Suchbegriffe: je die bekanntesten Treffer zusammenführen
+            cat.term.contains('|') -> cat.term.split('|').flatMap { search(it.trim(), cat.kids, limit = 4) }.distinctBy { it.id }
+            else -> search(cat.term, cat.kids)
+        }
         if (list.isNotEmpty()) synchronized(showCache) { showCache[cat.key] = list }
         return list
     }

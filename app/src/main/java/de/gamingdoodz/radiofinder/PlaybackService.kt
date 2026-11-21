@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.guava.future
@@ -269,6 +270,7 @@ class PlaybackService : MediaLibraryService() {
                 if (t.contains(" - ") || t.contains(" – ")) {
                     Heard.add(this@PlaybackService, t, item.mediaMetadata.artist?.toString().orEmpty())
                 }
+                updateArtwork(item, t)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -279,6 +281,11 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (sameItemReplace && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                    sameItemReplace = false
+                    return
+                }
+                sameItemReplace = false
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
                 // Tempo gilt nur für Hörspiele und Hörbücher
                 if (!isStory(mediaItem?.mediaId)) session?.player?.setPlaybackSpeed(1f)
@@ -363,6 +370,27 @@ class PlaybackService : MediaLibraryService() {
             .setSessionCommand(nextCommand)
             .build()
 
+    private val stationLogos = HashMap<String, android.net.Uri?>()
+
+    /** Lied läuft: dessen Cover zeigen. Werbung/Moderation: wieder das Senderlogo. */
+    private fun updateArtwork(item: MediaItem, title: String) {
+        val id = item.mediaId
+        if (!stationLogos.containsKey(id)) stationLogos[id] = item.mediaMetadata.artworkUri
+        scope.launch {
+            val cover = if (LiveIndex.isMusic(title)) Covers.load(title)?.artwork?.let { android.net.Uri.parse(it) } else null
+            val target = cover ?: stationLogos[id]
+            val p = session?.player ?: return@launch
+            val cur = p.currentMediaItem ?: return@launch
+            if (cur.mediaId != id || cur.mediaMetadata.artworkUri == target) return@launch
+            sameItemReplace = true
+            p.replaceMediaItem(p.currentMediaItemIndex,
+                cur.buildUpon().setMediaMetadata(cur.mediaMetadata.buildUpon().setArtworkUri(target).build()).build())
+        }
+    }
+
+    /** Beim Bild-Tausch nicht so tun, als wäre ein neuer Sender gestartet. */
+    private var sameItemReplace = false
+
     private fun isStory(id: String?) = id != null && (id.startsWith("pc:") || id.startsWith("ia:") || id.startsWith("lv:"))
 
     private fun seekButton(back: Boolean): CommandButton =
@@ -401,6 +429,16 @@ class PlaybackService : MediaLibraryService() {
 
     /** "Spiel X": erst Sendername, dann Radio wo es gerade läuft, dann freie Musik. */
     private suspend fun findForVoice(query: String): MediaItem? {
+        val q = query.lowercase()
+        val theme = when {
+            Regex("weihnacht|christmas|xmas").containsMatchIn(q) -> "xmas"
+            Regex("kinderlieder|kindermusik|kinder musik").containsMatchIn(q) -> "kids"
+            Regex("^(hits|charts|aktuelle hits|hit mix|hitmix|nur hits)$").containsMatchIn(q.trim()) -> "charts"
+            else -> Genres.all.firstOrNull { g -> g.key != "charts" && q.trim() == g.name.lowercase() }?.key
+        }
+        if (theme != null) {
+            hitMix.start(if (theme == "charts") null else theme)?.let { updateFavButton(); return it }
+        }
         val stations = StationRepository.load(applicationContext)
         val words = Scanner.words(query)
         stations.firstOrNull { Scanner.matches(it.name, words) }?.let { return it.toEntry().toMediaItem() }
@@ -430,6 +468,18 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private suspend fun resolve(item: MediaItem): MediaItem? = liveTitle(resolveRaw(item))
+
+    /** Für Android Auto: Cover der laufenden Lieder holen (höchstens 4 Sekunden warten). */
+    private suspend fun withCovers(list: List<Entry>): List<MediaItem> {
+        withTimeoutOrNull(4_000) {
+            coroutineScope { list.take(30).map { e -> async { Covers.load(e.title) } }.awaitAll() }
+        }
+        return list.map { e ->
+            val d = Covers.dress(e)
+            // Abspielen als Sender, angezeigt mit Lied-Cover
+            e.copy(title = d.title, artwork = d.artwork).toMediaItem()
+        }
+    }
 
     private suspend fun resolveRaw(item: MediaItem): MediaItem? {
         val query = item.requestMetadata.searchQuery
@@ -573,10 +623,10 @@ class PlaybackService : MediaLibraryService() {
                         withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
                     }
                     val pop = LiveIndex.popularity()
-                    LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) }
+                    val list = LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) }
                         .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
                         .distinctBy { it.normalized }.take(60)
-                        .map { it.station.toEntry(it.title).toMediaItem() }
+                    withCovers(list.map { it.station.toEntry(it.title) })
                 }
                 CHARTS_LIVE_ID -> {
                     val charts = Deezer.topGermany()
@@ -584,9 +634,9 @@ class PlaybackService : MediaLibraryService() {
                         val stations = StationRepository.load(applicationContext, big = false).take(150)
                         withTimeoutOrNull(20_000) { LiveIndex.refresh(stations) }
                     }
-                    charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
+                    withCovers(charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
                         .distinctBy { it.station.id }
-                        .map { it.station.toEntry(it.title).toMediaItem() }
+                        .map { it.station.toEntry(it.title) })
                 }
                 HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
                 KIDS_ID -> listOf(hitMixItem("kids", "⚡ Kinder-Hit-Mix")) + kidsEntries().map { it.toMediaItem() }

@@ -24,9 +24,14 @@ object Deezer {
 
     /** Bekannte Kinderlieder (über gezielte Suchen, damit keine Erwachsenen-Hits drin sind). */
     suspend fun kidsHits(): List<Entry> = cached("kids") {
-        listOf("kinderlieder", "Rolf Zuckowski", "Simone Sommerland", "Bibi Blocksberg", "Volker Rosin")
-            .flatMap { load("search?q=${URLEncoder.encode(it, "UTF-8")}&limit=8") }
+        listOf(
+            "Rolf Zuckowski", "Simone Sommerland", "Deine Freunde", "Volker Rosin", "Detlev Jöcker",
+            "Bibi Blocksberg", "Bibi und Tina", "Benjamin Blümchen", "Lichterkinder", "Kinderlieder Superstar",
+            "Die Schlümpfe", "Frederik Vahle", "Sternschnuppe Kinderlieder", "Kikaninchen", "Paw Patrol Lied",
+            "Die Eiskönigin Lied", "Pippi Langstrumpf Lied", "Biene Maja Lied", "Kinderlieder Klassiker"
+        ).flatMap { load("search?q=${URLEncoder.encode(it, "UTF-8")}&limit=6") }
             .distinctBy { it.id }
+            .sortedByDescending { rank[it.id] ?: 0 }
     }
 
     data class Artist(val id: Long, val name: String, val picture: String)
@@ -71,6 +76,9 @@ object Deezer {
         return list
     }
 
+    /** Beliebtheit laut Deezer (höher = bekannter). */
+    val rank = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     private suspend fun load(path: String): List<Entry> = withContext(Dispatchers.IO) {
         val text = Net.get("https://api.deezer.com/$path") ?: return@withContext emptyList()
         try {
@@ -81,6 +89,7 @@ object Deezer {
                 if (!preview.startsWith("http")) return@mapNotNull null
                 val title = o.optString("title_short").ifBlank { o.optString("title") }
                 val album = o.optJSONObject("album")
+                rank["dz:" + o.optLong("id")] = o.optInt("rank")
                 Entry(
                     id = "dz:" + o.optLong("id"),
                     kind = Kind.TRACK,

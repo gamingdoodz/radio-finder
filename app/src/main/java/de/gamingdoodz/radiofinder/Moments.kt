@@ -46,7 +46,7 @@ object Moments {
             m in 6..8 ->
                 out += Moment("summer", "Sommerhits", "Gute Laune für warme Tage", Action.HITMIX, "summer", "#FFFACC15", "#FFEA580C", R.drawable.ic_sun)
             m == 10 && d >= 15 ->
-                out += Moment("halloween", "Halloween-Grusel", "Gruselgeschichten zum Hören", Action.ADULT_STORIES, null, "#FFF97316", "#FF431407", R.drawable.ic_book, storyIndex = 2)
+                out += Moment("halloween", "Halloween-Grusel", "Gruselgeschichten zum Hören", Action.ADULT_STORIES, null, "#FFF97316", "#FF431407", R.drawable.ic_book, storyIndex = 4)
         }
 
         // Tageszeit

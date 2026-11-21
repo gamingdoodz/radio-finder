@@ -21,6 +21,9 @@ Damit die App funktioniert, ruft sie Inhalte direkt von diesen Diensten ab. Dabe
 
 Für deren Datenverarbeitung gelten die Datenschutzerklärungen dieser Anbieter.
 
+## Installierte Musik-Apps
+Um dir beim Öffnen eines Liedes nur passende Apps anzubieten, prüft Hitradar **auf deinem Gerät**, ob bestimmte Musik-Apps installiert sind (z. B. Spotify, Amazon Music, YouTube Music). Diese Information verlässt dein Gerät nicht.
+
 ## Berechtigungen
 - **Internet:** zum Abspielen und Suchen
 - **Benachrichtigungen:** Player, Wächter und Wecker
