@@ -489,6 +489,7 @@ class MainActivity : ComponentActivity() {
         expanded.clear()
         searchJob?.cancel()
         val myId = ++searchId
+        if (q != query) searchFilter = 0 // neue Suche: wieder alles zeigen
         query = q
         songHits = emptyList()
         artistMix = null

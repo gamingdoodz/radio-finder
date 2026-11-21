@@ -124,6 +124,7 @@ class WatchService : Service() {
                 // Aus der Benachrichtigung "Jetzt hören" getippt
                 val json = prefs(this).getString("pending", null)
                 getSystemService(NotificationManager::class.java).cancel(ID_HIT)
+                prefs(this).edit().remove("pending").apply()
                 if (json != null) scope.launch {
                     try { playNow(Entry.fromJson(org.json.JSONObject(json))) } catch (_: Exception) {}
                     if (job?.isActive != true) finish()
