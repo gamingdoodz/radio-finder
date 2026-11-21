@@ -1527,7 +1527,8 @@ class MainActivity : ComponentActivity() {
 
     private fun statusText() =
         if (scanTotal == 0) "Lade Senderliste…"
-        else "Durchsuche Radiosender… $scanDone von $scanTotal" +
+        else if (!Scanner.searchingSelf && scanDone == 0) "Frage den Hitradar-Server…"
+        else "Server nicht erreichbar – durchsuche selbst… $scanDone von $scanTotal" +
             if (Net.isUnmetered(this)) " (WLAN)" else " (mobil)"
 
     private fun updateStatusRow() {

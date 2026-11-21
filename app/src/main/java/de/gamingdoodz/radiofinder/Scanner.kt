@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicInteger
 object Scanner {
     data class Hit(val station: Station, val title: String)
 
+    /** Sucht die App gerade selbst (Server nicht erreichbar)? Für die Anzeige. */
+    @Volatile var searchingSelf = false
+
     /** Treffer der letzten Suche, z. B. für Android Auto. */
     @Volatile var lastHits: List<Hit> = emptyList()
 
@@ -99,8 +102,9 @@ object Scanner {
             return found
         }
         val hits = Collections.synchronizedList(mutableListOf<Hit>())
+        searchingSelf = true
         try {
-            titles(stations, onProgress) { s, title ->
+            kotlinx.coroutines.withTimeoutOrNull(45_000) { titles(stations, onProgress) { s, title ->
                 if (matches(title, words)) {
                     val hit = Hit(s, title)
                     hits.add(hit)
@@ -108,9 +112,11 @@ object Scanner {
                     if (stopAfterFirst) throw FoundException()
                 }
             }
+            }
         } catch (_: FoundException) {
             // gefunden, Rest abgebrochen
         }
+        searchingSelf = false
         return synchronized(hits) { hits.toList() }
     }
 

@@ -100,7 +100,7 @@ object Radar {
         val t = System.currentTimeMillis()
         if (!force && t - lastTry < interval()) return@withContext ok
         // Nach einem Fehler 5 Minuten Pause, damit die App nicht dauernd wartet
-        if (t - lastFail < 5 * 60_000L) return@withContext false
+        if (t - lastFail < 60_000L) return@withContext false
         if (!lock.tryLock()) return@withContext ok
         try {
             lastTry = t
@@ -176,10 +176,11 @@ object Radar {
 
     /** Sucht ein Lied auf dem Server. null = Server nicht erreichbar. */
     suspend fun search(query: String): List<Scanner.Hit>? = withContext(Dispatchers.IO) {
-        if (System.currentTimeMillis() - lastFail < 5 * 60_000L) return@withContext null
+        // Suche ist vom Nutzer gewollt: immer fragen, bei einem Aussetzer einmal kurz nachfassen
         val text = fetch("/search?q=" + URLEncoder.encode(query, "UTF-8"), 8000, 4_000_000)
-        if (text == null) { lastFail = System.currentTimeMillis(); return@withContext null }
-        val list = runCatching { parse(text) }.getOrNull() ?: return@withContext null
+        val answer = text ?: run { kotlinx.coroutines.delay(1500); fetch("/search?q=" + URLEncoder.encode(query, "UTF-8"), 8000, 4_000_000) }
+        if (answer == null) { lastFail = System.currentTimeMillis(); return@withContext null }
+        val list = runCatching { parse(answer) }.getOrNull() ?: return@withContext null
         lastOk = System.currentTimeMillis()
         list.map { (s, n) ->
             LiveIndex.putRemote(s, n.first, n.second, n.third)
