@@ -1,18 +1,7 @@
 #!/bin/bash
-# Wird einmal auf dem Server ausgeführt, wenn sich diese Datei ändert (über GitHub Actions).
-# KI prüfen: warten, bis sie läuft (max. 12 Minuten), dann einen Wunsch testen
-for i in $(seq 1 6); do
-  systemctl is-active --quiet llm && break
-  sleep 10
+# Suche testen
+for u in "http://localhost:8081/search?q=weihnachtsb%C3%A4ckerei" "http://localhost/search?q=weihnachtsb%C3%A4ckerei" "https://130-61-78-232.sslip.io:8080/search?q=weihnachtsb%C3%A4ckerei"; do
+  echo "== $u"; curl -s -m 20 -o /tmp/r.json -w "HTTP %{http_code} in %{time_total}s, %{size_download} Bytes\n" "$u"; head -c 300 /tmp/r.json; echo
 done
-echo "--- Einrichtung (Ende) ---"; tail -5 /var/log/llm-setup.log
-echo "KI-Dienst: $(systemctl is-active llm)"
-sleep 5
-for q in "Party wie auf Mallorca" "etwas von Helene Fischer" "was für einen verregneten Sonntag" "Lieder wie von Queen"; do
-  echo "Wunsch: $q"
-  START=$(date +%s)
-  curl -s -m 40 "http://localhost:8081/wish?q=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" "$q")"; echo
-  echo "Dauer: $(( $(date +%s) - START )) s"
-done
-echo "Ähnlich zu 'Wham - Last Christmas':"
-curl -s "http://localhost:8081/similar?q=Wham%20Last%20Christmas" | head -c 600; echo
+journalctl -u radar -n 20 --no-pager | grep -iE "error|exception|traceback" | tail -5
+uptime
