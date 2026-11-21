@@ -165,6 +165,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Radar.init(this)
         lifecycleScope.launch { if (Radar.sync(force = true)) render() }
+        // Beim allerersten Start kurz erklären, wie die App funktioniert
+        if (!Settings.prefs(this).getBoolean("intro_seen", false)) {
+            Settings.prefs(this).edit().putBoolean("intro_seen", true).apply()
+            window.decorView.post { intro(0) }
+        }
         setContentView(R.layout.activity_main)
         onBackPressedDispatcher.addCallback(this, backCallback)
 
@@ -1243,6 +1248,10 @@ class MainActivity : ComponentActivity() {
             },
         ))
 
+        settingsGroup("Hilfe", listOf(
+            Row.Setting(R.drawable.ic_radar, "So funktioniert's", "Kurze Einführung in 4 Schritten") { intro(0) },
+        ))
+
         settingsGroup("Rechtliches", listOf(
             Row.Setting(R.drawable.ic_book, "Datenschutz", null) {
                 try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder/blob/main/PRIVACY.md"))) } catch (_: Exception) {}
@@ -1325,6 +1334,34 @@ class MainActivity : ComponentActivity() {
     }
 
     private class Option(val icon: Int, val label: String, val sub: String?, val action: () -> Unit)
+
+    /** Kurze Einführung in 4 Schritten (beim ersten Start und unter Mehr → So funktioniert's). */
+    private fun intro(step: Int) {
+        val pages = listOf(
+            Triple(R.drawable.ic_radar, "Willkommen bei Hitradar",
+                "Finde Lieder, die gerade im Radio laufen – und hör sie komplett und kostenlos." to
+                    "Songs mit ● LIVE laufen genau jetzt. Antippen, und es geht los."),
+            Triple(R.drawable.ic_search, "Lied suchen",
+                "Unter „Musik“ einen Song oder Künstler eingeben. Du siehst sofort, auf welchem Sender er läuft." to
+                    "Läuft er gerade nirgends? Tippe auf „Wächter starten“ 🔔 – sobald er im Radio kommt, spielt Hitradar ihn ab."),
+            Triple(R.drawable.ic_bolt, "Hit-Mix",
+                "Nur Hits, wenig Gerede: Der Hit-Mix springt automatisch zum nächsten Sender, auf dem gerade ein Hit anfängt." to
+                    "Mit ⏭ springst du jederzeit zum nächsten Hit."),
+            Triple(R.drawable.ic_kids, "Kinder, Hörspiele & Auto",
+                "Kinderlieder und Hörspiele haben eigene Bereiche. Der Kinder-Modus zeigt nur Kinderinhalte." to
+                    "Alles läuft auch in Android Auto und im Hintergrund weiter."),
+        )
+        val (icon, title, texts) = pages[step]
+        val last = step == pages.lastIndex
+        sheet(
+            title, "${step + 1} von ${pages.size}", null, "", false,
+            texts.first + "\n\n" + texts.second,
+            listOfNotNull(
+                Option(icon, if (last) "Los geht's" else "Weiter", null) { if (!last) intro(step + 1) },
+                if (!last) Option(R.drawable.ic_close, "Überspringen", null) {} else null,
+            )
+        )
+    }
 
     /** Eigenes Auswahlfenster, das von unten hereinfährt. */
     private fun sheet(title: String, sub: String, art: String?, name: String, station: Boolean, hint: String?, options: List<Option>) {
