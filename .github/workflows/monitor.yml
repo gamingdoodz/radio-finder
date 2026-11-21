@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/monitor.yml"]
 
 permissions:
   issues: write
@@ -19,7 +22,9 @@ jobs:
         run: |
           ok=0
           for i in 1 2 3; do
-            if curl -s -m 15 http://130.61.78.232/health | grep -q '"ok": true'; then ok=1; break; fi
+            r=$(curl -s -m 15 http://130.61.78.232/health || true)
+            echo "Antwort: $r"
+            if echo "$r" | grep -q '"ok": true'; then ok=1; break; fi
             sleep 60
           done
           open=$(gh issue list -R "$REPO" --state open --search "Server nicht erreichbar in:title" --json number --jq '.[0].number')
