@@ -14,17 +14,26 @@ object Ads {
 
     private fun prefs(c: Context) = c.applicationContext.getSharedPreferences("ads", Context.MODE_PRIVATE)
 
-    /** Gemessene Dauer der Vorab-Werbung in ms (0 = keine bekannt). */
-    fun duration(c: Context, stationId: String): Long = prefs(c).getLong(stationId, 0L)
+    /** Von allen Hitradar-Nutzern gemeldete Werbelängen (vom Server). */
+    @Volatile var shared: Map<String, Long> = emptyMap()
+
+    /** Gemessene Dauer der Vorab-Werbung in ms (0 = keine bekannt): eigene Messung, sonst die der anderen Nutzer. */
+    fun duration(c: Context, stationId: String): Long =
+        prefs(c).getLong(stationId, 0L).takeIf { it > 0 } ?: shared[stationId] ?: 0L
 
     fun record(c: Context, stationId: String, ms: Long) {
         val clamped = ms.coerceIn(5_000L, 180_000L)
-        val old = duration(c, stationId)
+        val old = prefs(c).getLong(stationId, 0L)
         val avg = if (old == 0L) clamped else (old + clamped) / 2
         prefs(c).edit().putLong(stationId, avg).apply()
+        Radar.reportAd(stationId, clamped)
     }
 
-    fun clear(c: Context, stationId: String) = prefs(c).edit().remove(stationId).apply()
+    fun clear(c: Context, stationId: String) {
+        val had = prefs(c).getLong(stationId, 0L) > 0 || shared.containsKey(stationId)
+        prefs(c).edit().remove(stationId).apply()
+        if (had) Radar.reportAd(stationId, 0L) // diesmal keine Werbung: dem Server melden
+    }
 
     /** Merken, dass dieser Sender im Player Liedtitel mitschickt (nur dann heißt "kein Titel" am Anfang wohl Werbung). */
     fun markIcy(c: Context, stationId: String) {

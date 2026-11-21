@@ -46,7 +46,30 @@ class WatchService : Service() {
         private const val MAX_MINUTES = 60
         private const val ACTION_PLAY = "de.gamingdoodz.radiofinder.WATCH_PLAY"
 
+        /** Läuft der Wächter schon länger als seine Stunde? Dann nicht wieder anwerfen. */
+        fun expired(context: Context): Boolean {
+            val since = prefs(context).getLong("since", 0L)
+            return since > 0 && System.currentTimeMillis() - since > MAX_MINUTES * 60_000L
+        }
+
+        /**
+         * Passt ein Radiotitel zu einem Wunsch? Wunsch "Titel — Künstler": alle Titelwörter müssen vorkommen,
+         * der Künstler nur, wenn der Titel sehr kurz ist (sonst würde "Jingle Bells — Kinder Lieder" nie passen).
+         */
+        fun matchesWish(radioTitle: String, query: String): Boolean {
+            val parts = query.split(" — ")
+            val t = Scanner.normalize(radioTitle)
+            if (parts.size < 2) return Scanner.matches(radioTitle, Scanner.words(query))
+            val titleWords = Scanner.words(parts[0]).filter { it.length >= 2 }
+            if (titleWords.isEmpty() || !titleWords.all { t.contains(it) }) return false
+            val artistWords = Scanner.words(parts[1]).filter { it.length >= 3 }
+            val artistHit = artistWords.isEmpty() || artistWords.any { t.contains(it) }
+            return artistHit || titleWords.size >= 2
+        }
+
         fun start(context: Context, query: String, skipStation: String? = null) {
+            // Neue Stunde beginnt, wenn der Wächter gerade nicht läuft
+            if (queries(context).isEmpty() || expired(context)) prefs(context).edit().putLong("since", System.currentTimeMillis()).apply()
             // "Nochmal hören": den Sender, auf dem es gerade läuft, eine Weile ignorieren
             if (skipStation != null) prefs(context).edit()
                 .putString("skip:$query", skipStation + "|" + (System.currentTimeMillis() + 8 * 60_000L)).apply()
@@ -61,6 +84,7 @@ class WatchService : Service() {
         /** Viele Wunschlieder auf einmal (z. B. die ganzen Charts). */
         fun startMany(context: Context, list: List<String>) {
             if (list.isEmpty()) return
+            if (queries(context).isEmpty() || expired(context)) prefs(context).edit().putLong("since", System.currentTimeMillis()).apply()
             val all = (queries(context) + list).distinctBy { it.lowercase() }
             saveQueries(context, all)
             ContextCompat.startForegroundService(
@@ -155,14 +179,15 @@ class WatchService : Service() {
     }
 
     private suspend fun watch() {
-        val end = System.currentTimeMillis() + MAX_MINUTES * 60_000L
+        val since = prefs(this).getLong("since", 0L).takeIf { it > 0 } ?: System.currentTimeMillis()
+        val end = since + MAX_MINUTES * 60_000L
         var round = 0
         while (System.currentTimeMillis() < end) {
             val wishes = queries(this)
             if (wishes.isEmpty()) break
             round++
             setStatus("Suche läuft… (Runde $round)", true)
-            val matchers = wishes.map { it to Scanner.words(it) }
+            val matchers = wishes.map { it to it }
             var found: Pair<String, Scanner.Hit>? = null
             // Erst den Server fragen (tausende Sender, kaum Daten)
             // Nur die Änderungen seit dem letzten Mal holen und hier vergleichen.
@@ -172,7 +197,7 @@ class WatchService : Service() {
                 found = kotlinx.coroutines.withContext(Dispatchers.Default) {
                     val live = LiveIndex.fresh()
                     matchers.firstNotNullOfOrNull { (q, w) ->
-                        live.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
+                        live.firstOrNull { matchesWish(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
                     }
                 }
             }
@@ -181,7 +206,7 @@ class WatchService : Service() {
             if (stations.isNotEmpty()) try {
                 Scanner.titles(stations) { s, title ->
                     if (found == null) {
-                        matchers.firstOrNull { (q, w) -> Scanner.matches(title, w) && !skipped(q, s.id) }?.let { (q, _) ->
+                        matchers.firstOrNull { (q, w) -> matchesWish(title, w) && !skipped(q, s.id) }?.let { (q, _) ->
                             found = q to Scanner.Hit(s, title)
                             throw FoundSignal()
                         }

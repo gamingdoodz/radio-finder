@@ -177,6 +177,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Radar.init(this)
         lifecycleScope.launch { Blocklist.refresh(applicationContext) }
+        lifecycleScope.launch { Radar.loadAds() }
         lifecycleScope.launch { if (Radar.sync(force = true)) render() }
         // Beim allerersten Start kurz erklären, wie die App funktioniert
         if (!Settings.prefs(this).getBoolean("intro_seen", false)) {
@@ -317,7 +318,8 @@ class MainActivity : ComponentActivity() {
         // Wunschliste vorhanden, aber Wächter läuft nicht mehr (z. B. nach Neustart): weitermachen
         val wishes = WatchService.queries(this)
         if (wishes.isNotEmpty() && WatchService.status(this).isEmpty()) {
-            try { WatchService.start(this, wishes.first()) } catch (_: Exception) {}
+            if (WatchService.expired(this)) WatchService.stop(this)
+            else try { WatchService.start(this, wishes.first()) } catch (_: Exception) {}
         }
         render()
     }
@@ -1291,7 +1293,7 @@ class MainActivity : ComponentActivity() {
         if (topDe.isNotEmpty()) {
             rows.add(button(R.drawable.ic_bell, "Alle 100 auf die Wunschliste") {
                 WatchService.startMany(this, topDe.map { e ->
-                    e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
+                    e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " — " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
                 })
                 Toast.makeText(this, "100 Hits auf der Wunschliste – der Wächter sucht", Toast.LENGTH_LONG).show()
                 render()
@@ -1612,7 +1614,7 @@ class MainActivity : ComponentActivity() {
             play(best.station.toEntry(best.title), emptyList())
             return
         }
-        WatchService.start(this, "$title $artist", skipStation = here)
+        WatchService.start(this, "$title — $artist", skipStation = here)
         Toast.makeText(this, "Wächter läuft: Sobald „$title“ woanders anfängt, geht's los", Toast.LENGTH_LONG).show()
         render()
     }
@@ -1718,7 +1720,7 @@ class MainActivity : ComponentActivity() {
         val song = when {
             liveSong -> e.title
             e.kind == Kind.TRACK && (e.preview || e.id.startsWith("hd:")) ->
-                e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
+                e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " — " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
             else -> null
         }
         val isFav = Favorites.isFav(this, e.id)
@@ -1819,7 +1821,7 @@ class MainActivity : ComponentActivity() {
             hint,
             listOfNotNull(
                 Option(R.drawable.ic_bell, "Wächter starten", "Spielt das Lied komplett ab, sobald es im Radio kommt") {
-                    WatchService.start(this, "$clean $firstArtist")
+                    WatchService.start(this, "$clean — $firstArtist")
                     Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
                     render()
                 },
@@ -1934,6 +1936,7 @@ class MainActivity : ComponentActivity() {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
             ad != null -> adText(ad)
             c.playerError != null -> "Nicht erreichbar – tippe auf Play"
+            isStation && live == null && indexTitle != null -> (entry?.name ?: "") + " · Titel laut Senderliste"
             isStation -> entry?.name ?: (m.artist?.toString() ?: "")
             entry?.preview == true -> "${m.artist ?: ""} · Vorschau"
             else -> m.artist?.toString() ?: ""

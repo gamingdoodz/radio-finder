@@ -12,6 +12,9 @@ Favoriten, zuletzt gehörte Titel, Wunschliste, Einstellungen und Wecker werden 
 ## Hitradar-Server
 Damit die Suche schnell ist, fragt die App einen eigenen Server (gehostet bei Oracle Cloud in Frankfurt), welche Lieder gerade auf welchen Sendern laufen. Dabei werden dein **Suchbegriff** und technisch bedingt deine **IP-Adresse** übertragen. Beides wird nur für die Antwort verwendet und **nicht gespeichert, nicht protokolliert und nicht weitergegeben**. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (Funktion der App).
 
+## Werbung am Senderanfang
+Misst die App, wie lange ein Sender beim Einschalten Werbung spielt, meldet sie **nur die Sender-ID und die Dauer** an den Hitradar-Server. So profitieren alle Nutzer davon. Es werden dabei keine Daten über dich gespeichert.
+
 ## Verbindungen zu anderen Diensten
 Damit die App funktioniert, ruft sie Inhalte direkt von diesen Diensten ab. Dabei sieht der jeweilige Dienst – wie bei jedem Webseitenaufruf – deine IP-Adresse:
 - Internetradio-Sender und radio-browser.info (Senderliste, laufende Titel)

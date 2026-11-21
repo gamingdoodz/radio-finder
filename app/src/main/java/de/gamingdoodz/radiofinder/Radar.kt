@@ -144,6 +144,24 @@ object Radar {
         }.getOrDefault(emptyList())
     }
 
+    /** Gemessene Werbelänge an den Server melden (nur Sender-ID und Dauer, nichts über dich). */
+    fun reportAd(stationId: String, ms: Long) {
+        Thread { runCatching { fetch("/ad?s=" + URLEncoder.encode(stationId, "UTF-8") + "&ms=$ms", 5000, 10_000) } }.start()
+    }
+
+    @Volatile private var adsAt = 0L
+
+    /** Werbelängen aller Nutzer holen (höchstens alle 6 Stunden). */
+    suspend fun loadAds() = withContext(Dispatchers.IO) {
+        if (System.currentTimeMillis() - adsAt < 6 * 3600_000L) return@withContext
+        val text = fetch("/ads", 8000, 3_000_000) ?: return@withContext
+        runCatching {
+            val o = JSONObject(text)
+            Ads.shared = o.keys().asSequence().associateWith { o.optLong(it) }
+            adsAt = System.currentTimeMillis()
+        }
+    }
+
     data class Wish(val genre: String?, val artist: String?, val ai: Boolean)
 
     /** "Wünsch dir was": Satz in ein Genre oder einen Künstler übersetzen (KI auf dem Server). */

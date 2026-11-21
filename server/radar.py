@@ -134,6 +134,55 @@ async def h_similar(req):
     return gz(web.json_response(out))
 
 
+# ---------------- Werbung am Senderanfang: von allen Apps gemeldet, für alle gemerkt ----------------
+ADS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ads.json")
+ads: dict = {}   # Sender-ID -> [Durchschnitt ms, Anzahl Meldungen]
+_ads_cache = {"t": 0, "body": None}
+
+
+def load_ads():
+    try:
+        with open(ADS_FILE, encoding="utf-8") as f:
+            ads.update(json.load(f))
+    except Exception:
+        pass
+
+
+def save_ads():
+    try:
+        with open(ADS_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(ads, f)
+        os.replace(ADS_FILE + ".tmp", ADS_FILE)
+    except Exception:
+        pass
+
+
+async def h_ad(req):
+    """Eine App meldet: bei Sender s kam ms Millisekunden Werbung (0 = keine)."""
+    sid = (req.query.get("s") or "")[:64]
+    try:
+        ms = int(req.query.get("ms", "-1"))
+    except ValueError:
+        ms = -1
+    if not sid or ms < 0 or ms > 180_000 or sid not in ids_map():
+        return web.json_response({"ok": False})
+    avg, n = ads.get(sid, [0, 0])
+    n = min(n + 1, 20)  # neuere Meldungen zählen stärker
+    avg = avg + (ms - avg) / n
+    ads[sid] = [int(avg), n]
+    return web.json_response({"ok": True})
+
+
+async def h_ads(req):
+    """Alle Sender mit bekannter Vorab-Werbung (für die Apps)."""
+    if not _ads_cache["body"] or time.time() - _ads_cache["t"] > 300:
+        out = {sid: v[0] for sid, v in ads.items() if v[0] >= 5000}
+        _ads_cache.update(t=time.time(), body=gzip.compress(json.dumps(out).encode(), 6))
+    if "gzip" in req.headers.get("Accept-Encoding", ""):
+        return web.Response(body=_ads_cache["body"], content_type="application/json", headers={"Content-Encoding": "gzip"})
+    return web.Response(body=gzip.decompress(_ads_cache["body"]), content_type="application/json")
+
+
 # ---------------- Wünsch dir was: kleine KI auf dem Server ----------------
 GENRES = {
     "xmas": "Weihnachtslieder", "charts": "aktuelle Hits/Charts", "pop": "Pop und Deutsch-Pop", "rap": "Rap und Hip-Hop",
@@ -491,6 +540,7 @@ async def scanner():
     async with aiohttp.ClientSession(connector=conn, headers={"User-Agent": UA}) as session:
         load_charts()
         load_similar()
+        load_ads()
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
         workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
@@ -507,6 +557,7 @@ async def scanner():
             print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
             if int(el) // 60 % 10 == 0:
                 save_charts()
+                save_ads()
             if int(el) // 60 % 30 == 15:
                 save_similar()
             # Einmal am Tag neu – und öfter, solange die Liste zu klein ist
@@ -655,7 +706,8 @@ async def main():
     app = web.Application()
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
                     web.get("/sync", h_sync), web.get("/charts", h_charts),
-                    web.get("/similar", h_similar), web.get("/wish", h_wish)])
+                    web.get("/similar", h_similar), web.get("/wish", h_wish),
+                    web.get("/ad", h_ad), web.get("/ads", h_ads)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

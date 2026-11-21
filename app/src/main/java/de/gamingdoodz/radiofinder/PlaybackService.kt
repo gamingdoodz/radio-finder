@@ -186,6 +186,7 @@ class PlaybackService : MediaLibraryService() {
         super.onCreate()
         Radar.init(this)
         scope.launch { Blocklist.refresh(applicationContext) }
+        scope.launch { Radar.loadAds() }
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent("Hitradar/1.0")
             .setAllowCrossProtocolRedirects(true)
