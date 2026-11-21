@@ -221,11 +221,13 @@ class MainActivity : ComponentActivity() {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 clear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+                findViewById<View>(R.id.mic).visibility = if (s.isNullOrEmpty()) View.VISIBLE else View.GONE
                 typing.removeCallbacks(typeSearch)
                 if ((s?.trim()?.length ?: 0) >= 3 && input.hasFocus()) typing.postDelayed(typeSearch, 700)
             }
         })
         clear.setOnClickListener { input.setText(""); startSearch() }
+        findViewById<View>(R.id.mic).setOnClickListener { listen(wish = false) }
         back.setOnClickListener { backCallback.handleOnBackPressed() }
 
         findViewById<View>(R.id.navHome).setOnClickListener { selectTab(Tab.HOME) }
@@ -254,6 +256,7 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullBack30).setOnClickListener { controller?.seekBack() }
         findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
         findViewById<View>(R.id.fullShare).setOnClickListener { shareSong() }
+        findViewById<View>(R.id.fullSimilar).setOnClickListener { currentSongTitle()?.let { moreLike(it) } }
         findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
         findViewById<View>(R.id.fullSpeed).setOnClickListener {
             val c = controller ?: return@setOnClickListener
@@ -993,6 +996,8 @@ class MainActivity : ComponentActivity() {
             )))
         }
 
+        if (!kids()) rows.add(Row.More("✨ Wünsch dir was – sag, worauf du Lust hast") { wishDialog() })
+
         // Weiterhören: die zuletzt gehörten Lieder (mit Cover), dazu angefangene freie Musik und Hörspiele
         if (Settings.homeOn(this, "again")) {
             val heard = Heard.all(this).take(12)
@@ -1059,6 +1064,7 @@ class MainActivity : ComponentActivity() {
         if (!kids()) rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
         if (musicAudience == 1) { renderKidsMusic(); return }
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
+        rows.add(Row.More("✨ Wünsch dir was – sag, worauf du Lust hast") { wishDialog() })
         val genres = Genres.all.filter { it.key != "kids" }
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix", "ALLE ${genres.size}") { openPage(Page.GenresPage) })
         genres.take(6).chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
@@ -1583,6 +1589,85 @@ class MainActivity : ComponentActivity() {
         render()
     }
 
+    // ================= KI: Sprechen, Wünsch dir was, Mehr wie dieses =================
+
+    private var listenForWish = false
+    private val speech = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
+        val text = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return@registerForActivityResult
+        // "Spiel was Ruhiges", "ich will Party-Musik" … -> Wunsch; sonst normale Suche
+        val looksLikeWish = Regex("(?i)^(spiel|spiele|ich will|ich möchte|ich hätte gern|mach|was |etwas |musik zum|musik für|lieder zum)").containsMatchIn(text)
+        if (listenForWish || looksLikeWish) handleWish(text) else { selectTab(Tab.FIND); startSearch(text) }
+    }
+
+    /** Spracheingabe (eingebaut in Android, kostenlos). */
+    private fun listen(wish: Boolean) {
+        listenForWish = wish
+        val i = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, if (wish) "Was möchtest du hören?" else "Lied, Künstler oder Sender")
+        try { speech.launch(i) } catch (_: Exception) {
+            Toast.makeText(this, "Spracheingabe ist auf diesem Handy nicht verfügbar", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** "Wünsch dir was": Satz eingeben oder sprechen. */
+    private fun wishDialog() {
+        val edit = EditText(this).apply {
+            hint = "z. B. „was Ruhiges zum Einschlafen“"
+            setSingleLine()
+            setPadding(dp(20f).toInt(), dp(16f).toInt(), dp(20f).toInt(), dp(16f).toInt())
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("✨ Wünsch dir was")
+            .setMessage("Sag oder schreib, worauf du Lust hast – Stimmung, Jahrzehnt, Anlass oder Künstler.")
+            .setView(edit)
+            .setPositiveButton("Los") { _, _ -> edit.text.toString().trim().takeIf { it.isNotEmpty() }?.let { handleWish(it) } }
+            .setNeutralButton("🎤 Sprechen") { _, _ -> listen(wish = true) }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
+    private fun handleWish(text: String) {
+        Toast.makeText(this, "Einen Moment, ich suche passende Musik…", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val w = Radar.wish(text) ?: localWish(text)
+            val artist = w?.artist?.let { Deezer.artist(it) }
+            when {
+                artist != null -> startHitMix("artist:${artist.id}:${artist.name}", "– ${artist.name}")
+                w?.genre != null -> {
+                    val g = Genres.all.firstOrNull { it.key == w.genre }
+                    startHitMix(if (w.genre == "charts") null else w.genre, "– ${g?.name ?: "Charts"}")
+                }
+                else -> { selectTab(Tab.FIND); startSearch(text) }
+            }
+        }
+    }
+
+    /** Falls der Server nicht antwortet: einfache Stichwörter. */
+    private fun localWish(text: String): Radar.Wish? {
+        val t = text.lowercase()
+        val rules = listOf("xmas" to "weihnacht|christmas", "kids" to "kinder", "chill" to "ruhig|entspann|chill|schlaf|kuschel",
+            "party" to "party|feier|ballermann", "80s" to "80er", "90s" to "90er", "2000s" to "2000er", "oldies" to "oldie|60er|70er",
+            "rap" to "rap|hip ?hop", "rock" to "rock|metal", "schlager" to "schlager", "dance" to "dance|techno|house|tanz",
+            "summer" to "sommer|gute laune", "classic" to "klassik", "jazz" to "jazz|soul", "charts" to "hits|charts")
+        return rules.firstOrNull { Regex(it.second).containsMatchIn(t) }?.let { Radar.Wish(it.first, null, false) }
+    }
+
+    /** Titel des Liedes, das gerade läuft ("Künstler - Titel"). */
+    private fun currentSongTitle(): String? {
+        val c = controller ?: return null
+        val live = c.mediaMetadata.title?.toString()?.takeIf { isMusic(it) }
+        if (live != null) return live
+        val m = c.currentMediaItem?.mediaMetadata ?: return null
+        return if (m.artist != null && m.title != null) "${m.artist} - ${m.title}" else null
+    }
+
+    /** Hit-Mix mit Liedern, die Sender oft zusammen mit diesem Lied spielen. */
+    private fun moreLike(song: String) {
+        startHitMix("similar:$song", "– Mehr wie dieses")
+    }
+
     /** Laufendes Lied an Freunde schicken (Text mit Links zu Spotify und YouTube). */
     private fun shareSong() {
         val c = controller ?: return
@@ -1625,6 +1710,9 @@ class MainActivity : ComponentActivity() {
                         render()
                     }
                 },
+                if (song != null && !kids()) Option(R.drawable.ic_bolt, "✨ Mehr wie dieses", "Mix mit Liedern, die Sender oft dazu spielen") {
+                    moreLike(if (liveSong) e.title else "${e.subtitle} - ${e.title}")
+                } else null,
                 if (song != null && !kids()) Option(R.drawable.ic_note, "In deiner Musik-App öffnen", null) {
                     openIn(song, stories = false)
                 } else null,
@@ -1861,6 +1949,7 @@ class MainActivity : ComponentActivity() {
             val canShare = (isStation && live != null && isMusic(live)) || (!isStation && !story)
             findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk || canShare) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullShare).visibility = if (canShare) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.fullSimilar).visibility = if (canShare && !kids()) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullAgain).visibility = if (againOk && !story) View.VISIBLE else View.GONE
             listOf(R.id.fullBack30, R.id.fullSpeed, R.id.fullFwd30).forEach {
                 findViewById<View>(it).visibility = if (story) View.VISIBLE else View.GONE

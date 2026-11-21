@@ -57,10 +57,12 @@ class HitMix(
         val genre = Genres.all.firstOrNull { it.key == genreKey }
         val favMix = genreKey == "favs"
         val chartsMix = genreKey == "radiocharts"
+        val similarTo = genreKey?.takeIf { it.startsWith("similar:") }?.removePrefix("similar:")
         val name = when {
             genreKey == "mine" -> "Mein Mix"
             favMix -> "Lieblingssender"
             chartsMix -> "Meistgespielt im Radio"
+            similarTo != null -> "Mehr wie „${similarTo.substringAfter(" - ").substringAfter(" – ").take(24)}“"
             else -> artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
         }
         Radar.fast = true
@@ -68,6 +70,17 @@ class HitMix(
 
         val hits = when {
             genreKey == "mine" -> mySongs()
+            similarTo != null -> {
+                // Ähnliche Lieder vom Server + weitere Lieder desselben Künstlers
+                val artist = similarTo.substringBefore(" - ").substringBefore(" – ").trim()
+                val sim = Radar.similar(similarTo).map { t ->
+                    val a = t.substringBefore(" - ").substringBefore(" – ").trim()
+                    val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
+                    Entry("sm:" + t.hashCode(), Kind.TRACK, ti, a, "", "", ti)
+                }
+                val own = Deezer.artist(artist)?.let { Deezer.artistTop(it.id).take(10) }.orEmpty()
+                (sim + own).ifEmpty { Deezer.topGermany(100) }
+            }
             chartsMix -> Radar.charts().take(60).map { (t, _) ->
                 val artist = t.substringBefore(" - ").substringBefore(" – ").trim()
                 val title = t.substringAfter(" - ").substringAfter(" – ").trim()
@@ -130,7 +143,13 @@ class HitMix(
         val topArtists = heard.groupingBy { it.subtitle.lowercase() }.eachCount()
             .entries.sortedByDescending { it.value }.take(4).map { it.key }
         val artistSongs = topArtists.flatMap { a -> Deezer.artist(a)?.let { Deezer.artistTop(it.id).take(15) }.orEmpty() }
-        val all = heard + favTracks + artistSongs
+        // Was Sender oft zusammen mit deinen meistgehörten Liedern spielen
+        val similar = Heard.all(context).take(3).flatMap { h -> Radar.similar(h.title).take(10) }.map { t ->
+            val a = t.substringBefore(" - ").substringBefore(" – ").trim()
+            val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
+            Entry("sm:" + t.hashCode(), Kind.TRACK, ti, a, "", "", ti)
+        }
+        val all = heard + favTracks + artistSongs + similar
         return if (all.size < 5) Deezer.topGermany(100) + all else all
     }
 

@@ -134,6 +134,28 @@ object Radar {
         }.getOrDefault(emptyList())
     }
 
+    /** Lieder, die Sender oft direkt vor oder nach diesem Lied spielen ("Mehr wie dieses"). */
+    suspend fun similar(radioTitle: String): List<String> = withContext(Dispatchers.IO) {
+        val text = fetch("/similar?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 8000, 1_000_000) ?: return@withContext emptyList()
+        runCatching {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("title")?.let { t -> Text.clean(t) } }
+                .filter { LiveIndex.isMusic(it) }
+        }.getOrDefault(emptyList())
+    }
+
+    data class Wish(val genre: String?, val artist: String?, val ai: Boolean)
+
+    /** "Wünsch dir was": Satz in ein Genre oder einen Künstler übersetzen (KI auf dem Server). */
+    suspend fun wish(text: String): Wish? = withContext(Dispatchers.IO) {
+        val t = fetch("/wish?q=" + URLEncoder.encode(text, "UTF-8"), 30_000, 100_000) ?: return@withContext null
+        runCatching {
+            val o = JSONObject(t)
+            Wish(o.optString("genre").takeIf { it.isNotBlank() && it != "null" },
+                o.optString("artist").takeIf { it.isNotBlank() && it != "null" }, o.optBoolean("ai"))
+        }.getOrNull()
+    }
+
     /** Sucht ein Lied auf dem Server. null = Server nicht erreichbar. */
     suspend fun search(query: String): List<Scanner.Hit>? = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() - lastFail < 5 * 60_000L) return@withContext null
