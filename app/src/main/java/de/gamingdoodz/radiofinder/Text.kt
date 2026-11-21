@@ -4,7 +4,9 @@ package de.gamingdoodz.radiofinder
 object Text {
     private val entity = Regex("&(#\\d+|#x[0-9a-fA-F]+|amp|quot|apos|lt|gt|nbsp);")
 
-    fun clean(s: String): String {
+    fun clean(raw: String): String {
+        // "Eminem_Lose_Yourself" -> "Eminem Lose Yourself"
+        val s = if (raw.contains('_')) raw.replace(Regex("_+"), " ").replace(Regex("\\s+"), " ") else raw
         if (!s.contains('&')) return s.trim()
         return entity.replace(s) { m ->
             val e = m.groupValues[1]

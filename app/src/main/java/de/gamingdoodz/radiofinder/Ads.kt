@@ -26,6 +26,13 @@ object Ads {
 
     fun clear(c: Context, stationId: String) = prefs(c).edit().remove(stationId).apply()
 
+    /** Merken, dass dieser Sender im Player Liedtitel mitschickt (nur dann heißt "kein Titel" am Anfang wohl Werbung). */
+    fun markIcy(c: Context, stationId: String) {
+        if (!hasIcy(c, stationId)) prefs(c).edit().putBoolean("icy:$stationId", true).apply()
+    }
+
+    fun hasIcy(c: Context, stationId: String) = prefs(c).getBoolean("icy:$stationId", false)
+
     /** Streams großer Werbe-Vermarkter spielen beim Verbinden fast immer erst Werbung. */
     private val adHosts = Regex("(?i)streamtheworld|tritondigital|adswizz|revma|ihrhls|spotxchange|liveadexchanger|deliver\\.adswizz|playerservices|ais-sa|ais-edge|audioad|adtonos|targetspot")
 

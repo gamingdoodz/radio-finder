@@ -1828,7 +1828,9 @@ class MainActivity : ComponentActivity() {
         val entry = Entry.fromMediaItem(item)
         val isStation = item.mediaId.startsWith("st:")
         val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
-        val indexTitle = if (isStation) LiveIndex.fresh().firstOrNull { "st:" + it.station.id == item.mediaId }?.title else null
+        val t0 = System.currentTimeMillis()
+        val indexTitle = if (isStation) LiveIndex.get(item.mediaId.removePrefix("st:"))
+            ?.takeIf { t0 - it.time < 120_000 && t0 - it.since < 6 * 60_000 }?.title else null
         val title = live ?: indexTitle ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
         if (isStation && live == null) checkStationTitle(item.mediaId, entry)
         val ad = adInfo(c, item.mediaId, live)
@@ -1906,9 +1908,9 @@ class MainActivity : ComponentActivity() {
         if (Ads.isAd(live)) return AdInfo(if (known > elapsed) known - elapsed else -1, known, elapsed)
         // Bekannte Vorab-Werbung: Countdown (mit etwas Puffer)
         if (known > 0 && elapsed < known + 15_000) return AdInfo((known - elapsed).coerceAtLeast(0), known, elapsed)
-        // Sender schickt sonst Liedtitel, gerade aber keinen: am Anfang ist das fast immer Werbung
-        val sendsTitles = LiveIndex.get(id)?.let { LiveIndex.isMusic(it.title) } == true
-        if (live == null && sendsTitles && elapsed < 120_000) return AdInfo(-1, 0, elapsed)
+        // Sender schickt im Player sonst Liedtitel, gerade aber keinen: am Anfang ist das fast immer Werbung.
+        // (Sender, die nie Titel in den Stream schreiben, zählen nicht – sonst stünde dort fälschlich "Werbung".)
+        if (live == null && Ads.hasIcy(this, id) && elapsed < 90_000) return AdInfo(-1, 0, elapsed)
         return null
     }
 

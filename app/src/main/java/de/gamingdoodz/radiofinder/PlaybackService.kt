@@ -256,6 +256,7 @@ class PlaybackService : MediaLibraryService() {
                 if (!item.mediaId.startsWith("st:")) return
                 val t = mediaMetadata.title?.toString()?.trim().orEmpty()
                 val id = item.mediaId.removePrefix("st:")
+                if (LiveIndex.isMusic(t)) Ads.markIcy(this@PlaybackService, id)
                 if (!musicSeen && stationStart > 0) {
                     if (LiveIndex.isMusic(t) && !Ads.isAd(t)) {
                         musicSeen = true
