@@ -183,6 +183,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         Radar.init(this)
+        scope.launch { Blocklist.refresh(applicationContext) }
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent("Hitradar/1.0")
             .setAllowCrossProtocolRedirects(true)

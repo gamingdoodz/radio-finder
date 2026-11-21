@@ -119,8 +119,9 @@ object StationRepository {
                 }
                 l
             }
-            if (list.isNotEmpty()) cache[fileName] = list
-            list
+            val allowed = list.filter { !Blocklist.blocked(it.id, it.url) }
+            if (allowed.isNotEmpty()) cache[fileName] = allowed
+            allowed
         }
 
     private fun fetchAll(queries: List<String>): List<Station> {
@@ -146,7 +147,7 @@ object StationRepository {
         if (o == null) return null
         val id = o.optString("stationuuid")
         val url = o.optString("url_resolved").ifBlank { o.optString("url") }.trim()
-        if (id.isBlank() || url.isBlank()) return null
+        if (id.isBlank() || url.isBlank() || Blocklist.blocked(id, url)) return null
         return Station(
             id = id,
             name = cleanName(o.optString("name")),

@@ -1,0 +1,3 @@
+# Sender, die nicht in Hitradar erscheinen sollen (z. B. auf Wunsch des Senders).
+# Eine Zeile pro Sender: die radio-browser-ID (stationuuid) ODER ein Teil der Stream-Adresse (z. B. stream.meinsender.de).
+# Zeilen mit # werden ignoriert. Änderungen wirken in der App innerhalb eines Tages, am Server innerhalb einer Stunde.

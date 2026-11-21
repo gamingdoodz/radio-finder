@@ -30,6 +30,9 @@ Für deren Datenverarbeitung gelten die Datenschutzerklärungen dieser Anbieter.
 ## Kinder
 Die App enthält einen Kinder-Modus, erhebt aber auch dort keine Daten.
 
+## Für Radiosender
+Hitradar spielt öffentlich angebotene Streams ab und zeigt die vom Sender mitgeschickten Titel an. Es werden keine Inhalte gespeichert oder aufgezeichnet. Möchte ein Sender nicht in Hitradar erscheinen, genügt eine kurze E-Mail an gamingdoodz@googlemail.com – er wird dann umgehend entfernt.
+
 ## Deine Rechte
 Du hast das Recht auf Auskunft, Berichtigung, Löschung und Einschränkung der Verarbeitung sowie ein Beschwerderecht bei einer Datenschutz-Aufsichtsbehörde. Da Hitradar keine personenbezogenen Daten speichert, liegen in der Regel keine Daten über dich vor.
 

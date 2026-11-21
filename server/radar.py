@@ -78,6 +78,15 @@ async def load_stations(session: aiohttp.ClientSession):
                 break
             except Exception:
                 continue
+    # Sperrliste (z. B. auf Wunsch eines Senders)
+    try:
+        block = [l.strip().lower() for l in open(os.path.join(os.path.dirname(__file__), "blocklist.txt"), encoding="utf-8")
+                 if l.strip() and not l.startswith("#")]
+    except Exception:
+        block = []
+    if block:
+        found = {k: v for k, v in found.items()
+                 if k.lower() not in block and not any("." in b and b in v["url"].lower() for b in block)}
     if found:
         stations = list(found.values())
     print(f"Senderliste: {len(stations)} Sender", flush=True)

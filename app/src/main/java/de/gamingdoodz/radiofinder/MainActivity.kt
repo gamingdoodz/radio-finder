@@ -164,6 +164,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Radar.init(this)
+        lifecycleScope.launch { Blocklist.refresh(applicationContext) }
         lifecycleScope.launch { if (Radar.sync(force = true)) render() }
         // Beim allerersten Start kurz erklären, wie die App funktioniert
         if (!Settings.prefs(this).getBoolean("intro_seen", false)) {
