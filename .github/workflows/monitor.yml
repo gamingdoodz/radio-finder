@@ -1,0 +1,36 @@
+name: Server überwachen
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Server prüfen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            if curl -s -m 15 http://130.61.78.232/health | grep -q '"ok": true'; then ok=1; break; fi
+            sleep 60
+          done
+          open=$(gh issue list -R "$REPO" --state open --search "Server nicht erreichbar in:title" --json number --jq '.[0].number')
+          if [ "$ok" = 1 ]; then
+            echo "Server läuft."
+            if [ -n "$open" ]; then gh issue close "$open" -R "$REPO" -c "Server läuft wieder ✅"; fi
+          else
+            echo "Server antwortet nicht!"
+            if [ -z "$open" ]; then
+              gh issue create -R "$REPO" --title "Server nicht erreichbar" \
+                --body "Der Hitradar-Server (130.61.78.232) antwortet seit mehreren Minuten nicht. Die App sucht in der Zeit selbst weiter. Tipp: In der Oracle-Konsole die Instanz 'radar' neu starten."
+            fi
+            exit 1
+          fi

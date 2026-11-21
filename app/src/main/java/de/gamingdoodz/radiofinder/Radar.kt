@@ -14,8 +14,8 @@ import java.net.URLEncoder
  * Ist er weg, scannt die App wie bisher selbst.
  */
 object Radar {
-    /** Hitradar-Server bei Oracle (alle Sender). Weitere Adressen hier als Ersatz eintragen. */
-    private val servers = listOf("http://130.61.78.232")
+    /** Hitradar-Server bei Oracle: verschlüsselt zuerst, sonst die direkte Adresse. */
+    private val servers = listOf("https://130-61-78-232.sslip.io", "http://130.61.78.232")
     @Volatile private var active = 0
 
     /** Fragt den aktiven Server; geht er nicht, den nächsten. */
