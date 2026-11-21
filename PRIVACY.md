@@ -1,6 +1,8 @@
 # Datenschutzerklärung – Hitradar
 
-Stand: November 2026 · Anbieter: gamingdoodz (gamingdoodz@googlemail.com)
+Stand: November 2026
+
+**Verantwortlich (Art. 13 DSGVO):** Kevin Gipp (Entwickler „gamingdoodz“) · E-Mail: gamingdoodz@googlemail.com
 
 **Kurz gesagt: Hitradar sammelt keine persönlichen Daten und hat keine Konten, keine Werbung und kein Tracking.**
 
@@ -15,7 +17,7 @@ Damit die App funktioniert, ruft sie Inhalte direkt von diesen Diensten ab. Dabe
 - Internetradio-Sender und radio-browser.info (Senderliste, laufende Titel)
 - Deezer (Charts, Vorschauen), Jamendo, Audius, Internet Archive / LibriVox (freie Musik und Hörbücher)
 - Apple Podcasts-Verzeichnis und die jeweiligen Podcast-Anbieter (Hörspiele)
-- GitHub (Prüfung auf neue Versionen)
+- GitHub (Prüfung auf neue Versionen, nur bei Installation außerhalb von Google Play)
 
 Für deren Datenverarbeitung gelten die Datenschutzerklärungen dieser Anbieter.
 
@@ -28,5 +30,8 @@ Für deren Datenverarbeitung gelten die Datenschutzerklärungen dieser Anbieter.
 ## Kinder
 Die App enthält einen Kinder-Modus, erhebt aber auch dort keine Daten.
 
+## Deine Rechte
+Du hast das Recht auf Auskunft, Berichtigung, Löschung und Einschränkung der Verarbeitung sowie ein Beschwerderecht bei einer Datenschutz-Aufsichtsbehörde. Da Hitradar keine personenbezogenen Daten speichert, liegen in der Regel keine Daten über dich vor.
+
 ## Kontakt
-Fragen: gamingdoodz@googlemail.com
+Kevin Gipp · gamingdoodz@googlemail.com
