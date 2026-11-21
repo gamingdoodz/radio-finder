@@ -122,6 +122,17 @@ object Radar {
         }
     }
 
+    /** Meistgespielt im Radio (24 h): Liste aus (Titel, wie oft gespielt). */
+    suspend fun charts(): List<Pair<String, Int>> = withContext(Dispatchers.IO) {
+        val text = fetch("/charts", 8000, 2_000_000) ?: return@withContext emptyList()
+        runCatching {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { i ->
+                arr.optJSONObject(i)?.let { Text.clean(it.optString("title")) to it.optInt("plays") }
+            }.filter { LiveIndex.isMusic(it.first) }
+        }.getOrDefault(emptyList())
+    }
+
     /** Sucht ein Lied auf dem Server. null = Server nicht erreichbar. */
     suspend fun search(query: String): List<Scanner.Hit>? = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() - lastFail < 5 * 60_000L) return@withContext null

@@ -35,6 +35,13 @@ object Net {
     }
 
     /** true im WLAN (bzw. bei Verbindungen ohne Datenvolumen). */
+    /** Gibt es überhaupt Internet? */
+    fun online(context: Context): Boolean = try {
+        (context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).activeNetwork != null
+    } catch (_: Exception) {
+        true
+    }
+
     fun isUnmetered(context: Context): Boolean = try {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         cm.activeNetwork != null && !cm.isActiveNetworkMetered

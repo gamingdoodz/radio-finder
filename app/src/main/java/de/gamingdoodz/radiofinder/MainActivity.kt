@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     private sealed class Page {
         data class GenrePage(val genre: Genre) : Page()
+        object RadioChartsPage : Page()
         object ChartsPage : Page()
         object GenresPage : Page()
         data class ShowPage(val show: Entry) : Page()
@@ -285,7 +286,13 @@ class MainActivity : ComponentActivity() {
             val c = try { future.get() } catch (_: Exception) { return@addListener }
             controller = c
             c.addListener(object : Player.Listener {
-                override fun onEvents(player: Player, events: Player.Events) = updatePlayer()
+                override fun onEvents(player: Player, events: Player.Events) {
+                    updatePlayer()
+                    // Startseite: "Jetzt läuft" aktuell halten
+                    if (tab == Tab.HOME && page == null && events.containsAny(
+                            Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_METADATA_CHANGED)
+                    ) render()
+                }
             })
             updatePlayer()
         }, ContextCompat.getMainExecutor(this))
@@ -473,6 +480,7 @@ class MainActivity : ComponentActivity() {
         pageTitle.text = when (val p = page) {
             is Page.GenrePage -> p.genre.name
             Page.ChartsPage -> "Deutsche Charts"
+            Page.RadioChartsPage -> "Meistgespielt im Radio"
             Page.GenresPage -> "Alle Genres"
             is Page.ShowPage -> p.show.name
             null -> when (tab) {
@@ -595,6 +603,7 @@ class MainActivity : ComponentActivity() {
         when (val p = page) {
             is Page.GenrePage -> renderGenre(p.genre)
             Page.ChartsPage -> renderCharts()
+            Page.RadioChartsPage -> renderRadioCharts()
             Page.GenresPage -> Genres.all.filter { it.key != "kids" }.chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
             is Page.ShowPage -> renderShow(p.show)
             null -> when (tab) {
@@ -936,49 +945,112 @@ class MainActivity : ComponentActivity() {
         list.forEachIndexed { i, e -> rows.add(Row.Item(e, list, liveText(e), if (ranked) i + 1 else null)) }
     }
 
+    private var radioCharts: List<Pair<String, Int>> = emptyList()
+    private var radioChartsAt = 0L
+
+    /** Meistgespielt im Radio (24 h) vom Server, alle 10 Minuten neu. */
+    private fun loadRadioCharts() {
+        if (System.currentTimeMillis() - radioChartsAt < 10 * 60_000L) return
+        radioChartsAt = System.currentTimeMillis()
+        lifecycleScope.launch {
+            val list = Radar.charts()
+            if (list.isNotEmpty()) { radioCharts = list; render() } else radioChartsAt = 0L
+        }
+    }
+
+    /** Lied aus dem Radio ("Künstler - Titel") als Eintrag mit Cover (Antippen: im Radio hören oder Wächter). */
+    private fun songEntry(radioTitle: String): Entry {
+        val artist = radioTitle.substringBefore(" - ").substringBefore(" – ").trim()
+        val title = radioTitle.substringAfter(" - ").substringAfter(" – ").trim()
+        val c = Covers.get(radioTitle)
+        return Entry("hd:" + radioTitle.hashCode().toString(16), Kind.TRACK, c?.title ?: title, c?.artist ?: artist,
+            "", c?.artwork.orEmpty(), c?.title ?: title, preview = true)
+    }
+
     private fun renderHome() {
-        // 1. Begrüßung + passende Vorschläge zur Tageszeit
+        if (!Net.online(this)) rows.add(Row.Empty("⚠ Keine Internetverbindung – Radio und Suche gehen gerade nicht."))
         rows.add(Row.Header(Moments.greeting()))
-        val moments = Moments.now().toMutableList()
-        if (Heard.all(this).size >= 3 || Favorites.all(this).any { it.kind == Kind.TRACK }) {
-            moments.add(1.coerceAtMost(moments.size), Moments.Moment("mine", "Mein Mix", "Lieder, die dir gefallen – aus dem Radio", Moments.Action.HITMIX, "mine", "#FF2EE6A8", "#FF6366F1", R.drawable.ic_heart_white))
-        }
-        rows.add(Row.Moments(moments))
 
-        // 2. Weiterhören (Favoriten zuerst)
+        // Jetzt läuft: großes Cover vom aktuellen Lied
+        val c = controller
+        val cur = c?.currentMediaItem
+        if (Settings.homeOn(this, "now") && cur != null) {
+            val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
+            val e = Entry.fromMediaItem(cur)
+            val cover = live?.let { Covers.get(it) }
+            val title = cover?.let { "${it.artist} - ${it.title}" } ?: live ?: e?.title ?: ""
+            val art = cover?.artwork ?: cur.mediaMetadata.artworkUri?.toString().orEmpty()
+            val shown = (e ?: Entry(cur.mediaId, Kind.TRACK, title, "", "", art, title)).copy(title = title, artwork = art)
+            rows.add(Row.Top(shown, if (c.isPlaying) "JETZT LÄUFT" else "PAUSIERT",
+                HitMix.activeName(this)?.let { "⚡ Hit-Mix · $it" } ?: e?.name ?: "") { showFull(true) })
+        }
+
+        // Schnellstart
+        if (Settings.homeOn(this, "quick")) {
+            val season = Moments.now().firstOrNull { it.action == Moments.Action.HITMIX && it.genreKey != null && it.genreKey != "charts" }
+            rows.add(Row.Quick(listOfNotNull(
+                Triple(R.drawable.ic_bolt, "Hit-Mix", { startHitMix(null, "– Charts") }),
+                season?.let { m -> Triple(R.drawable.ic_star, m.title.substringBefore("-").substringBefore(" ").take(12), { startHitMix(m.genreKey, "– ${m.title}") }) },
+                Triple(R.drawable.ic_heart, "Mein Mix", { startHitMix("mine", "– Mein Mix") }),
+                Triple(R.drawable.ic_kids, "Kinder", { musicAudience = 1; loadKids(); selectTab(Tab.FIND) }),
+            )))
+        }
+
         // Weiterhören: die zuletzt gehörten Lieder (mit Cover), dazu angefangene freie Musik und Hörspiele
-        val heard = Heard.all(this).take(12)
-        loadCoverTitles(heard.map { it.title })
-        val songs = heard.map { h ->
-            val artist = h.title.substringBefore(" - ").substringBefore(" – ").trim()
-            val title = h.title.substringAfter(" - ").substringAfter(" – ").trim()
-            val c = Covers.get(h.title)
-            Entry("hd:" + h.title.hashCode().toString(16), Kind.TRACK, c?.title ?: title, c?.artist ?: artist,
-                "", c?.artwork.orEmpty(), c?.title ?: title, preview = true)
-        }
-        val others = Recent.all(this).filter { it.kind != Kind.STATION }.take(6)
-        val again = (songs + others).distinctBy { it.id }
-        if (again.isNotEmpty()) {
-            rows.add(Row.Header("Weiterhören"))
-            rows.add(Row.Carousel(again))
+        if (Settings.homeOn(this, "again")) {
+            val heard = Heard.all(this).take(12)
+            loadCoverTitles(heard.map { it.title })
+            val songs = heard.map { songEntry(it.title) }
+            val others = Recent.all(this).filter { it.kind != Kind.STATION }.take(6)
+            val again = (songs + others).distinctBy { it.id }
+            if (again.isNotEmpty()) {
+                rows.add(Row.Header("Weiterhören"))
+                rows.add(Row.Carousel(again))
+            }
         }
 
-        // 3. Jetzt im Radio: erst Chart-Hits, dann andere Musik – eine Liste statt zwei
-        val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
-            .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
-        // Danach beliebte Sender, dann alles andere, was der Server gerade an Musik kennt (frisch angefangen zuerst)
-        val pop = LiveIndex.popularity()
-        val liveOthers = LiveIndex.fresh().filter { isMusic(it.title) }
-            .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
-            .take(60).map { it.station.toEntry(it.title) }
-        val live = dedupe(chartsLive + liveEntries(popular.take(80)) + liveOthers).take(25)
-        loadCovers(live)
-        rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
-        if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
+        // Jetzt im Radio: erst Chart-Hits, dann bekannte Lieder
+        if (Settings.homeOn(this, "live")) {
+            val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
+                .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
+            val pop = LiveIndex.popularity()
+            val liveOthers = LiveIndex.fresh().filter { isMusic(it.title) }
+                .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+                .take(60).map { it.station.toEntry(it.title) }
+            val live = dedupe(chartsLive + liveEntries(popular.take(80)) + liveOthers).take(25)
+            loadCovers(live)
+            rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
+            if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
+        }
 
-        // 4. Charts kurz, Rest auf eigener Seite
-        rows.add(Row.Header("Deutsche Charts", null, "ALLE") { openPage(Page.ChartsPage) })
-        if (topDe.isEmpty()) rows.add(Row.Empty("Lade Charts…")) else addSongs(topDe.take(5), ranked = true)
+        // Meistgespielt im Radio (vom Server, über alle Sender aus DE/AT/CH)
+        if (Settings.homeOn(this, "radiocharts")) {
+            loadRadioCharts()
+            if (radioCharts.isNotEmpty()) {
+                val list = radioCharts.take(10).map { songEntry(it.first) }
+                loadCoverTitles(radioCharts.take(10).map { it.first })
+                rows.add(Row.Header("Meistgespielt im Radio", "Heute auf allen Sendern", "ALLE") { openPage(Page.RadioChartsPage) })
+                rows.add(Row.Carousel(list))
+            }
+        }
+
+        // Deutsche Charts kurz, Rest auf eigener Seite
+        if (Settings.homeOn(this, "charts")) {
+            rows.add(Row.Header("Deutsche Charts", null, "ALLE") { openPage(Page.ChartsPage) })
+            if (topDe.isEmpty()) rows.add(Row.Empty("Lade Charts…")) else addSongs(topDe.take(5), ranked = true)
+        }
+    }
+
+    private fun renderRadioCharts() {
+        rows.add(Row.Header("Meistgespielt im Radio", "Die letzten 24 Stunden · alle Sender aus DE/AT/CH"))
+        loadRadioCharts()
+        if (radioCharts.isEmpty()) { rows.add(Row.Empty("Lade…")); return }
+        loadCoverTitles(radioCharts.take(15).map { it.first })
+        val list = radioCharts.map { songEntry(it.first) }
+        list.forEachIndexed { i, e ->
+            val plays = radioCharts[i].second
+            rows.add(Row.Item(e, list, liveText(e) ?: "$plays× gespielt", i + 1))
+        }
     }
 
     private var musicAudience = 0 // 0 = Erwachsene, 1 = Kinder
@@ -2082,7 +2154,8 @@ class MainActivity : ComponentActivity() {
                     box.removeAllViews()
                     row.items.forEach { (icon, label, action) ->
                         val b = android.widget.LinearLayout(this@MainActivity)
-                        b.orientation = android.widget.LinearLayout.HORIZONTAL
+                        val stacked = row.items.size >= 4
+                        b.orientation = if (stacked) android.widget.LinearLayout.VERTICAL else android.widget.LinearLayout.HORIZONTAL
                         b.gravity = android.view.Gravity.CENTER
                         b.minimumHeight = dp(50f).toInt()
                         b.setBackgroundResource(R.drawable.bg_option)
@@ -2097,12 +2170,13 @@ class MainActivity : ComponentActivity() {
                         iv.layoutParams = android.widget.LinearLayout.LayoutParams(dp(22f).toInt(), dp(22f).toInt())
                         val tv = TextView(this@MainActivity)
                         tv.text = label
-                        tv.setTextColor(Color.WHITE)
-                        tv.textSize = 14f
+                        tv.setTextColor(getColor(R.color.c_ffffffff))
+                        tv.textSize = if (stacked) 12f else 14f
+                        if (stacked) tv.gravity = android.view.Gravity.CENTER
                         tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
                         tv.maxLines = 1
                         tv.ellipsize = android.text.TextUtils.TruncateAt.END
-                        tv.setPadding(dp(10f).toInt(), 0, 0, 0)
+                        if (stacked) tv.setPadding(0, dp(6f).toInt(), 0, 0) else tv.setPadding(dp(10f).toInt(), 0, 0, 0)
                         b.addView(iv); b.addView(tv)
                         b.setOnClickListener { action() }
                         box.addView(b)

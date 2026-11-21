@@ -39,12 +39,85 @@ def normalize(s: str) -> str:
     return re.sub(r"[^\w]+", " ", s).strip()
 
 
+def is_song(t: str) -> bool:
+    return " - " in t or " – " in t
+
+
 def put(st: dict, title: str):
     title = html.unescape(title).strip()
     t = time.time()
     old = now.get(st["id"])
     since = old["since"] if old and old["title"] == title and t - old["time"] < FRESH_SECONDS else t
-    now[st["id"]] = {"title": title, "norm": normalize(title), "since": since, "time": t}
+    norm = normalize(title)
+    now[st["id"]] = {"title": title, "norm": norm, "since": since, "time": t}
+    # Neues Lied auf einem Sender aus DE/AT/CH: für die Radio-Charts zählen
+    if since == t and st.get("cc") in ("DE", "AT", "CH") and is_song(title) and not TALK.search(title):
+        count_play(norm, title, st["id"], t)
+
+
+# ---------------- Radio-Charts: meistgespielt in den letzten 24 Stunden ----------------
+TALK = re.compile(r"(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|sendung|moderation|gewinnspiel|jingle|station id|\bon air\b")
+CHARTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts.json")
+chart_hours: dict = {}     # Stunde -> {norm: Anzahl Sender}
+chart_seen: dict = {}      # Stunde -> set((norm, sender)) – jeder Sender zählt pro Stunde nur einmal
+chart_titles: dict = {}    # norm -> schönster Titel
+_charts_cache = {"t": 0, "body": None}
+
+
+def count_play(norm, title, sid, t):
+    hour = int(t // 3600)
+    seen = chart_seen.setdefault(hour, set())
+    if (norm, sid) in seen:
+        return
+    seen.add((norm, sid))
+    c = chart_hours.setdefault(hour, {})
+    c[norm] = c.get(norm, 0) + 1
+    chart_titles[norm] = title
+    for h in [h for h in chart_hours if h < hour - 24]:
+        chart_hours.pop(h, None)
+        chart_seen.pop(h, None)
+
+
+def save_charts():
+    try:
+        hours = {str(h): dict(sorted(c.items(), key=lambda kv: -kv[1])[:3000]) for h, c in chart_hours.items()}
+        keep = {k for c in hours.values() for k in c}
+        with open(CHARTS_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"hours": hours, "titles": {k: v for k, v in chart_titles.items() if k in keep}}, f)
+        os.replace(CHARTS_FILE + ".tmp", CHARTS_FILE)
+    except Exception as e:
+        print("Charts speichern:", e, flush=True)
+
+
+def load_charts():
+    try:
+        with open(CHARTS_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        now_h = int(time.time() // 3600)
+        for h, c in d.get("hours", {}).items():
+            if int(h) >= now_h - 24:
+                chart_hours[int(h)] = c
+        chart_titles.update(d.get("titles", {}))
+        print(f"Charts geladen: {len(chart_hours)} Stunden", flush=True)
+    except Exception:
+        pass
+
+
+async def h_charts(req):
+    # Alle 5 Minuten neu berechnen, sonst fertige Antwort
+    if not _charts_cache["body"] or time.time() - _charts_cache["t"] > 300:
+        total: dict = {}
+        now_h = int(time.time() // 3600)
+        for h, c in chart_hours.items():
+            if h >= now_h - 24:
+                for k, n in c.items():
+                    total[k] = total.get(k, 0) + n
+        top = sorted(total.items(), key=lambda kv: -kv[1])[:100]
+        out = [{"title": chart_titles.get(k, k), "plays": n} for k, n in top if n >= 3]
+        _charts_cache.update(t=time.time(), body=gzip.compress(json.dumps(out, ensure_ascii=False).encode(), 6))
+    if "gzip" in req.headers.get("Accept-Encoding", ""):
+        return web.Response(body=_charts_cache["body"], content_type="application/json", headers={"Content-Encoding": "gzip"})
+    return web.Response(body=gzip.decompress(_charts_cache["body"]), content_type="application/json")
 
 
 # ---------------- Senderliste ----------------
@@ -74,6 +147,7 @@ async def load_stations(session: aiohttp.ClientSession):
                         "name": re.sub(r"\s+", " ", re.sub(r"[_#*|~=]+", " ", o.get("name") or "")).strip() or "Radio",
                         "url": u,
                         "favicon": (o.get("favicon") or "").strip(),
+                        "cc": (o.get("countrycode") or "").upper(),
                     })
                 break
             except Exception:
@@ -226,6 +300,7 @@ async def worker(session, ids):
 async def scanner():
     conn = aiohttp.TCPConnector(limit=CONCURRENCY, limit_per_host=20, ttl_dns_cache=600, ssl=False)
     async with aiohttp.ClientSession(connector=conn, headers={"User-Agent": UA}) as session:
+        load_charts()
         await load_stations(session)
         ids = {s["id"]: s for s in stations}
         schedule_all()
@@ -235,6 +310,8 @@ async def scanner():
             el = time.time() - stats["since"]
             last_round.update(seconds=int(el), at=int(time.time()))
             print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
+            if int(el) // 60 % 10 == 0:
+                save_charts()
             # Einmal am Tag die Senderliste erneuern (oder sofort, falls sie beim Start fehlte)
             if el > 24 * 3600 or not stations:
                 await load_stations(session)
@@ -330,10 +407,6 @@ _diff_cache: dict = {}     # (from, to) -> gzip-Bytes
 _ver = {"n": 0}
 
 
-def is_song(t: str) -> bool:
-    return " - " in t or " – " in t
-
-
 def snapshot():
     t = time.time()
     if _snaps and t - _snaps[-1][1] < 15:
@@ -384,7 +457,7 @@ async def h_sync(req):
 async def main():
     app = web.Application()
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
-                    web.get("/sync", h_sync)])
+                    web.get("/sync", h_sync), web.get("/charts", h_charts)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

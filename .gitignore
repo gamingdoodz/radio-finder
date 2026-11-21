@@ -5,3 +5,4 @@ local.properties
 .idea/
 __pycache__/
 server/venv/
+server/charts.json
