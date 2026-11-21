@@ -104,7 +104,7 @@ object StationRepository {
         synchronized(tagCache) { tagCache[tag]?.let { return it } }
         val t = java.net.URLEncoder.encode(tag, "UTF-8")
         val list = withContext(Dispatchers.IO) {
-            fetchAll(listOf("tag=$t&countrycode=DE&limit=30", "tag=$t&limit=30"))
+            Radar.listBlocking("tag:$tag") ?: fetchAll(listOf("tag=$t&countrycode=DE&limit=30", "tag=$t&limit=30"))
         }
         if (list.isNotEmpty()) synchronized(tagCache) { tagCache[tag] = list }
         return list
@@ -118,7 +118,9 @@ object StationRepository {
                 val fresh = file.exists() && System.currentTimeMillis() - file.lastModified() < MAX_AGE_MS
                 var l = if (fresh) readFile(file) else emptyList()
                 if (l.isEmpty()) {
-                    l = fetchAll(queries)
+                    // Erst vom Hitradar-Server (einheitlich, Sperrliste wirkt), sonst direkt von radio-browser
+                    val type = when (fileName) { "stations.json" -> "popular"; "kids.json" -> "kids"; else -> null }
+                    l = type?.let { Radar.listBlocking(it) } ?: fetchAll(queries)
                     if (l.isNotEmpty()) writeFile(file, l) else if (file.exists()) l = readFile(file)
                 }
                 l

@@ -66,6 +66,7 @@ class HitMix(
             genreKey == "mine" -> "Mein Mix"
             favMix -> "Lieblingssender"
             chartsMix -> "Meistgespielt im Radio"
+            playlist == "community" -> "Beliebt bei Hitradar-Hörern"
             playlist != null -> Playlists.curated.firstOrNull { it.second == playlist }?.first ?: playlist
             myList != null -> myList
             similarTo != null -> "Mehr wie „${similarTo.substringAfter(" - ").substringAfter(" – ").take(24)}“"
@@ -73,10 +74,19 @@ class HitMix(
         }
         Radar.fast = true
         scope.launch { Radar.charts() }
+        // Nur feste Schlüssel zählen (keine eigenen Playlist-Namen)
+        (genre?.key ?: playlist?.takeIf { p -> Playlists.curated.any { it.second == p } }?.let { "pl:$it" }
+            ?: genreKey?.takeIf { it == "radiocharts" || it == "mine" } ?: if (genreKey == null) "charts" else null)
+            ?.let { Radar.event("mix", it) }
         prefs(context).edit().putString("name", name).putString("now", "Suche Hits…").apply()
 
         val hits = when {
             genreKey == "mine" -> mySongs()
+            playlist == "community" -> Radar.popular()?.songs.orEmpty().map { t ->
+                val a = t.substringBefore(" - ").substringBefore(" – ").trim()
+                val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
+                Entry("cm:" + t.hashCode(), Kind.TRACK, ti, a, "", "", ti)
+            }.ifEmpty { Deezer.topGermany(100) }
             playlist != null -> Deezer.playlistByName(playlist).ifEmpty { Deezer.topGermany(100) }
             myList != null -> Playlists.get(context, myList).ifEmpty { Deezer.topGermany(100) }
             similarTo != null -> {

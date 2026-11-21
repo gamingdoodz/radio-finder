@@ -1029,6 +1029,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Beliebt bei Hitradar-Hörern (gelernt aus allen Apps)
+        if (Settings.homeOn(this, "community")) {
+            val list = playlistSongs["community"].orEmpty()
+            if (list.isEmpty()) loadCommunityOnce()
+            else {
+                rows.add(Row.Header("Beliebt bei Hitradar-Hörern", "Was andere gerade gern hören", "ALLE") {
+                    openPage(Page.PlaylistPage("Beliebt bei Hitradar-Hörern", "community", false))
+                })
+                rows.add(Row.Carousel(list.take(15)))
+            }
+        }
+
         // Deutsche Charts kurz, Rest auf eigener Seite
         if (Settings.homeOn(this, "charts")) {
             rows.add(Row.Header("Deutsche Charts", null, "ALLE") { openPage(Page.ChartsPage) })
@@ -1050,6 +1062,7 @@ class MainActivity : ComponentActivity() {
         playlistCoversTried = true
         playlistCoversLoading = true
         lifecycleScope.launch {
+            loadCommunity()
             Playlists.curated.forEach { (_, q) ->
                 val songs = Deezer.playlistByName(q)
                 if (songs.isNotEmpty()) { playlistSongs[q] = songs; playlistCovers[q] = songs.first().artwork }
@@ -1059,6 +1072,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var communityTried = 0L
+
+    private fun loadCommunityOnce() {
+        if (System.currentTimeMillis() - communityTried < 10 * 60_000L) return
+        communityTried = System.currentTimeMillis()
+        lifecycleScope.launch { loadCommunity(); if (playlistSongs["community"] != null) render() }
+    }
+
+    /** "Beliebt bei Hitradar-Hörern": vom Server, gelernt aus allen Apps (anonym). */
+    private suspend fun loadCommunity() {
+        val songs = Radar.popular()?.songs.orEmpty().take(50)
+        if (songs.isEmpty()) return
+        songs.take(12).forEach { Covers.load(it) }
+        val list = songs.map { songEntry(it) }
+        playlistSongs["community"] = list
+        list.firstOrNull { it.artwork.isNotBlank() }?.let { playlistCovers["community"] = it.artwork }
+    }
+
     private fun renderPlaylist(p: Page.PlaylistPage) {
         val songs = if (p.own) Playlists.get(this, p.name) else playlistSongs[p.query].orEmpty()
         if (!p.own && songs.isEmpty()) {
@@ -1066,7 +1097,7 @@ class MainActivity : ComponentActivity() {
             if (q in playlistTried) { rows.add(Row.Empty("Playlist konnte nicht geladen werden. Nach unten ziehen zum Neuladen.")); return }
             playlistTried.add(q)
             rows.add(Row.Empty("Lade Playlist…"))
-            lifecycleScope.launch { playlistSongs[q] = Deezer.playlistByName(q); render() }
+            lifecycleScope.launch { if (q == "community") loadCommunity() else playlistSongs[q] = Deezer.playlistByName(q); render() }
             return
         }
         if (songs.isNotEmpty()) {
@@ -1130,7 +1161,8 @@ class MainActivity : ComponentActivity() {
         // Playlists mit bekannten Liedern (als Radio-Mix)
         loadPlaylistCovers()
         rows.add(Row.Header("Playlists", "Bekannte Lieder – komplett aus dem Radio"))
-        rows.add(Row.Carousel(Playlists.curated.map { (name, q) ->
+        rows.add(Row.Carousel(listOf(Entry("pl:community", Kind.SHOW, "Beliebt bei Hitradar-Hörern", "Von allen gelernt", "",
+            playlistCovers["community"].orEmpty(), "Hitradar")) + Playlists.curated.map { (name, q) ->
             Entry("pl:$q", Kind.SHOW, name, "Playlist", "", playlistCovers[q].orEmpty(), name)
         }))
         val genres = Genres.all.filter { it.key != "kids" }
@@ -1545,6 +1577,12 @@ class MainActivity : ComponentActivity() {
             Row.Setting(R.drawable.ic_radar, "So funktioniert's", "Kurze Einführung in 4 Schritten") { intro(0) },
         ))
 
+        val share = Settings.share(this)
+        settingsGroup("Gemeinsam besser", listOf(
+            Row.Setting(R.drawable.ic_heart, "Anonym beitragen", "Gehörte und gemerkte Lieder zählen für „Beliebt bei Hitradar-Hörern“ – ohne Daten über dich",
+                toggle = share, chevron = false) { Settings.setShare(this, !share); render() },
+        ))
+
         settingsGroup("Rechtliches", listOf(
             Row.Setting(R.drawable.ic_book, "Datenschutz", null) {
                 try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gamingdoodz/radio-finder/blob/main/PRIVACY.md"))) } catch (_: Exception) {}
@@ -1680,7 +1718,10 @@ class MainActivity : ComponentActivity() {
         val song = LiveIndex.Song(Entry("", Kind.TRACK, title, artist, "", "", title))
         lifecycleScope.launch {
             val t0 = System.currentTimeMillis()
-            Scanner.titles(candidates.map { it.station }) { _, _ -> }
+            // Der Server prüft die Sender (schneller, ohne mobile Daten); geht das nicht, prüft das Handy selbst
+            val remote = Radar.verify(candidates.map { it.station.id })
+            if (remote != null) candidates.forEach { c -> remote[c.station.id]?.let { (title, _) -> LiveIndex.put(c.station, title) } }
+            else Scanner.titles(candidates.map { it.station }) { _, _ -> }
             val checked = candidates.filter { c -> (LiveIndex.get(c.station.id)?.time ?: 0L) >= t0 }
             // Bestätigt läuft es noch – oder der Sender verrät nichts, dann trotzdem versuchen
             val ok = checked.firstOrNull { c -> LiveIndex.get(c.station.id)?.let { song.matches(it.normalized) } == true }

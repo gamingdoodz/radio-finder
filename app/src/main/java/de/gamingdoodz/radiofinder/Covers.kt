@@ -31,6 +31,12 @@ object Covers {
         val k = key(radioTitle)
         cache[k]?.let { return@withContext it.takeIf { i -> i !== NONE } }
         if (k in missing) return@withContext null
+        // Zuerst der Server: der hat das Cover meist schon für einen anderen Nutzer geholt
+        Radar.coverBlocking(radioTitle)?.let { (art, t, a) ->
+            return@withContext if (art.isBlank()) { missing.add(k); null }
+            else Info(art, t.ifBlank { radioTitle.substringAfter(" - ") }, a.ifBlank { radioTitle.substringBefore(" - ") })
+                .also { cache[k] = it; coverUrls.add(art) }
+        }
         val artist = radioTitle.substringBefore(" - ").substringBefore(" – ").trim()
         val title = radioTitle.substringAfter(" - ").substringAfter(" – ").replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim()
         val hit = Deezer.search("$artist $title", 5).firstOrNull { e ->

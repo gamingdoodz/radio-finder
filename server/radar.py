@@ -137,6 +137,191 @@ async def h_similar(req):
     return gz(web.json_response(out))
 
 
+SHARED: dict = {}  # gemeinsam genutzte Verbindung (vom Scanner)
+
+
+# ---------------- Cover für alle: einmal bei Deezer holen, für alle Nutzer merken ----------------
+COVERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "covers.json")
+covers: dict = {}          # norm -> {"art","title","artist"} oder {} (= nichts gefunden)
+_cover_sem = asyncio.Semaphore(4)
+
+
+def load_covers():
+    try:
+        with open(COVERS_FILE, encoding="utf-8") as f:
+            covers.update(json.load(f))
+    except Exception:
+        pass
+
+
+def save_covers():
+    try:
+        with open(COVERS_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(covers, f)
+        os.replace(COVERS_FILE + ".tmp", COVERS_FILE)
+    except Exception:
+        pass
+
+
+async def find_cover(title: str):
+    key = normalize(title)
+    if key in covers:
+        return covers[key]
+    artist = re.split(r" - | – ", title, 1)[0].strip()
+    song = re.split(r" - | – ", title, 1)[-1]
+    song = re.sub(r"\(.*?\)|\[.*?\]", "", song).strip()
+    res = {}
+    try:
+        async with _cover_sem:
+            async with SHARED["session"].get("https://api.deezer.com/search",
+                                             params={"q": f"{artist} {song}", "limit": "5"},
+                                             timeout=aiohttp.ClientTimeout(total=8)) as r:
+                data = await r.json(content_type=None)
+        words_t = [w for w in normalize(song).split() if len(w) >= 2]
+        words_a = [w for w in normalize(artist).split() if len(w) >= 3]
+        for o in data.get("data", []):
+            t, a = normalize(o.get("title_short") or o.get("title") or ""), normalize((o.get("artist") or {}).get("name", ""))
+            if words_t and all(w in key for w in normalize(t).split() if len(w) >= 2) and (not words_a or any(w in a for w in words_a)):
+                art = (o.get("album") or {}).get("cover_big") or ""
+                if art:
+                    res = {"art": art, "title": o.get("title_short") or o.get("title"), "artist": (o.get("artist") or {}).get("name", "")}
+                    break
+    except Exception:
+        return None  # später nochmal versuchen
+    if len(covers) > 300_000:
+        covers.clear()
+    covers[key] = res
+    return res
+
+
+async def h_cover(req):
+    t = (req.query.get("q") or "").strip()[:200]
+    if not is_song(t):
+        return web.json_response({})
+    res = await find_cover(t)
+    return web.json_response(res or {})
+
+
+# ---------------- Prüfen auf Zuruf: läuft das wirklich gerade? ----------------
+async def h_verify(req):
+    ids = [i for i in (req.query.get("ids") or "").split(",") if i][:8]
+    m = ids_map()
+    sts = [m[i] for i in ids if i in m]
+
+    async def one(st):
+        try:
+            await asyncio.wait_for(check(SHARED["session"], st), timeout=7)
+        except Exception:
+            pass
+    await asyncio.gather(*(one(st) for st in sts))
+    t = time.time()
+    out = {}
+    for st in sts:
+        n = now.get(st["id"])
+        if n and t - n["time"] < 15:
+            out[st["id"]] = {"title": n["title"], "since": int(n["since"])}
+    return web.json_response(out)
+
+
+# ---------------- Senderlisten: beliebt, Kinder, Genres ----------------
+_lists_cache: dict = {}
+
+
+async def h_list(req):
+    typ = (req.query.get("t") or "popular").lower()[:40]
+    hit = _lists_cache.get(typ)
+    if hit and time.time() - hit[0] < 3600:
+        return gz(web.json_response(hit[1]))
+    # Liste ist nach Beliebtheit sortiert
+    if typ == "popular":
+        sel = [st for st in stations if st.get("cc") in ("DE", "AT", "CH")][:150]
+    elif typ == "kids":
+        rx = re.compile(r"kinder|kids|children|teddy|kiraka|toggo|kakadu")
+        sel = [st for st in stations if rx.search(st.get("tags", "")) or rx.search(st["name"].lower())][:60]
+    elif typ.startswith("tag:"):
+        tag = typ[4:]
+        de = [st for st in stations if tag in st.get("tags", "") and st.get("cc") == "DE"][:30]
+        other = [st for st in stations if tag in st.get("tags", "") and st.get("cc") != "DE"][:40]
+        sel = de + other
+    else:
+        sel = []
+    out = [{"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"]} for st in sel]
+    _lists_cache[typ] = (time.time(), out)
+    return gz(web.json_response(out))
+
+
+# ---------------- Gemeinsam lernen: was Hitradar-Hörer mögen (anonym) ----------------
+POPULAR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "popular.json")
+pop_days: dict = {}   # Tag -> {"songs": {norm: n}, "mixes": {key: n}}
+pop_titles: dict = {}  # norm -> Titel
+_pop_cache = {"t": 0, "body": None}
+EVENT_WEIGHT = {"heard": 1, "fav": 3, "playlist": 3, "mix": 1}
+
+
+def load_popular():
+    try:
+        with open(POPULAR_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        pop_days.update({int(k): v for k, v in d.get("days", {}).items()})
+        pop_titles.update(d.get("titles", {}))
+    except Exception:
+        pass
+
+
+def save_popular():
+    try:
+        with open(POPULAR_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"days": pop_days, "titles": pop_titles}, f)
+        os.replace(POPULAR_FILE + ".tmp", POPULAR_FILE)
+    except Exception:
+        pass
+
+
+async def h_event(req):
+    """Anonyme Meldung aus der App: Lied gehört/gemerkt oder Mix gestartet. Keine Nutzerdaten."""
+    typ = req.query.get("type", "")
+    val = (req.query.get("v") or "").strip()[:150]
+    if typ not in EVENT_WEIGHT or not val:
+        return web.json_response({"ok": False})
+    day = int(time.time() // 86400)
+    d = pop_days.setdefault(day, {"songs": {}, "mixes": {}})
+    if typ == "mix":
+        if not re.fullmatch(r"[a-z0-9:_\- ]{1,60}", val.lower()) or val.startswith(("artist:", "similar:", "my:")):
+            return web.json_response({"ok": False})
+        d["mixes"][val] = d["mixes"].get(val, 0) + 1
+    else:
+        if not is_song(val) or TALK.search(val):
+            return web.json_response({"ok": False})
+        k = normalize(val)
+        d["songs"][k] = d["songs"].get(k, 0) + EVENT_WEIGHT[typ]
+        pop_titles[k] = val
+    for old in [k for k in pop_days if k < day - 7]:
+        pop_days.pop(old, None)
+    return web.json_response({"ok": True})
+
+
+async def h_popular(req):
+    if not _pop_cache["body"] or time.time() - _pop_cache["t"] > 300:
+        songs: dict = {}
+        mixes: dict = {}
+        today = int(time.time() // 86400)
+        for day, d in pop_days.items():
+            w = 1.0 if day == today else 0.7 ** (today - day)  # neuere Tage zählen mehr
+            for k, n in d["songs"].items():
+                songs[k] = songs.get(k, 0) + n * w
+            for k, n in d["mixes"].items():
+                mixes[k] = mixes.get(k, 0) + n * w
+        out = {
+            "songs": [{"title": pop_titles.get(k, k), "score": round(v, 1)}
+                      for k, v in sorted(songs.items(), key=lambda kv: -kv[1])[:60] if v >= 2],
+            "mixes": [{"key": k, "score": round(v, 1)} for k, v in sorted(mixes.items(), key=lambda kv: -kv[1])[:20]],
+        }
+        _pop_cache.update(t=time.time(), body=gzip.compress(json.dumps(out, ensure_ascii=False).encode(), 6))
+    if "gzip" in req.headers.get("Accept-Encoding", ""):
+        return web.Response(body=_pop_cache["body"], content_type="application/json", headers={"Content-Encoding": "gzip"})
+    return web.Response(body=gzip.decompress(_pop_cache["body"]), content_type="application/json")
+
+
 # ---------------- Sender nach Namen suchen (alle ~50.000) ----------------
 _station_names = {"n": -1, "list": []}
 
@@ -401,6 +586,7 @@ async def load_stations(session: aiohttp.ClientSession):
                         "url": u,
                         "favicon": (o.get("favicon") or "").strip(),
                         "cc": (o.get("countrycode") or "").upper(),
+                        "tags": (o.get("tags") or "").lower()[:200],
                     })
                 break
             except Exception:
@@ -563,9 +749,12 @@ async def worker(session, ids):
 async def scanner():
     conn = aiohttp.TCPConnector(limit=CONCURRENCY, limit_per_host=20, ttl_dns_cache=600, ssl=False)
     async with aiohttp.ClientSession(connector=conn, headers={"User-Agent": UA}) as session:
+        SHARED["session"] = session
         load_charts()
         load_similar()
         load_ads()
+        load_covers()
+        load_popular()
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
         workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
@@ -583,6 +772,8 @@ async def scanner():
             if int(el) // 60 % 10 == 0:
                 save_charts()
                 save_ads()
+                save_covers()
+                save_popular()
             if int(el) // 60 % 30 == 15:
                 save_similar()
             # Einmal am Tag neu – und öfter, solange die Liste zu klein ist
@@ -732,7 +923,9 @@ async def main():
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
                     web.get("/sync", h_sync), web.get("/charts", h_charts),
                     web.get("/similar", h_similar), web.get("/wish", h_wish),
-                    web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations)])
+                    web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations),
+                    web.get("/cover", h_cover), web.get("/verify", h_verify), web.get("/list", h_list),
+                    web.get("/event", h_event), web.get("/popular", h_popular)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

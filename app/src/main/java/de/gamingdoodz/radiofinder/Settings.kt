@@ -32,13 +32,17 @@ object Settings {
 
     /** Startseite: welche Bereiche angezeigt werden. */
     val homeSections = listOf("quick" to "Schnellstart", "again" to "Weiterhören",
-        "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "charts" to "Deutsche Charts")
+        "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "community" to "Beliebt bei Hitradar-Hörern", "charts" to "Deutsche Charts")
     fun homeOn(context: Context, key: String) = prefs(context).getBoolean("home_$key", key != "again")
     fun setHomeOn(context: Context, key: String, v: Boolean) = prefs(context).edit().putBoolean("home_$key", v).apply()
 
     /** Mit welchem Reiter die App startet: 0 Start, 1 Musik, 2 Hörspiele, 3 Bibliothek. */
     fun startTab(context: Context) = prefs(context).getInt("starttab", 0)
     fun setStartTab(context: Context, v: Int) = prefs(context).edit().putInt("starttab", v).apply()
+
+    /** Anonym beitragen (welche Lieder beliebt sind), Standard: an. */
+    fun share(context: Context) = prefs(context).getBoolean("share", true)
+    fun setShare(context: Context, v: Boolean) = prefs(context).edit().putBoolean("share", v).apply()
 
     fun quality(context: Context) = prefs(context).getInt("quality", 3)
 

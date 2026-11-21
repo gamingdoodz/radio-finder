@@ -411,7 +411,10 @@ class PlaybackService : MediaLibraryService() {
     private val heardRunnable = Runnable {
         val p = session?.player ?: return@Runnable
         val now = p.mediaMetadata.title?.toString()?.trim().orEmpty()
-        if (p.isPlaying && Text.clean(now) == Text.clean(heardTitle)) Heard.add(this, Text.clean(heardTitle), heardStation)
+        if (p.isPlaying && Text.clean(now) == Text.clean(heardTitle)) {
+            Heard.add(this, Text.clean(heardTitle), heardStation)
+            Radar.event("heard", Text.clean(heardTitle))
+        }
     }
 
     private val stationLogos = HashMap<String, android.net.Uri?>()
@@ -653,10 +656,14 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(HITS_ID, "🔎 Letzte Suche"),
                 )
                 MUSIC_ID -> listOf(
+                    hitMixItem("pl:community", "⚡ Beliebt bei Hitradar-Hörern"),
+                    folderItem("playlists", "🎶 Playlists"),
                     folderItem(FREE_ID, "🎵 Freie Musik – Charts"),
                     folderItem(FREEGENRES_ID, "♾️ Freie Musik endlos"),
                     folderItem(KIDS_ID, "🧸 Kinderlieder"),
                 )
+                "playlists" -> Playlists.mine(applicationContext).keys.map { hitMixItem("my:$it", "⚡ $it") } +
+                    Playlists.curated.map { (name, q) -> hitMixItem("pl:$q", "⚡ $name") }
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
                 MOMENTS_ID -> Moments.now().filter { it.action == Moments.Action.HITMIX }
                     .map { hitMixItem(it.genreKey, "⚡ " + it.title) }

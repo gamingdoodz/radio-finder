@@ -9,3 +9,5 @@ server/charts.json
 server/stations_cache.json
 server/similar.json
 server/ads.json
+server/covers.json
+server/popular.json

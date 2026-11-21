@@ -67,6 +67,7 @@ object Playlists {
         if (list.any { Scanner.normalize(it.subtitle + " " + it.title) == key }) return false
         all[name] = list + song
         save(c, all)
+        Radar.event("playlist", "${song.subtitle} - ${song.title}")
         return true
     }
 

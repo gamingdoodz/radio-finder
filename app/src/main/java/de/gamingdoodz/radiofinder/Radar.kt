@@ -201,6 +201,64 @@ object Radar {
         }.getOrNull()
     }
 
+    /** Cover vom Server (einmal für alle Nutzer geholt). null = Server nicht erreichbar, leer = kein Cover. */
+    fun coverBlocking(radioTitle: String): Triple<String, String, String>? {
+        val text = fetch("/cover?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 10_000, 100_000) ?: return null
+        return runCatching {
+            val o = JSONObject(text)
+            Triple(o.optString("art"), o.optString("title"), o.optString("artist"))
+        }.getOrNull()
+    }
+
+    /** Sender direkt vom Server prüfen lassen: Sender-ID -> (Titel, seit). null = Server nicht erreichbar. */
+    suspend fun verify(ids: List<String>): Map<String, Pair<String, Long>>? = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyMap()
+        val text = fetch("/verify?ids=" + ids.joinToString(","), 12_000, 200_000) ?: return@withContext null
+        runCatching {
+            val o = JSONObject(text)
+            o.keys().asSequence().associateWith { k ->
+                val v = o.getJSONObject(k)
+                Text.clean(v.optString("title")) to v.optLong("since") * 1000L
+            }
+        }.getOrNull()
+    }
+
+    /** Senderliste vom Server ("popular", "kids", "tag:rock"). null = nicht erreichbar. */
+    fun listBlocking(type: String): List<Station>? {
+        val text = fetch("/list?t=" + URLEncoder.encode(type, "UTF-8"), 10_000, 2_000_000) ?: return null
+        return runCatching {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                Station(o.optString("id"), StationRepository.cleanName(o.optString("name")), o.optString("url"), o.optString("favicon"), false)
+            }.filter { it.id.isNotBlank() && it.url.isNotBlank() && !Blocklist.blocked(it.id, it.url) }
+        }.getOrNull()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Anonym melden, was gehört/gemerkt wurde (für "Beliebt bei Hitradar-Hörern"). Ohne Nutzerdaten. */
+    fun event(type: String, value: String) {
+        val c = appContext ?: return
+        if (!Settings.share(c)) return
+        Thread { runCatching { fetch("/event?type=$type&v=" + URLEncoder.encode(value, "UTF-8"), 5000, 10_000) } }.start()
+    }
+
+    data class Popular(val songs: List<String>, val mixes: List<String>)
+    @Volatile private var popularCache: Pair<Long, Popular>? = null
+
+    /** Was Hitradar-Hörer gerade mögen (Lieder und Mixe), höchstens alle 10 Minuten neu. */
+    suspend fun popular(): Popular? = withContext(Dispatchers.IO) {
+        popularCache?.let { (at, p) -> if (System.currentTimeMillis() - at < 10 * 60_000L) return@withContext p }
+        val text = fetch("/popular", 8000, 1_000_000) ?: return@withContext popularCache?.second
+        runCatching {
+            val o = JSONObject(text)
+            val s = o.optJSONArray("songs") ?: JSONArray()
+            val m = o.optJSONArray("mixes") ?: JSONArray()
+            Popular((0 until s.length()).map { Text.clean(s.getJSONObject(it).optString("title")) }.filter { LiveIndex.isMusic(it) },
+                (0 until m.length()).map { m.getJSONObject(it).optString("key") })
+                .also { popularCache = System.currentTimeMillis() to it }
+        }.getOrNull()
+    }
+
     /** Sucht ein Lied auf dem Server. null = Server nicht erreichbar. */
     suspend fun search(query: String): List<Scanner.Hit>? = withContext(Dispatchers.IO) {
         // Suche ist vom Nutzer gewollt: immer fragen, bei einem Aussetzer einmal kurz nachfassen

@@ -25,6 +25,7 @@ object Favorites {
         val list = all(context).toMutableList()
         val nowFav = list.none { it.id == entry.id }
         if (nowFav) list.add(0, entry) else list.removeAll { it.id == entry.id }
+        if (nowFav && entry.kind == Kind.TRACK) Radar.event("fav", "${entry.subtitle} - ${entry.title}")
         val arr = JSONArray()
         list.forEach { arr.put(it.toJson()) }
         prefs(context).edit().putString(KEY, arr.toString()).apply()

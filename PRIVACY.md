@@ -43,6 +43,10 @@ Um dir beim Öffnen eines Liedes nur passende Apps anzubieten, prüft Hitradar *
 ## Kinder
 Die App enthält einen Kinder-Modus, erhebt aber auch dort keine Daten.
 
+## Anonyme Nutzungszahlen
+
+Damit alle von beliebten Liedern profitieren („Beliebt bei Hitradar-Hörern“), meldet die App gehörte, gemerkte oder zu Playlists hinzugefügte Lieder sowie gestartete Mix-Arten an den Hitradar-Server. Übertragen wird nur der Liedtitel bzw. die Mix-Art – keine Kennung, kein Konto, kein Gerät. Der Server zählt nur Summen pro Tag und löscht sie nach 7 Tagen. IP-Adressen werden dabei nicht gespeichert. Abschaltbar unter Mehr → Einstellungen → „Anonym beitragen“.
+
 ## Für Radiosender
 Hitradar spielt öffentlich angebotene Streams ab und zeigt die vom Sender mitgeschickten Titel an. Es werden keine Inhalte gespeichert oder aufgezeichnet. Möchte ein Sender nicht in Hitradar erscheinen, genügt eine kurze E-Mail an gamingdoodz@googlemail.com – er wird dann umgehend entfernt.
 
