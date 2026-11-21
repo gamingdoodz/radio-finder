@@ -7,3 +7,4 @@ __pycache__/
 server/venv/
 server/charts.json
 server/stations_cache.json
+server/similar.json

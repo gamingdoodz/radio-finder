@@ -51,8 +51,160 @@ def put(st: dict, title: str):
     norm = normalize(title)
     now[st["id"]] = {"title": title, "norm": norm, "since": since, "time": t}
     # Neues Lied auf einem Sender aus DE/AT/CH: für die Radio-Charts zählen
-    if since == t and st.get("cc") in ("DE", "AT", "CH") and is_song(title) and not TALK.search(title):
-        count_play(norm, title, st["id"], t)
+    if since == t and is_song(title) and not TALK.search(title):
+        if st.get("cc") in ("DE", "AT", "CH"):
+            count_play(norm, title, st["id"], t)
+        learn_neighbors(st["id"], norm, title)
+
+
+# ---------------- Ähnliche Lieder: was Sender oft direkt hintereinander spielen ----------------
+SIMILAR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "similar.json")
+last_song: dict = {}     # Sender -> zuletzt gespieltes Lied (norm)
+neighbors: dict = {}     # norm -> {norm: Anzahl}
+song_titles: dict = {}   # norm -> Titel
+
+
+def learn_neighbors(sid, norm, title):
+    song_titles[norm] = title
+    prev = last_song.get(sid)
+    last_song[sid] = norm
+    if not prev or prev == norm:
+        return
+    for a, b in ((prev, norm), (norm, prev)):
+        d = neighbors.setdefault(a, {})
+        d[b] = d.get(b, 0) + 1
+        if len(d) > 60:  # nur die häufigsten Nachbarn behalten
+            for k, _ in sorted(d.items(), key=lambda kv: kv[1])[:20]:
+                del d[k]
+    if len(neighbors) > 400_000:  # Speicher begrenzen: seltene Lieder vergessen
+        for k in [k for k, d in neighbors.items() if sum(d.values()) < 3]:
+            neighbors.pop(k, None)
+
+
+def save_similar():
+    try:
+        keep = {k: dict(sorted(d.items(), key=lambda kv: -kv[1])[:25]) for k, d in neighbors.items() if sum(d.values()) >= 2}
+        titles = {k: song_titles[k] for k in set(keep) | {n for d in keep.values() for n in d} if k in song_titles}
+        with open(SIMILAR_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"n": keep, "t": titles}, f)
+        os.replace(SIMILAR_FILE + ".tmp", SIMILAR_FILE)
+    except Exception as e:
+        print("Ähnliche speichern:", e, flush=True)
+
+
+def load_similar():
+    try:
+        with open(SIMILAR_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        neighbors.update(d.get("n", {}))
+        song_titles.update(d.get("t", {}))
+        print(f"Ähnliche Lieder geladen: {len(neighbors)}", flush=True)
+    except Exception:
+        pass
+
+
+_similar_cache: dict = {}
+
+
+async def h_similar(req):
+    q = normalize(req.query.get("q", ""))
+    if not q:
+        return web.json_response([])
+    hit = _similar_cache.get(q)
+    if hit and time.time() - hit[0] < 600:
+        return gz(web.json_response(hit[1]))
+    key = q if q in neighbors else None
+    if key is None:
+        # Ungefähr passend: Lied, das alle Wörter enthält (das mit den meisten Daten)
+        words = q.split()
+        best = 0
+        for k, d in neighbors.items():
+            if all(w in k for w in words):
+                n = sum(d.values())
+                if n > best:
+                    best, key = n, k
+    out = []
+    if key:
+        for k, n in sorted(neighbors[key].items(), key=lambda kv: -kv[1])[:30]:
+            if n >= 2 and k in song_titles:
+                out.append({"title": song_titles[k], "score": n})
+    if len(_similar_cache) > 3000:
+        _similar_cache.clear()
+    _similar_cache[q] = (time.time(), out)
+    return gz(web.json_response(out))
+
+
+# ---------------- Wünsch dir was: kleine KI auf dem Server ----------------
+GENRES = {
+    "xmas": "Weihnachtslieder", "charts": "aktuelle Hits/Charts", "pop": "Pop und Deutsch-Pop", "rap": "Rap und Hip-Hop",
+    "dance": "Dance, Electronic, House, Techno", "rock": "Rock und Alternative", "schlager": "Schlager",
+    "party": "Party, Après-Ski, Ballermann, Fasching", "80s": "80er", "90s": "90er", "2000s": "2000er",
+    "summer": "Sommerhits, gute Laune", "deutschrap": "Deutschrap", "rockclassics": "Rock-Klassiker, Metal",
+    "oldies": "Oldies, 60er, 70er", "latin": "Latin, Reggaeton", "country": "Country", "jazz": "Jazz, Soul, Blues",
+    "classic": "Klassik, Orchester", "chill": "ruhig, entspannt, Einschlafen, Lounge, Romantik", "kids": "Kinderlieder",
+}
+LLM_URL = "http://127.0.0.1:8090/completion"
+_wish_cache: dict = {}
+_llm_lock = asyncio.Semaphore(1)
+WISH_RULES = [
+    ("xmas", r"weihnacht|christmas|xmas|advent"), ("kids", r"kinder|kids"), ("chill", r"ruhig|entspann|chill|schlaf|lounge|romant|kuschel"),
+    ("party", r"party|feier|ballermann|apres|après|fasching|karneval"), ("80s", r"80er|achtziger"), ("90s", r"90er|neunziger"),
+    ("2000s", r"2000er|nuller"), ("oldies", r"oldie|60er|70er|siebziger|sechziger"), ("deutschrap", r"deutschrap|deutscher rap"),
+    ("rap", r"rap|hip ?hop"), ("rock", r"rock|metal|gitarre"), ("schlager", r"schlager"), ("dance", r"dance|techno|house|elektro|edm|tanz"),
+    ("summer", r"sommer|gute laune|fröhlich|sonne"), ("jazz", r"jazz|soul|blues"), ("classic", r"klassik|orchester|mozart|beethoven"),
+    ("latin", r"latin|reggaeton|salsa"), ("country", r"country"), ("charts", r"hits|charts|aktuell|neu"),
+]
+
+
+def wish_rules(q: str):
+    ql = q.lower()
+    for key, rx in WISH_RULES:
+        if re.search(rx, ql):
+            return {"genre": key, "artist": None, "ai": False}
+    return None
+
+
+async def ask_llm(session, q: str):
+    genres = "\n".join(f"- {k}: {v}" for k, v in GENRES.items())
+    prompt = (
+        "<|im_start|>system\nDu wählst Musik für eine Radio-App. Antworte nur mit JSON.<|im_end|>\n"
+        f"<|im_start|>user\nMusikwunsch: \"{q}\"\n\nWähle das passendste genre aus dieser Liste:\n{genres}\n\n"
+        "Wenn ein bestimmter Künstler oder eine Band genannt wird, schreibe den Namen in artist, sonst einen leeren Text.<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+    schema = {"type": "object", "properties": {
+        "genre": {"type": "string", "enum": list(GENRES)},
+        "artist": {"type": "string", "maxLength": 40}}, "required": ["genre", "artist"]}
+    async with _llm_lock:
+        async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 48, "temperature": 0.1,
+                                               "json_schema": schema, "cache_prompt": True},
+                                timeout=aiohttp.ClientTimeout(total=25)) as r:
+            data = await r.json()
+    out = json.loads(data.get("content", "{}"))
+    return {"genre": out.get("genre") if out.get("genre") in GENRES else None,
+            "artist": (out.get("artist") or "").strip() or None, "ai": True}
+
+
+async def h_wish(req):
+    q = (req.query.get("q") or "").strip()[:200]
+    if not q:
+        return web.json_response({})
+    key = q.lower()
+    hit = _wish_cache.get(key)
+    if hit:
+        return web.json_response(hit)
+    res = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            res = await ask_llm(session, q)
+    except Exception:
+        res = None
+    if not res or not (res.get("genre") or res.get("artist")):
+        res = wish_rules(q) or {"genre": None, "artist": None, "ai": False}
+    if len(_wish_cache) > 2000:
+        _wish_cache.clear()
+    _wish_cache[key] = res
+    return web.json_response(res)
 
 
 # ---------------- Radio-Charts: meistgespielt in den letzten 24 Stunden ----------------
@@ -329,6 +481,7 @@ async def scanner():
     conn = aiohttp.TCPConnector(limit=CONCURRENCY, limit_per_host=20, ttl_dns_cache=600, ssl=False)
     async with aiohttp.ClientSession(connector=conn, headers={"User-Agent": UA}) as session:
         load_charts()
+        load_similar()
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
         workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
@@ -345,6 +498,8 @@ async def scanner():
             print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
             if int(el) // 60 % 10 == 0:
                 save_charts()
+            if int(el) // 60 % 30 == 15:
+                save_similar()
             # Einmal am Tag neu – und öfter, solange die Liste zu klein ist
             if el > 24 * 3600 or len(stations) < 20000 and int(el) // 60 % 30 == 29:
                 if await load_stations(session):
@@ -490,7 +645,8 @@ async def h_sync(req):
 async def main():
     app = web.Application()
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
-                    web.get("/sync", h_sync), web.get("/charts", h_charts)])
+                    web.get("/sync", h_sync), web.get("/charts", h_charts),
+                    web.get("/similar", h_similar), web.get("/wish", h_wish)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
