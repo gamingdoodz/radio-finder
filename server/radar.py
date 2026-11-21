@@ -118,7 +118,10 @@ async def h_similar(req):
         # Ungefähr passend: Lied, das alle Wörter enthält (das mit den meisten Daten)
         words = q.split()
         best = 0
-        for k, d in neighbors.items():
+        # höchstens 150.000 Lieder durchsehen, damit der Server nicht blockiert
+        for i, (k, d) in enumerate(neighbors.items()):
+            if i > 150_000:
+                break
             if all(w in k for w in words):
                 n = sum(d.values())
                 if n > best:

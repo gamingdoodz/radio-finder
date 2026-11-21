@@ -814,6 +814,8 @@ class PlaybackService : MediaLibraryService() {
             if (hm != null) {
                 val first = hitMix.start(hm.mediaId.removePrefix("hitmix:").ifBlank { null })
                 updateFavButton()
+                if (first == null) android.widget.Toast.makeText(this@PlaybackService,
+                    "Gerade fängt kein passender Hit an – ich springe hin, sobald einer kommt", android.widget.Toast.LENGTH_LONG).show()
                 return@future MediaSession.MediaItemsWithStartPosition(
                     listOfNotNull(first), if (first == null) C.INDEX_UNSET else 0, C.TIME_UNSET
                 )

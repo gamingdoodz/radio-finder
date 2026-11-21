@@ -12,6 +12,13 @@ Favoriten, zuletzt gehörte Titel, Wunschliste, Einstellungen und Wecker werden 
 ## Hitradar-Server
 Damit die Suche schnell ist, fragt die App einen eigenen Server (gehostet bei Oracle Cloud in Frankfurt), welche Lieder gerade auf welchen Sendern laufen. Dabei werden dein **Suchbegriff** und technisch bedingt deine **IP-Adresse** übertragen. Beides wird nur für die Antwort verwendet und **nicht gespeichert, nicht protokolliert und nicht weitergegeben**. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (Funktion der App).
 
+## Wünsch dir was und Spracheingabe
+Bei „Wünsch dir was“ wird dein Wunschtext (z. B. „was Ruhiges zum Einschlafen“) an den Hitradar-Server geschickt. Eine kleine KI auf diesem Server wählt daraus eine passende Musikrichtung. Der Text wird nur dafür verwendet und **nicht gespeichert oder protokolliert**.
+Die Spracheingabe (🎤) nutzt die Spracherkennung deines Android-Geräts (meist von Google). Hitradar selbst nimmt kein Audio auf und hat keinen Zugriff auf das Mikrofon. Für die Spracherkennung gelten die Datenschutzhinweise des Anbieters.
+
+## Ähnliche Lieder und Radio-Charts
+Der Server zählt, welche Lieder Radiosender spielen und in welcher Reihenfolge. Dafür werden nur die öffentlichen Titelangaben der Sender verwendet, keine Daten über dich.
+
 ## Werbung am Senderanfang
 Misst die App, wie lange ein Sender beim Einschalten Werbung spielt, meldet sie **nur die Sender-ID und die Dauer** an den Hitradar-Server. So profitieren alle Nutzer davon. Es werden dabei keine Daten über dich gespeichert.
 

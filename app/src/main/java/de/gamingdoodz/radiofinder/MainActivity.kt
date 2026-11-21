@@ -202,6 +202,7 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch {
                     Radar.sync(force = true)
                     radioChartsAt = 0L
+                    playlistTried.clear(); playlistCoversTried = false
                     if (tab == Tab.HOME && page == null) loadHome()
                     render()
                     isRefreshing = false
@@ -231,6 +232,7 @@ class MainActivity : ComponentActivity() {
         clear.setOnClickListener { input.setText(""); startSearch() }
         findViewById<View>(R.id.mic).setOnClickListener { listen(wish = false) }
         // ✨ Wünsch dir was: mit Text = Wunsch erfüllen, ohne Text = sprechen
+        findViewById<View>(R.id.wishBtn).visibility = if (kids()) View.GONE else View.VISIBLE
         findViewById<View>(R.id.wishBtn).setOnClickListener {
             val t = input.text.toString().trim()
             if (t.isNotEmpty()) handleWish(t) else listen(wish = true)
@@ -1036,11 +1038,16 @@ class MainActivity : ComponentActivity() {
 
     private val playlistCovers = HashMap<String, String>()
     private val playlistSongs = HashMap<String, List<Entry>>()
+    private val playlistTried = HashSet<String>()
     private var playlistCoversLoading = false
 
     /** Cover der fertigen Playlists (erstes Lied) im Hintergrund laden. */
+    private var playlistCoversTried = false
+
     private fun loadPlaylistCovers() {
-        if (playlistCoversLoading || playlistCovers.size >= Playlists.curated.size) return
+        // Nur einmal pro Start versuchen (sonst würde bei einem Fehler bei jedem Bildaufbau neu geladen)
+        if (playlistCoversLoading || playlistCoversTried) return
+        playlistCoversTried = true
         playlistCoversLoading = true
         lifecycleScope.launch {
             Playlists.curated.forEach { (_, q) ->
@@ -1055,8 +1062,11 @@ class MainActivity : ComponentActivity() {
     private fun renderPlaylist(p: Page.PlaylistPage) {
         val songs = if (p.own) Playlists.get(this, p.name) else playlistSongs[p.query].orEmpty()
         if (!p.own && songs.isEmpty()) {
+            val q = p.query ?: return
+            if (q in playlistTried) { rows.add(Row.Empty("Playlist konnte nicht geladen werden. Nach unten ziehen zum Neuladen.")); return }
+            playlistTried.add(q)
             rows.add(Row.Empty("Lade Playlist…"))
-            lifecycleScope.launch { p.query?.let { playlistSongs[it] = Deezer.playlistByName(it) }; render() }
+            lifecycleScope.launch { playlistSongs[q] = Deezer.playlistByName(q); render() }
             return
         }
         if (songs.isNotEmpty()) {
