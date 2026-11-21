@@ -901,7 +901,10 @@ class MainActivity : ComponentActivity() {
         // 3. Jetzt im Radio: erst Chart-Hits, dann andere Musik – eine Liste statt zwei
         val chartsLive = topDe.mapNotNull { e -> LiveIndex.findSong(e.title, e.subtitle) }
             .distinctBy { it.station.id }.map { it.station.toEntry(it.title) }
-        val live = dedupe(chartsLive + liveEntries(popular.take(80))).take(25)
+        // Danach beliebte Sender, dann alles andere, was der Server gerade an Musik kennt (frisch angefangen zuerst)
+        val others = LiveIndex.fresh().filter { isMusic(it.title) }.sortedByDescending { it.since }
+            .take(60).map { it.station.toEntry(it.title) }
+        val live = dedupe(chartsLive + liveEntries(popular.take(80)) + others).take(25)
         rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
         if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live, live = true))
 
