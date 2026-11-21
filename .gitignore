@@ -6,3 +6,4 @@ local.properties
 __pycache__/
 server/venv/
 server/charts.json
+server/stations_cache.json

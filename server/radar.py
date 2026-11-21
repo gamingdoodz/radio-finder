@@ -122,10 +122,28 @@ async def h_charts(req):
 
 # ---------------- Senderliste ----------------
 
+STATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stations_cache.json")
+
+
+def load_cached_stations() -> bool:
+    """Beim Start sofort die zuletzt gespeicherte Senderliste nehmen (kein Warten auf radio-browser)."""
+    global stations
+    try:
+        with open(STATIONS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if data:
+            stations = data
+            print(f"Senderliste aus Speicher: {len(stations)} Sender", flush=True)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 async def load_stations(session: aiohttp.ClientSession):
     global stations
-    queries = [
-        f"limit={MAX_STATIONS}",
+    # In Seiten zu je 10.000 holen – eine riesige Anfrage bricht gern ab
+    queries = [f"limit=10000&offset={o}" for o in range(0, MAX_STATIONS, 10000)] + [
         "countrycode=DE&limit=3000",
         "countrycode=AT&limit=600",
         "countrycode=CH&limit=600",
@@ -135,7 +153,7 @@ async def load_stations(session: aiohttp.ClientSession):
         for host in RB_SERVERS:
             try:
                 url = f"https://{host}/json/stations/search?{q}&order=clickcount&reverse=true&hidebroken=true"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=300)) as r:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=180)) as r:
                     data = await r.json(content_type=None)
                 for o in data:
                     sid = o.get("stationuuid")
@@ -161,9 +179,19 @@ async def load_stations(session: aiohttp.ClientSession):
     if block:
         found = {k: v for k, v in found.items()
                  if k.lower() not in block and not any("." in b and b in v["url"].lower() for b in block)}
-    if found:
+    # Nur übernehmen, wenn die neue Liste nicht viel kleiner ist (sonst hat radio-browser gehakt)
+    if found and (not stations or len(found) >= 0.8 * len(stations)):
         stations = list(found.values())
-    print(f"Senderliste: {len(stations)} Sender", flush=True)
+        try:
+            with open(STATIONS_FILE + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(stations, f)
+            os.replace(STATIONS_FILE + ".tmp", STATIONS_FILE)
+        except Exception as e:
+            print("Senderliste speichern:", e, flush=True)
+        print(f"Senderliste: {len(stations)} Sender", flush=True)
+        return True
+    print(f"Senderliste unvollständig ({len(found)}), behalte {len(stations)} Sender", flush=True)
+    return False
 
 
 # ---------------- Titel abfragen ----------------
@@ -301,10 +329,15 @@ async def scanner():
     conn = aiohttp.TCPConnector(limit=CONCURRENCY, limit_per_host=20, ttl_dns_cache=600, ssl=False)
     async with aiohttp.ClientSession(connector=conn, headers={"User-Agent": UA}) as session:
         load_charts()
-        await load_stations(session)
-        ids = {s["id"]: s for s in stations}
-        schedule_all()
+        ids: dict = {}
+        # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
         workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
+        if load_cached_stations():
+            ids.update({s["id"]: s for s in stations})
+            schedule_all()
+        if await load_stations(session):
+            ids.clear(); ids.update({s["id"]: s for s in stations})
+            schedule_all()
         while True:
             await asyncio.sleep(60)
             el = time.time() - stats["since"]
@@ -312,11 +345,11 @@ async def scanner():
             print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
             if int(el) // 60 % 10 == 0:
                 save_charts()
-            # Einmal am Tag die Senderliste erneuern (oder sofort, falls sie beim Start fehlte)
-            if el > 24 * 3600 or not stations:
-                await load_stations(session)
-                ids.clear(); ids.update({s["id"]: s for s in stations})
-                schedule_all()
+            # Einmal am Tag neu – und öfter, solange die Liste zu klein ist
+            if el > 24 * 3600 or len(stations) < 20000 and int(el) // 60 % 30 == 29:
+                if await load_stations(session):
+                    ids.clear(); ids.update({s["id"]: s for s in stations})
+                    schedule_all()
                 stats.update(checked=0, since=time.time())
 
 
