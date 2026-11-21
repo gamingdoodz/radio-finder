@@ -123,14 +123,26 @@ object Radar {
     }
 
     /** Meistgespielt im Radio (24 h): Liste aus (Titel, wie oft gespielt). */
+    @Volatile private var chartsCache: Pair<Long, List<Pair<String, Int>>>? = null
+
+    /** Wie oft lief dieses Lied heute im Radio? (normalisierter Titel -> Anzahl, für "bekannte Lieder zuerst") */
+    @Volatile var chartPlays: Map<String, Int> = emptyMap()
+        private set
+
     suspend fun charts(): List<Pair<String, Int>> = withContext(Dispatchers.IO) {
-        val text = fetch("/charts", 8000, 2_000_000) ?: return@withContext emptyList()
-        runCatching {
+        chartsCache?.let { (at, l) -> if (System.currentTimeMillis() - at < 10 * 60_000L && l.isNotEmpty()) return@withContext l }
+        val text = fetch("/charts", 8000, 2_000_000) ?: return@withContext chartsCache?.second.orEmpty()
+        val list = runCatching {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { i ->
                 arr.optJSONObject(i)?.let { Text.clean(it.optString("title")) to it.optInt("plays") }
             }.filter { LiveIndex.isMusic(it.first) }
         }.getOrDefault(emptyList())
+        if (list.isNotEmpty()) {
+            chartsCache = System.currentTimeMillis() to list
+            chartPlays = list.associate { Scanner.normalize(it.first) to it.second }
+        }
+        list
     }
 
     /** Lieder, die Sender oft direkt vor oder nach diesem Lied spielen ("Mehr wie dieses"). */

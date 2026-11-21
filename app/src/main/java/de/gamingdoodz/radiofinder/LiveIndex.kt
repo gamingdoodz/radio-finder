@@ -70,6 +70,14 @@ object LiveIndex {
     /** Zählt jede Änderung. Zwischenspeicher gelten, bis sich etwas ändert (höchstens 30 s). */
     @Volatile private var gen = 0L
 
+    /** Bekannt (viele Sender, oft gespielt) und gerade erst angefangen = höher. Fast vorbei = tiefer. */
+    private fun score(n: Now, pop: Map<String, Int>, t: Long): Long {
+        val age = t - n.since
+        return ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 60_000L +
+            (Radar.chartPlays[n.normalized] ?: 0).coerceAtMost(200) * 1_500L -
+            age - (if (age > 180_000L) 300_000L else 0L)
+    }
+
     /** Nach einem Server-Abgleich: Zwischenspeicher neu berechnen lassen. */
     fun invalidate() { gen++ }
 
@@ -87,7 +95,7 @@ object LiveIndex {
         val m = HashMap<String, MutableList<Now>>()
         for (n in f) for (w in n.normalized.split(' ')) if (w.length >= 2) m.getOrPut(w) { mutableListOf() }.add(n)
         val top = f.filter { isMusic(it.title) }
-            .sortedWith(compareByDescending<Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+            .sortedByDescending { score(it, pop, t) }
             .distinctBy { it.normalized }.take(300)
         val g = gen + 1
         freshCache = Cache(g, t, f)
@@ -127,8 +135,9 @@ object LiveIndex {
         valid(topCache)?.let { return it }
         val g = gen
         val pop = popularity()
+        val t = System.currentTimeMillis()
         return fresh().filter { isMusic(it.title) }
-            .sortedWith(compareByDescending<Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
+            .sortedByDescending { score(it, pop, t) }
             .distinctBy { it.normalized }
             .take(300)
             .also { topCache = Cache(g, System.currentTimeMillis(), it) }

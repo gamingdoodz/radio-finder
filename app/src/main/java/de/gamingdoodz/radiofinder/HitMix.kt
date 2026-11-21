@@ -68,6 +68,7 @@ class HitMix(
             else -> artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
         }
         Radar.fast = true
+        scope.launch { Radar.charts() }
         prefs(context).edit().putString("name", name).putString("now", "Suche Hits…").apply()
 
         val hits = when {
@@ -286,11 +287,15 @@ class HitMix(
         val tiers = listOf(fromList, fromGenre, fromArtist, fromAny)
         val best = (tiers.map { noAds(it) } + tiers).firstOrNull { it.isNotEmpty() }
             ?.minByOrNull { (n, key) ->
-                val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 45_000L
-                val top = rank[key]?.let { (100 - it).coerceAtLeast(0) * 1_500L } ?: 0L
-                val knownArtist = if (artistWords.any { w -> w.all { n.normalized.contains(it) } }) 60_000L else 0L
-                // Frisch angefangen zählt, Sender mit Vorab-Werbung rutschen nach hinten
-                (t - n.since) + (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - top - knownArtist
+                // Bekannte Lieder deutlich bevorzugen: läuft auf vielen Sendern, oft gespielt heute, weit oben in der Liste
+                val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 60_000L
+                val played = (Radar.chartPlays[n.normalized] ?: 0).coerceAtMost(200) * 1_500L
+                val top = rank[key]?.let { (100 - it).coerceAtLeast(0) * 2_000L } ?: 0L
+                val knownArtist = if (artistWords.any { w -> w.all { n.normalized.contains(it) } }) 90_000L else 0L
+                // Frisch angefangen zählt; fast vorbei (über 3 Min.) und Sender mit Vorab-Werbung rutschen nach hinten
+                val age = t - n.since
+                age + (if (age > 180_000L) 300_000L else 0L) +
+                    (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist
             } ?: return null
         val (n, key) = best
         currentStationId = n.station.id
