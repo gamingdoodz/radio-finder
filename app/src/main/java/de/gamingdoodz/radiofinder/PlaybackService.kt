@@ -617,6 +617,7 @@ class PlaybackService : MediaLibraryService() {
                 RADIO_ID -> listOf(
                     folderItem(LIVE_ID, "🔴 Jetzt im Radio"),
                     folderItem(CHARTS_LIVE_ID, "🔥 Charts gerade im Radio"),
+                    folderItem(RADIOCHARTS_ID, "📊 Meistgespielt im Radio"),
                     folderItem(POPULAR_ID, "📻 Beliebte Sender"),
                     folderItem(HITS_ID, "🔎 Letzte Suche"),
                 )
@@ -642,6 +643,18 @@ class PlaybackService : MediaLibraryService() {
                         .sortedWith(compareByDescending<LiveIndex.Now> { (pop[it.normalized] ?: 1).coerceAtMost(5) }.thenByDescending { it.since })
                         .distinctBy { it.normalized }.take(60)
                     withCovers(list.map { it.station.toEntry(it.title) })
+                }
+                RADIOCHARTS_ID -> {
+                    // Mix aus den meistgespielten Liedern + die davon, die gerade laufen
+                    Radar.sync()
+                    val charts = Radar.charts().take(50)
+                    val live = charts.mapNotNull { (t, _) ->
+                        val a = t.substringBefore(" - ").substringBefore(" – ").trim()
+                        val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
+                        LiveIndex.findSong(ti, a)
+                    }.distinctBy { it.station.id }
+                    listOf(hitMixItem("radiocharts", "⚡ Mix: Meistgespielt im Radio")) +
+                        withCovers(live.map { it.station.toEntry(it.title) })
                 }
                 CHARTS_LIVE_ID -> {
                     val charts = Deezer.topGermany()

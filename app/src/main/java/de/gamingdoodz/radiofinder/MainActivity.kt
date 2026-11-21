@@ -1062,6 +1062,9 @@ class MainActivity : ComponentActivity() {
         loadRadioCharts()
         if (radioCharts.isEmpty()) { rows.add(Row.Empty("Lade…")); return }
         loadCoverTitles(radioCharts.take(15).map { it.first })
+        if (HitMix.activeName(this) == null) rows.add(button(R.drawable.ic_bolt, "Mix aus den Radio-Charts starten") {
+            startHitMix("radiocharts", "– Meistgespielt im Radio")
+        })
         val list = radioCharts.map { songEntry(it.first) }
         list.forEachIndexed { i, e ->
             val plays = radioCharts[i].second

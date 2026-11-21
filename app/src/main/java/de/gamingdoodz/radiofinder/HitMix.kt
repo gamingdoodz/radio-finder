@@ -53,9 +53,11 @@ class HitMix(
         val artist = genreKey?.takeIf { it.startsWith("artist:") }?.split(":", limit = 3)
         val genre = Genres.all.firstOrNull { it.key == genreKey }
         val favMix = genreKey == "favs"
+        val chartsMix = genreKey == "radiocharts"
         val name = when {
             genreKey == "mine" -> "Mein Mix"
             favMix -> "Lieblingssender"
+            chartsMix -> "Meistgespielt im Radio"
             else -> artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
         }
         Radar.fast = true
@@ -63,6 +65,11 @@ class HitMix(
 
         val hits = when {
             genreKey == "mine" -> mySongs()
+            chartsMix -> Radar.charts().take(60).map { (t, _) ->
+                val artist = t.substringBefore(" - ").substringBefore(" – ").trim()
+                val title = t.substringAfter(" - ").substringAfter(" – ").trim()
+                Entry("rc:" + t.hashCode(), Kind.TRACK, title, artist, "", "", title)
+            }.ifEmpty { Deezer.topGermany(100) }
             artist != null -> Deezer.artistTop(artist.getOrNull(1)?.toLongOrNull() ?: 0L)
             genre?.key == "kids" -> Deezer.kidsHits()
             genre?.playlist != null -> Deezer.playlistByName(genre.playlist)
