@@ -112,6 +112,15 @@ object LiveIndex {
             .also { topCache = Cache(g, System.currentTimeMillis(), it) }
     }
 
+    fun find(query: String): List<Now> {
+        val words = Scanner.words(query)
+        if (words.isEmpty()) return emptyList()
+        return fresh().filter { n -> words.all { n.normalized.contains(it) } }
+    }
+
+    /** Läuft dieser Song (Titel + Künstler) gerade irgendwo? */
+    fun findSong(title: String, artist: String): Now? = findSongs(title, artist).firstOrNull()
+
     /** Wort -> laufende Titel mit diesem Wort. Damit muss nicht jedes Mal über alle 8.000 Einträge gesucht werden. */
     @Volatile private var wordIndex: Pair<List<Now>, Map<String, List<Now>>>? = null
 
