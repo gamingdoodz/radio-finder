@@ -165,21 +165,14 @@ class WatchService : Service() {
             val matchers = wishes.map { it to Scanner.words(it) }
             var found: Pair<String, Scanner.Hit>? = null
             // Erst den Server fragen (tausende Sender, kaum Daten)
-            var serverOk = true
-            if (matchers.size > 8) {
-                // Viele Wünsche: einmal alles holen und hier vergleichen
-                serverOk = Radar.sync(force = true)
-                if (serverOk) {
-                    val live = LiveIndex.fresh()
-                    found = matchers.firstNotNullOfOrNull { (q, w) ->
-                        live.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
-                    }
+            // Nur die Änderungen seit dem letzten Mal holen und hier vergleichen.
+            // Das ist für den Server fast kostenlos, auch wenn tausende Wächter laufen.
+            val serverOk = Radar.sync(force = true)
+            if (serverOk) {
+                val live = LiveIndex.fresh()
+                found = matchers.firstNotNullOfOrNull { (q, w) ->
+                    live.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { q to Scanner.Hit(it.station, it.title) }
                 }
-            } else for ((q, w) in matchers) {
-                val remote = Radar.search(q)
-                if (remote == null) { serverOk = false; break }
-                remote.firstOrNull { Scanner.matches(it.title, w) && !skipped(q, it.station.id) }?.let { found = q to it }
-                if (found != null) break
             }
             val stations = if (found != null || serverOk) emptyList()
             else try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }

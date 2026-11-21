@@ -269,14 +269,25 @@ async def h_health(_):
                               "checked": stats["checked"], "queue": len(due)})
 
 
+_search_cache: dict = {}  # Suchwörter -> (Zeit, Antwort)
+
+
 async def h_search(req):
-    words = [w for w in normalize(req.query.get("q", "")).split() if w]
+    words = tuple(sorted(w for w in normalize(req.query.get("q", "")).split() if w))
     if not words:
         return web.json_response([])
+    # Gleiche Suche von vielen Nutzern (z. B. ein Hit): 15 s lang dieselbe Antwort
+    hit = _search_cache.get(words)
+    if hit and time.time() - hit[0] < 15:
+        return gz(web.json_response(hit[1]))
     ids = ids_map()
     hits = [item(ids[sid], n) for sid, n in fresh() if sid in ids and all(w in n["norm"] for w in words)]
     hits.sort(key=lambda h: -h["since"])
-    return gz(web.json_response(hits[:200]))
+    hits = hits[:200]
+    if len(_search_cache) > 2000:
+        _search_cache.clear()
+    _search_cache[words] = (time.time(), hits)
+    return gz(web.json_response(hits))
 
 
 _now_cache: dict = {}   # (limit, music) -> (Zeit, gzip-Bytes)
