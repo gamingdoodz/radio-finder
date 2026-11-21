@@ -886,7 +886,7 @@ class MainActivity : ComponentActivity() {
         coverTitleJob = lifecycleScope.launch {
             var found = false
             todo.take(15).forEach { if (Covers.load(it) != null) found = true }
-            if (found) render()
+            if (found) { render(); updatePlayer() }
         }
     }
 
@@ -1111,7 +1111,8 @@ class MainActivity : ComponentActivity() {
             else -> {
                 val now = LiveIndex.fresh().associateBy { it.station.id }
                 val list = dedupe(stations.take(30).map { s -> now[s.id]?.let { s.toEntry(it.title) } ?: s.toEntry() })
-                list.forEach { e -> rows.add(Row.Item(e, list, if (e.subtitle != "Internetradio") "● LIVE" else null)) }
+                loadCovers(list)
+                list.forEach { e -> rows.add(Row.Item(Covers.dress(e), list, if (e.subtitle != "Internetradio") "● LIVE" else null)) }
             }
         }
         val songs = genreSongs[g.key].orEmpty()
@@ -1213,7 +1214,9 @@ class MainActivity : ComponentActivity() {
         when {
             kidStations.isNotEmpty() -> {
                 val now = LiveIndex.fresh().associateBy { it.station.id }
-                rows.add(Row.Carousel(kidStations.map { e -> now[e.id.removePrefix("st:")]?.let { Entry(e.id, e.kind, it.title, e.name, e.url, e.artwork, e.name) } ?: e }))
+                val kl = kidStations.map { e -> now[e.id.removePrefix("st:")]?.let { Entry(e.id, e.kind, it.title, e.name, e.url, e.artwork, e.name) } ?: e }
+                loadCovers(kl)
+                rows.add(Row.Carousel(kl.map { Covers.dress(it) }))
             }
             kidsState == 1 -> rows.add(Row.Empty("Lade…"))
             else -> rows.add(Row.Empty("Keine Kinderradios gefunden."))
@@ -1637,7 +1640,10 @@ class MainActivity : ComponentActivity() {
         val playing = c.isPlaying || (c.playbackState == Player.STATE_BUFFERING && c.playWhenReady)
         val playIcon = if (playing) R.drawable.ic_pause else R.drawable.ic_play
         val isFav = Favorites.isFav(this, item.mediaId)
-        val art = m.artworkUri?.toString().orEmpty()
+        // Radio: Cover des Liedes, das gerade läuft (sonst Senderlogo)
+        val songCover = if (isStation && live != null && isMusic(live)) Covers.get(live)?.artwork else null
+        if (isStation && live != null && isMusic(live) && !Covers.known(live)) loadCoverTitles(listOf(live))
+        val art = songCover ?: m.artworkUri?.toString().orEmpty()
         val name = entry?.name ?: title
 
         findViewById<TextView>(R.id.miniTitle).text = title
@@ -1647,7 +1653,7 @@ class MainActivity : ComponentActivity() {
         val canNext = c.hasNextMediaItem() || HitMix.activeName(this) != null
         findViewById<View>(R.id.miniNext).visibility = if (canNext) View.VISIBLE else View.GONE
         findViewById<View>(R.id.miniProgress).visibility = if (isStation) View.INVISIBLE else View.VISIBLE
-        bindArt(findViewById(R.id.miniArt), findViewById(R.id.miniInitials), art, name, isStation, 12f)
+        bindArt(findViewById(R.id.miniArt), findViewById(R.id.miniInitials), art, name, isStation && songCover == null, 12f)
 
         if (full.visibility == View.VISIBLE) {
             findViewById<TextView>(R.id.fullTitle).text = title
@@ -1674,7 +1680,7 @@ class MainActivity : ComponentActivity() {
             }
             if (story) findViewById<TextView>(R.id.fullSpeed).text =
                 "%.2f".format(c.playbackParameters.speed).trimEnd('0').trimEnd('.', ',').replace('.', ',') + "×"
-            bindArt(findViewById(R.id.fullArt), findViewById(R.id.fullInitials), art, name, isStation, 24f)
+            bindArt(findViewById(R.id.fullArt), findViewById(R.id.fullInitials), art, name, isStation && songCover == null, 24f)
             val bg = findViewById<ImageView>(R.id.fullBg)
             if (art.isNotBlank()) bg.load(art) { crossfade(true) } else bg.setImageDrawable(null)
         }
