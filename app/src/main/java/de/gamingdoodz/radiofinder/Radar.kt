@@ -13,7 +13,19 @@ import java.net.URLEncoder
  * Ist er weg, scannt die App wie bisher selbst.
  */
 object Radar {
-    private const val BASE = "http://34.170.242.185"
+    /** Oracle (groß, alle Sender) zuerst, Google als Ersatz. */
+    private val servers = listOf("http://130.61.78.232", "http://34.170.242.185")
+    @Volatile private var active = 0
+
+    /** Fragt den aktiven Server; geht er nicht, den nächsten. */
+    private fun fetch(path: String, readMs: Int, maxBytes: Int): String? {
+        for (n in servers.indices) {
+            val i = (active + n) % servers.size
+            val text = Net.get(servers[i] + path, 4000, readMs, maxBytes)
+            if (text != null) { active = i; return text }
+        }
+        return null
+    }
 
     @Volatile private var appContext: Context? = null
     @Volatile private var lastOk = 0L
@@ -56,7 +68,7 @@ object Radar {
         if (!lock.tryLock()) return@withContext ok
         try {
             lastTry = t
-            val text = Net.get("$BASE/now?limit=6000", 4000, 15_000, 8_000_000)
+            val text = fetch("/now?limit=8000", 15_000, 10_000_000)
             val list = text?.let { runCatching { parse(it) }.getOrNull() }
             if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
             list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
@@ -70,7 +82,7 @@ object Radar {
     /** Sucht ein Lied auf dem Server. null = Server nicht erreichbar. */
     suspend fun search(query: String): List<Scanner.Hit>? = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() - lastFail < 5 * 60_000L) return@withContext null
-        val text = Net.get("$BASE/search?q=" + URLEncoder.encode(query, "UTF-8"), 4000, 8000)
+        val text = fetch("/search?q=" + URLEncoder.encode(query, "UTF-8"), 8000, 4_000_000)
         if (text == null) { lastFail = System.currentTimeMillis(); return@withContext null }
         val list = runCatching { parse(text) }.getOrNull() ?: return@withContext null
         lastOk = System.currentTimeMillis()
