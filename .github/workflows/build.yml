@@ -71,5 +71,5 @@ jobs:
           packageName: de.gamingdoodz.hitradar
           releaseFiles: Hitradar-PlayStore.aab
           mappingFile: app/build/outputs/mapping/release/mapping.txt
-          track: internal
+          track: alpha
           status: completed
