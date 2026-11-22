@@ -40,8 +40,13 @@ def normalize(s: str) -> str:
     return re.sub(r"[^\w]+", " ", s).strip()
 
 
+# Werbung/Ansagen, die wie "Künstler - Titel" aussehen ("Ein bisschen Verbraucherinformationen - paypal.com")
+JUNK = re.compile(r"(?i)verbraucherinfo|ein angebot de[rs]|livestream|werbung|anzeige|hotline|jetzt anrufen|www\.|"
+                  r"\b[\w-]+\.(?:com|de|ch|at|fm|net|org|info|eu|io|radio)\b|\d{3,}[\s/-]\d{2,}[\s/-]?\d*")
+
+
 def is_song(t: str) -> bool:
-    return " - " in t or " – " in t
+    return (" - " in t or " – " in t) and not JUNK.search(t)
 
 
 def put(st: dict, title: str):
@@ -533,7 +538,7 @@ async def h_charts(req):
             if h >= now_h - 24:
                 for k, n in c.items():
                     total[k] = total.get(k, 0) + n
-        top = sorted(total.items(), key=lambda kv: -kv[1])[:100]
+        top = sorted(((k, n) for k, n in total.items() if is_song(chart_titles.get(k, k))), key=lambda kv: -kv[1])[:100]
         out = [{"title": chart_titles.get(k, k), "plays": n} for k, n in top if n >= 3]
         _charts_cache.update(t=time.time(), body=gzip.compress(json.dumps(out, ensure_ascii=False).encode(), 6))
     if "gzip" in req.headers.get("Accept-Encoding", ""):

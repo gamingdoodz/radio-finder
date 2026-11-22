@@ -60,8 +60,11 @@ object LiveIndex {
     private val talkWords = Regex("(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|magazin|sendung|moderation|gewinnspiel")
 
     /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen, Nachrichten, Werbung nicht. */
+    private val junk = Regex("(?i)verbraucherinfo|ein angebot de[rs]|livestream|anzeige|hotline|jetzt anrufen|www\\.|" +
+        "\\b[\\w-]+\\.(com|de|ch|at|fm|net|org|info|eu|io|radio)\\b|\\d{3,}[\\s/-]\\d{2,}")
+
     fun isMusic(title: String) =
-        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title)
+        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title) && !junk.containsMatchIn(title)
 
     fun get(stationId: String): Now? = map[stationId]?.takeIf { System.currentTimeMillis() - it.time < MAX_AGE }
 
