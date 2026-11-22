@@ -45,7 +45,7 @@ object Settings {
     fun setShare(context: Context, v: Boolean) = prefs(context).edit().putBoolean("share", v).apply()
 
     /** Aus welchen Ländern Sender genommen werden (gegen fremdsprachige Werbung). */
-    fun region(context: Context) = prefs(context).getString("region", "dach_en") ?: "dach_en"
+    fun region(context: Context) = prefs(context).getString("region", "all") ?: "all"
     fun setRegion(context: Context, r: String) = prefs(context).edit().putString("region", r).apply()
 
     fun quality(context: Context) = prefs(context).getInt("quality", 3)

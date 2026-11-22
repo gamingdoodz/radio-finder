@@ -103,6 +103,16 @@ object Radar {
         return known.isNotEmpty()
     }
 
+    /** App-Start: die 1.500 neuesten Lieder sofort (≈ 150 KB statt 2,7 MB), der Rest kommt danach. */
+    suspend fun quickStart(): Boolean = withContext(Dispatchers.IO) {
+        if (version != 0L) return@withContext false
+        val text = fetch("/now?limit=1500&music=1", 8000, 3_000_000) ?: return@withContext false
+        val list = runCatching { parse(text) }.getOrNull().orEmpty()
+        list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
+        if (list.isNotEmpty()) LiveIndex.rebuild()
+        list.isNotEmpty()
+    }
+
     /** Holt alles, was gerade läuft, in den LiveIndex (höchstens einmal pro Intervall). */
     suspend fun sync(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         val t = System.currentTimeMillis()

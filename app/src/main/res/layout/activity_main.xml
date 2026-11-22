@@ -109,7 +109,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:background="@null"
-                    android:hint="Lied, Künstler, Sender oder ✨ Wunsch"
+                    android:hint="Lied, Künstler oder Sender"
                     android:imeOptions="actionSearch"
                     android:inputType="text"
                     android:paddingStart="48dp"
@@ -127,7 +127,7 @@
                     android:layout_marginEnd="48dp"
                     android:background="?android:attr/selectableItemBackgroundBorderless"
                     android:contentDescription="Wünsch dir was"
-                    android:src="@drawable/ic_star"
+                    android:src="@drawable/ic_sparkle"
                     android:tint="@color/c_ff2ee6a8" />
 
                 <ImageButton

@@ -179,7 +179,8 @@ class MainActivity : ComponentActivity() {
         Radar.init(this)
         lifecycleScope.launch { Blocklist.refresh(applicationContext) }
         lifecycleScope.launch { Radar.loadAds() }
-        lifecycleScope.launch { if (Radar.sync(force = true)) render() }
+        // Erst schnell die neuesten Lieder (klein), dann im Hintergrund alles
+        lifecycleScope.launch { if (Radar.quickStart()) render(); if (Radar.sync(force = true)) render() }
         // Beim allerersten Start kurz erklären, wie die App funktioniert
         if (!Settings.prefs(this).getBoolean("intro_seen", false)) {
             Settings.prefs(this).edit().putBoolean("intro_seen", true).apply()
@@ -235,7 +236,7 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.wishBtn).visibility = if (kids()) View.GONE else View.VISIBLE
         findViewById<View>(R.id.wishBtn).setOnClickListener {
             val t = input.text.toString().trim()
-            if (t.isNotEmpty()) handleWish(t) else listen(wish = true)
+            if (t.isNotEmpty()) handleWish(t) else wishDialog()
         }
         findViewById<View>(R.id.fullStopMix).setOnClickListener { stopHitMix(); updatePlayer() }
         back.setOnClickListener { backCallback.handleOnBackPressed() }
