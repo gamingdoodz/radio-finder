@@ -164,7 +164,7 @@ class HitMix(
         val first = withContext(Dispatchers.Default) { pickNext() }
         if (first != null) { switchedAt = System.currentTimeMillis(); confirmed = false }
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
-        job = scope.launch { loop() }
+        job = scope.launch { delay(3_000); refreshQueue(); loop() }
         return first?.let { prepareItem(it) }
     }
 
@@ -299,6 +299,7 @@ class HitMix(
             LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) && System.currentTimeMillis() - it.since < 150_000 && !Covers.known(it.title) }
                 .sortedByDescending { it.since }.take(12).forEach { n -> scope.launch { Covers.load(n.title) } }
             candidate = withContext(Dispatchers.Default) { choose() }?.let { System.currentTimeMillis() to it }
+            refreshQueue()
             // Ohne Titel im Stream (z. B. beim Casten oder Sender ohne Titel): Server-Stand entscheidet
             val local = !Cast.active && System.currentTimeMillis() - lastLocal < 10 * 60_000L
             if (local) continue
@@ -375,7 +376,11 @@ class HitMix(
         return n.station.toEntry(n.title).toMediaItem()
     }
 
-    private fun choose(allowRepeats: Boolean = false, anyMusic: Boolean = false): Choice? {
+    private fun choose(allowRepeats: Boolean = false, anyMusic: Boolean = false): Choice? =
+        ranked(allowRepeats, anyMusic, 1).firstOrNull()
+
+    /** Die besten Kandidaten der Reihe nach (für "Als Nächstes" in der Wiedergabeliste). */
+    private fun ranked(allowRepeats: Boolean = false, anyMusic: Boolean = false, limit: Int = 6): List<Choice> {
         val t = System.currentTimeMillis()
         val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
@@ -403,8 +408,8 @@ class HitMix(
         // Sender, bei denen beim Umschalten Werbung kommt, nur nehmen, wenn es gar nicht anders geht
         fun noAds(l: List<Pair<LiveIndex.Now, String>>) = l.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
         val tiers = listOf(fromList, fromGenre, fromArtist, fromAny)
-        val best = (tiers.map { noAds(it) } + tiers).firstOrNull { it.isNotEmpty() }
-            ?.minByOrNull { (n, key) ->
+        val list = (tiers.map { noAds(it) } + tiers).firstOrNull { it.isNotEmpty() } ?: return emptyList()
+        return list.sortedBy { (n, key) ->
                 // Bekannte Lieder deutlich bevorzugen: läuft auf vielen Sendern, oft gespielt heute, weit oben in der Liste
                 val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 60_000L
                 val played = (Radar.chartPlays[n.normalized] ?: 0).coerceAtMost(200) * 1_500L
@@ -416,8 +421,33 @@ class HitMix(
                 val relay = if (Cast.active && !Cast.isHttps(n.station.url)) 45_000L else 0L
                 age + relay + (if (age > 180_000L) 300_000L else 0L) +
                     (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist
-            } ?: return null
-        return Choice(best.first, best.second)
+            }.distinctBy { it.second }.take(limit).map { Choice(it.first, it.second) }
+    }
+
+    // ---------- Wiedergabeliste: "Als Nächstes" zeigen, antippen springt hin ----------
+
+    /** Nach dem aktuellen Sender die nächsten passenden Hits einreihen (ohne das laufende Lied zu stören). */
+    private suspend fun refreshQueue() {
+        val p = player() ?: return
+        val next = withContext(Dispatchers.Default) { ranked(limit = 5) }
+        if (p.mediaItemCount == 0) return
+        val idx = p.currentMediaItemIndex
+        if (p.mediaItemCount > idx + 1) p.removeMediaItems(idx + 1, p.mediaItemCount)
+        if (idx > 0) p.removeMediaItems(0, idx)
+        queued = next.associateBy { "st:" + it.now.station.id }
+        if (next.isNotEmpty()) p.addMediaItems(next.map { prepareItem(it.now.station.toEntry(it.now.title).toMediaItem()) })
+    }
+
+    private var queued: Map<String, Choice> = emptyMap()
+
+    /** Nutzer hat in der Wiedergabeliste getippt oder "Weiter" im Auto gedrückt: das ist jetzt der laufende Hit. */
+    suspend fun onJump(mediaId: String) {
+        val c = queued[mediaId] ?: return
+        if (c.now.station.id == currentStationId) return
+        commit(c)
+        switchedAt = System.currentTimeMillis()
+        confirmed = false
+        refreshQueue()
     }
 
     private fun switchTo(item: MediaItem) {
@@ -425,6 +455,7 @@ class HitMix(
         confirmed = false
         val p = player() ?: return
         p.setMediaItem(prepareItem(item))
+        scope.launch { delay(1_500); refreshQueue() }
         p.prepare()
         p.play()
     }
