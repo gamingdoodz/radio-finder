@@ -907,6 +907,155 @@ async def h_relay(req):
         relays["n"] -= 1
 
 
+# ---------------- Server-Mix: ein durchgehender Stream, der nach jedem Lied zum nächsten Hit springt ----------------
+# Für Alexa (und alles, was nur eine Adresse abspielen kann): Lied-Ende kommt aus den Titeln im Stream,
+# Moderation/Werbung dazwischen wird übersprungen. Nur MP3-Sender mit gleicher Abtastrate (sonst stockt es).
+mix_bad: set = set()        # Sender, die sich nicht eignen (kein MP3, keine Titel, Fehler)
+_MP3_RATES = {0: 44100, 1: 48000, 2: 32000}
+
+
+def mp3_rate(b: bytes):
+    for i in range(min(len(b) - 4, 8000)):
+        if b[i] == 0xFF and (b[i + 1] & 0xE0) == 0xE0:
+            ver = (b[i + 1] >> 3) & 3
+            if ver == 3 and ((b[i + 1] >> 1) & 3) == 1:     # MPEG-1 Layer III
+                r = (b[i + 2] >> 2) & 3
+                if r in _MP3_RATES and (b[i + 2] >> 4) not in (0, 15):
+                    return _MP3_RATES[r]
+    return None
+
+
+def mix_fits(st, norm, title, genre):
+    rx = re.compile(TAG_WORDS[genre]) if genre in TAG_WORDS else None
+    if rx is not None:
+        return bool(rx.search(st.get("tags", "")) or rx.search(title.lower()))
+    return plays24(norm) >= 8
+
+
+def mix_pick(genre, played, exclude):
+    m = ids_map()
+    t = time.time()
+    rx = re.compile(TAG_WORDS[genre]) if genre in TAG_WORDS else None
+    best, score = None, None
+    for sid, n in fresh():
+        st = m.get(sid)
+        if not st or sid in exclude or sid in mix_bad or n["norm"] in played or not is_song(n["title"]) or TALK.search(n["title"]):
+            continue
+        if rx is not None and not (rx.search(st.get("tags", "")) or rx.search(n["title"].lower())):
+            continue
+        age = t - n["since"]
+        if age > 150:      # nur frisch angefangene Lieder
+            continue
+        sc = age + (240 if sid in ads else 0) - (0 if rx is not None else min(plays24(n["norm"]), 60) * 20)
+        if score is None or sc < score:
+            best, score = (st, n), sc
+    return best
+
+
+async def mix_song(resp, st, n, genre, played, state):
+    """Spielt das Lied auf diesem Sender (und passende Folgelieder). False = Sender ungeeignet."""
+    sess = SHARED.get("relay")
+    if sess is None:
+        sess = SHARED["relay"] = aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=RELAY_MAX + 20, ssl=False),
+                                                       headers={"User-Agent": UA})
+    async with sess.get(st["url"], headers={"Icy-MetaData": "1"},
+                        timeout=aiohttp.ClientTimeout(total=None, sock_connect=8, sock_read=20)) as r:
+        ctype = r.headers.get("Content-Type", "")
+        metaint = int(r.headers.get("icy-metaint", "0") or 0)
+        if r.status >= 400 or "mpeg" not in ctype or metaint <= 0:
+            mix_bad.add(st["id"])
+            return False
+        expected = n["norm"]
+        started = time.time()
+        confirmed = False
+        song_start = n["since"]
+        dur = (covers.get(expected) or {}).get("dur", 0)
+        first = True
+        while True:
+            audio = await r.content.readexactly(metaint)
+            if first:
+                rate = mp3_rate(audio)
+                if state.get("rate") is None and rate:
+                    state["rate"] = rate
+                elif rate and state.get("rate") != rate:
+                    mix_bad.add(st["id"])
+                    return False
+                first = False
+            # Bis der erwartete Titel kommt (Vorab-Werbung, Sendername): nicht durchreichen, höchstens 25 s
+            if confirmed or time.time() - started > 25:
+                await resp.write(audio)
+                count_relay(len(audio))
+            ln = (await r.content.readexactly(1))[0] * 16
+            if ln:
+                meta = (await r.content.readexactly(ln)).decode("utf-8", "ignore")
+                mt = re.search(r"StreamTitle='(.*?)';", meta)
+                title = (mt.group(1) if mt else "").strip()
+                norm = normalize(title)
+                if norm == expected:
+                    confirmed = True
+                elif is_song(title) and not TALK.search(title):
+                    if not confirmed and time.time() - started < 25:
+                        expected, confirmed = norm, True     # Server war etwas veraltet: das ist das Lied
+                    elif norm not in played and mix_fits(st, norm, title, genre):
+                        expected, song_start = norm, time.time()   # passendes Folgelied: bleiben
+                        dur = (covers.get(norm) or {}).get("dur", 0)
+                        played.add(norm)
+                    else:
+                        return True
+                elif confirmed:
+                    return True      # Moderation, Jingle, Werbung: weiter zum nächsten Hit
+            if confirmed and dur and time.time() - song_start > dur + 4:
+                return True          # Lied laut Länge vorbei, Sender redet weiter
+            if traffic["bytes"] >= RELAY_STOP:
+                return True
+
+
+def count_relay(n):
+    pass   # Datenmenge zählt die Netzwerkkarte (siehe update_traffic)
+
+
+async def h_mix(req):
+    genre = (req.query.get("g") or "")[:20]
+    first = req.query.get("first") or ""
+    if not relay_ok():
+        return web.Response(status=503, text="Pause")
+    resp = web.StreamResponse(headers={"Content-Type": "audio/mpeg", "Cache-Control": "no-cache"})
+    await resp.prepare(req)
+    relays["n"] += 1
+    played: set = set()
+    state: dict = {}
+    last = ""
+    try:
+        while True:
+            hit = None
+            if first and first in ids_map() and first in now:
+                hit = (ids_map()[first], now[first])
+                first = ""
+            hit = hit or mix_pick(genre, played, {last}) or mix_pick("", played, {last})
+            if not hit:
+                await asyncio.sleep(2)
+                continue
+            st, n = hit
+            played.add(n["norm"])
+            last = st["id"]
+            if len(played) > 40:
+                played.clear()
+            try:
+                await mix_song(resp, st, n, genre, played, state)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Hörer weg? Dann aufhören. Sonst war nur der Sender schuld.
+                if req.transport is None or req.transport.is_closing():
+                    break
+                mix_bad.add(st["id"])
+    except Exception:
+        pass
+    finally:
+        relays["n"] -= 1
+    return resp
+
+
 # ---------------- Alexa-Skill: "Alexa, sag Hit Radar, spiel Last Christmas" ----------------
 PUBLIC = os.environ.get("PUBLIC_URL", "https://130-61-78-232.sslip.io")   # Alexa braucht https auf Port 443
 TAG_WORDS = {"xmas": "christmas|weihnacht|xmas", "kids": "kinder|kids|children", "chill": "chill|lounge|relax|ambient",
@@ -990,9 +1139,12 @@ def alexa_pick(query: str = "", genre: str = "", exclude: str = ""):
 
 
 def alexa_play(st, n, token: str, speech: str = ""):
+    # Durchgehender Mix: nach dem Lied geht es automatisch mit dem nächsten passenden Hit weiter
+    kind, genre = (token.split("|") + ["", ""])[:2]
+    url = f"{PUBLIC}/mix?g={genre if kind == 'mix' else ''}&first={st['id']}&r={int(time.time())}"
     out = {"version": "1.0", "response": {"shouldEndSession": True, "directives": [{
         "type": "AudioPlayer.Play", "playBehavior": "REPLACE_ALL",
-        "audioItem": {"stream": {"url": f"{PUBLIC}/relay?id={st['id']}", "token": token, "offsetInMilliseconds": 0},
+        "audioItem": {"stream": {"url": url, "token": token, "offsetInMilliseconds": 0},
                       "metadata": {"title": n["title"][:100], "subtitle": st["name"][:100]}}}]}}
     if speech:
         out["response"]["outputSpeech"] = {"type": "PlainText", "text": speech}
@@ -1219,7 +1371,7 @@ async def main():
                     web.get("/cover", h_cover), web.get("/verify", h_verify), web.get("/list", h_list),
                     web.get("/event", h_event), web.get("/popular", h_popular),
                     web.get("/relay", h_relay), web.post("/alexa", h_alexa),
-                    web.get("/rising", h_rising)])
+                    web.get("/rising", h_rising), web.get("/mix", h_mix)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

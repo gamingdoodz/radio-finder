@@ -255,7 +255,8 @@ class WatchService : Service() {
             MediaController.releaseFuture(future)
             p
         } catch (_: Exception) { false }
-        if (playing) {
+        // Laufendes Lied nicht einfach unterbrechen – nur wenn so eingestellt
+        if (playing && Settings.watchAuto(this)) {
             notifyHit("Gefunden: „$query“ 🎉", "${hit.title}\nläuft jetzt auf ${hit.station.name}", null)
             playNow(entry)
         } else {

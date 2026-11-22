@@ -1580,6 +1580,10 @@ class MainActivity : ComponentActivity() {
                 value = listOf("Sparend", "Normal", "Hoch", "Auto")[q.coerceIn(0, 3)]) { qualitySheet() },
             Row.Setting(R.drawable.ic_radio, "Lautstärke angleichen", "Alle Sender gleich laut",
                 toggle = norm, chevron = false) { Settings.setNormalize(this, !norm); render() },
+            Row.Setting(R.drawable.ic_radio, "Werbung stumm schalten", "Bekannte Werbung am Senderanfang, mit Countdown",
+                toggle = Settings.muteAds(this), chevron = false) { Settings.setMuteAds(this, !Settings.muteAds(this)); render() },
+            Row.Setting(R.drawable.ic_bell, "Wächter schaltet sofort um", "Aus: laufendes Lied bleibt, du bekommst „Jetzt hören“",
+                toggle = Settings.watchAuto(this), chevron = false) { Settings.setWatchAuto(this, !Settings.watchAuto(this)); render() },
             Row.Setting(R.drawable.ic_note, "Meine Musik-Apps", "Zum Öffnen von Liedern",
                 value = when (mine.size) {
                     0 -> Services.all.count { Services.installed(this, it) }.let { if (it == 0) "Wählen" else "Auto ($it)" }

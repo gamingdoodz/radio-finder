@@ -44,6 +44,10 @@ object Settings {
     fun share(context: Context) = prefs(context).getBoolean("share", true)
     fun setShare(context: Context, v: Boolean) = prefs(context).edit().putBoolean("share", v).apply()
 
+    /** Wächter: bei Fund sofort umschalten (sonst nur Benachrichtigung mit "Jetzt hören"). */
+    fun watchAuto(context: Context) = prefs(context).getBoolean("watch_auto", false)
+    fun setWatchAuto(context: Context, on: Boolean) = prefs(context).edit().putBoolean("watch_auto", on).apply()
+
     /** Werbung am Senderanfang stumm schalten (mit Countdown). */
     fun muteAds(context: Context) = prefs(context).getBoolean("mute_ads", true)
     fun setMuteAds(context: Context, on: Boolean) = prefs(context).edit().putBoolean("mute_ads", on).apply()
