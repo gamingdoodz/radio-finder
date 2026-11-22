@@ -32,7 +32,7 @@ object Settings {
 
     /** Startseite: welche Bereiche angezeigt werden. */
     val homeSections = listOf("quick" to "Schnellstart", "again" to "Weiterhören",
-        "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "community" to "Beliebt bei Hitradar-Hörern", "charts" to "Deutsche Charts")
+        "live" to "Jetzt im Radio", "radiocharts" to "Meistgespielt im Radio", "community" to "Beliebt bei Hitradar-Hörern", "playlists" to "Playlists für dich", "charts" to "Deutsche Charts")
     fun homeOn(context: Context, key: String) = prefs(context).getBoolean("home_$key", key != "again")
     fun setHomeOn(context: Context, key: String, v: Boolean) = prefs(context).edit().putBoolean("home_$key", v).apply()
 

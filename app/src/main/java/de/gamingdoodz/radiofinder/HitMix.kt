@@ -67,7 +67,7 @@ class HitMix(
             favMix -> "Lieblingssender"
             chartsMix -> "Meistgespielt im Radio"
             playlist == "community" -> "Beliebt bei Hitradar-Hörern"
-            playlist != null -> Playlists.curated.firstOrNull { it.second == playlist }?.first ?: playlist
+            playlist != null -> Playlists.nameFor(playlist)
             myList != null -> myList
             similarTo != null -> "Mehr wie „${similarTo.substringAfter(" - ").substringAfter(" – ").take(24)}“"
             else -> artist?.getOrNull(2) ?: genre?.name ?: "Deutsche Charts"
@@ -82,6 +82,12 @@ class HitMix(
 
         val hits = when {
             genreKey == "mine" -> mySongs()
+            playlist == "rising" || playlist == "radiocharts" ->
+                (if (playlist == "rising") Radar.rising() else Radar.charts().map { it.first }).map { t ->
+                    val a = t.substringBefore(" - ").substringBefore(" – ").trim()
+                    val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
+                    Entry("cm:" + t.hashCode(), Kind.TRACK, ti, a, "", "", ti)
+                }.ifEmpty { Deezer.topGermany(100) }
             playlist == "community" -> Radar.popular()?.songs.orEmpty().map { t ->
                 val a = t.substringBefore(" - ").substringBefore(" – ").trim()
                 val ti = t.substringAfter(" - ").substringAfter(" – ").trim()

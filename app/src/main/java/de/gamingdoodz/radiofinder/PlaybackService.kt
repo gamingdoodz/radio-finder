@@ -752,7 +752,8 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(KIDS_ID, "🧸 Kinderlieder"),
                 )
                 "playlists" -> Playlists.mine(applicationContext).keys.map { hitMixItem("my:$it", "⚡ $it") } +
-                    Playlists.curated.map { (name, q) -> hitMixItem("pl:$q", "⚡ $name") }
+                    (Playlists.saved(applicationContext) + Playlists.trending + Playlists.forNow() + Playlists.weekly() + Playlists.classics)
+                        .distinctBy { it.query }.map { hitMixItem("pl:${it.query}", "⚡ ${it.name}") }
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
                 MOMENTS_ID -> Moments.now().filter { it.action == Moments.Action.HITMIX }
                     .map { hitMixItem(it.genreKey, "⚡ " + it.title) }

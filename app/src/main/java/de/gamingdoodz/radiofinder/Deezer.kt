@@ -54,6 +54,19 @@ object Deezer {
     }
 
     /** Lieder einer Deezer-Playlist, gefunden über ihren Namen (z. B. "80er Hits"). */
+    private val pictures = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Bild einer Playlist (eine kleine Anfrage statt aller Lieder). */
+    suspend fun playlistPicture(name: String): String? {
+        pictures[name]?.let { return it.ifBlank { null } }
+        val text = withContext(Dispatchers.IO) {
+            Net.get("https://api.deezer.com/search/playlist?limit=1&q=" + URLEncoder.encode(name, "UTF-8"))
+        } ?: return null
+        val pic = try { JSONObject(text).optJSONArray("data")?.optJSONObject(0)?.optString("picture_medium").orEmpty() } catch (_: Exception) { "" }
+        pictures[name] = pic
+        return pic.ifBlank { null }
+    }
+
     suspend fun playlistByName(name: String): List<Entry> = cached("p:$name") {
         val text = withContext(Dispatchers.IO) {
             Net.get("https://api.deezer.com/search/playlist?limit=1&q=" + URLEncoder.encode(name, "UTF-8"))

@@ -546,6 +546,34 @@ async def h_charts(req):
     return web.Response(body=gzip.decompress(_charts_cache["body"]), content_type="application/json")
 
 
+_rising_cache = {"t": 0, "body": None}
+
+
+async def h_rising(req):
+    """Aufsteiger: Lieder, die in den letzten 6 Stunden viel öfter laufen als davor (neu oder gerade angesagt)."""
+    if not _rising_cache["body"] or time.time() - _rising_cache["t"] > 900:
+        now_h = int(time.time() // 3600)
+        recent: dict = {}
+        before: dict = {}
+        for h, c in chart_hours.items():
+            target = recent if h > now_h - 6 else before if h > now_h - 30 else None
+            if target is None:
+                continue
+            for k, n in c.items():
+                target[k] = target.get(k, 0) + n
+        scored = []
+        for k, r in recent.items():
+            if r < 6 or not is_song(chart_titles.get(k, k)):
+                continue
+            b = before.get(k, 0) * 6 / 24
+            if r > 1.6 * b + 2:
+                scored.append((r - b, k))
+        scored.sort(reverse=True)
+        out = [{"title": chart_titles.get(k, k), "score": round(sc, 1)} for sc, k in scored[:60]]
+        _rising_cache.update(t=time.time(), body=json.dumps(out, ensure_ascii=False))
+    return web.Response(text=_rising_cache["body"], content_type="application/json")
+
+
 # ---------------- Senderliste ----------------
 
 STATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stations_cache.json")
@@ -1189,7 +1217,8 @@ async def main():
                     web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations),
                     web.get("/cover", h_cover), web.get("/verify", h_verify), web.get("/list", h_list),
                     web.get("/event", h_event), web.get("/popular", h_popular),
-                    web.get("/relay", h_relay), web.post("/alexa", h_alexa)])
+                    web.get("/relay", h_relay), web.post("/alexa", h_alexa),
+                    web.get("/rising", h_rising)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

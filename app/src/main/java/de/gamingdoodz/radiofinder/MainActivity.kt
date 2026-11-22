@@ -1020,6 +1020,15 @@ class MainActivity : ComponentActivity() {
             if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
         }
 
+        // Playlists für dich: angesagt, zur Jahreszeit/Uhrzeit, neu diese Woche
+        if (Settings.homeOn(this, "playlists")) {
+            loadPlaylistCovers()
+            val list = (Playlists.trending.take(1) + Playlists.forNow() + Playlists.trending.drop(1) + Playlists.weekly().take(2))
+                .distinctBy { it.query }
+            rows.add(Row.Header("Playlists für dich", "Passend zu jetzt – immer wieder neu", "ALLE") { selectTab(Tab.FIND) })
+            rows.add(Row.Carousel(list.map { plEntry(it) }))
+        }
+
         // Meistgespielt im Radio (vom Server, über alle Sender aus DE/AT/CH)
         if (Settings.homeOn(this, "radiocharts")) {
             loadRadioCharts()
@@ -1065,10 +1074,14 @@ class MainActivity : ComponentActivity() {
         playlistCoversLoading = true
         lifecycleScope.launch {
             loadCommunity()
-            Playlists.curated.forEach { (_, q) ->
-                val songs = Deezer.playlistByName(q)
-                if (songs.isNotEmpty()) { playlistSongs[q] = songs; playlistCovers[q] = songs.first().artwork }
-            }
+            loadPlaylist("rising")
+            loadPlaylist("radiocharts")
+            render()
+            // Nur das Bild jeder Playlist holen (klein), die Lieder erst beim Öffnen
+            (Playlists.forNow() + Playlists.weekly() + Playlists.saved(this@MainActivity) + Playlists.classics)
+                .map { it.query }.distinct().filter { it !in playlistCovers }.forEach { q ->
+                    Deezer.playlistPicture(q)?.let { playlistCovers[q] = it }
+                }
             playlistCoversLoading = false
             render()
         }
@@ -1081,6 +1094,31 @@ class MainActivity : ComponentActivity() {
         communityTried = System.currentTimeMillis()
         lifecycleScope.launch { loadCommunity(); if (playlistSongs["community"] != null) render() }
     }
+
+    /** Lieder einer Playlist laden (Deezer oder aus dem Radio berechnet). */
+    private suspend fun loadPlaylist(q: String) {
+        when (q) {
+            "community" -> loadCommunity()
+            "rising", "radiocharts" -> {
+                val titles = if (q == "rising") Radar.rising().take(50) else Radar.charts().take(50).map { it.first }
+                if (titles.isEmpty()) return
+                titles.take(10).forEach { Covers.load(it) }
+                val list = titles.map { songEntry(it) }
+                playlistSongs[q] = list
+                list.firstOrNull { it.artwork.isNotBlank() }?.let { playlistCovers[q] = it.artwork }
+            }
+            else -> {
+                val songs = Deezer.playlistByName(q)
+                if (songs.isNotEmpty()) {
+                    playlistSongs[q] = songs
+                    if (q !in playlistCovers) playlistCovers[q] = songs.first().artwork
+                }
+            }
+        }
+    }
+
+    private fun plEntry(d: Playlists.Def) =
+        Entry("pl:${d.query}", Kind.SHOW, d.name, d.sub, "", playlistCovers[d.query].orEmpty(), d.name)
 
     /** "Beliebt bei Hitradar-Hörern": vom Server, gelernt aus allen Apps (anonym). */
     private suspend fun loadCommunity() {
@@ -1099,14 +1137,28 @@ class MainActivity : ComponentActivity() {
             if (q in playlistTried) { rows.add(Row.Empty("Playlist konnte nicht geladen werden. Nach unten ziehen zum Neuladen.")); return }
             playlistTried.add(q)
             rows.add(Row.Empty("Lade Playlist…"))
-            lifecycleScope.launch { if (q == "community") loadCommunity() else playlistSongs[q] = Deezer.playlistByName(q); render() }
+            lifecycleScope.launch { loadPlaylist(q); render() }
             return
         }
         if (songs.isNotEmpty()) {
             rows.add(button(R.drawable.ic_bolt, "Als Radio-Mix abspielen") {
                 startHitMix(if (p.own) "my:${p.name}" else "pl:${p.query}", "– ${p.name}")
             })
-            rows.add(Row.Empty("Hitradar spielt die Lieder, sobald sie irgendwo im Radio anfangen – komplett und kostenlos."))
+            if (!p.own && p.query != null) {
+                val saved = Playlists.isSaved(this, p.query)
+                rows.add(button(if (saved) R.drawable.ic_heart else R.drawable.ic_heart_outline,
+                    if (saved) "Gespeichert in deiner Bibliothek" else "Playlist speichern") {
+                    val d = (Playlists.trending + Playlists.forNow() + Playlists.weekly() + Playlists.classics + Playlists.saved(this))
+                        .firstOrNull { it.query == p.query } ?: Playlists.Def(p.name, "Playlist", p.query)
+                    val now = Playlists.toggleSaved(this, d)
+                    Toast.makeText(this, if (now) "In der Bibliothek gespeichert" else "Aus der Bibliothek entfernt", Toast.LENGTH_SHORT).show()
+                    render()
+                })
+            }
+            val liveNow = songs.count { liveText(it) != null }
+            rows.add(Row.Empty("Der Radio-Mix spielt die Lieder komplett, sobald sie irgendwo im Radio anfangen" +
+                (if (liveNow > 0) " – gerade laufen $liveNow davon (● LIVE)." else ".") +
+                " Andere Lieder: antippen für Vorschau, Wächter oder deine Musik-App."))
         } else rows.add(Row.Empty("Noch leer. Halte bei einem Lied den Finger drauf → „Zur Playlist hinzufügen“."))
         if (p.own) rows.add(Row.More("Playlist löschen") {
             android.app.AlertDialog.Builder(this).setTitle("„${p.name}“ löschen?")
@@ -1162,11 +1214,14 @@ class MainActivity : ComponentActivity() {
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
         // Playlists mit bekannten Liedern (als Radio-Mix)
         loadPlaylistCovers()
-        rows.add(Row.Header("Playlists", "Bekannte Lieder – komplett aus dem Radio"))
-        rows.add(Row.Carousel(listOf(Entry("pl:community", Kind.SHOW, "Beliebt bei Hitradar-Hörern", "Von allen gelernt", "",
-            playlistCovers["community"].orEmpty(), "Hitradar")) + Playlists.curated.map { (name, q) ->
-            Entry("pl:$q", Kind.SHOW, name, "Playlist", "", playlistCovers[q].orEmpty(), name)
-        }))
+        rows.add(Row.Header("Gerade angesagt", "Live aus dem Radio berechnet"))
+        rows.add(Row.Carousel(Playlists.trending.map { plEntry(it) }))
+        rows.add(Row.Header("Passend zu jetzt", "Jahreszeit, Wochentag, Uhrzeit"))
+        rows.add(Row.Carousel(Playlists.forNow().map { plEntry(it) }))
+        rows.add(Row.Header("Neu diese Woche", "Jeden Montag andere Playlists"))
+        rows.add(Row.Carousel(Playlists.weekly().map { plEntry(it) }))
+        rows.add(Row.Header("Klassiker", "Die Dauerbrenner"))
+        rows.add(Row.Carousel(Playlists.classics.map { plEntry(it) }))
         val genres = Genres.all.filter { it.key != "kids" }
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix", "ALLE ${genres.size}") { openPage(Page.GenresPage) })
         genres.take(6).chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
@@ -1429,6 +1484,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderLib() {
+        val saved = Playlists.saved(this)
+        if (saved.isNotEmpty()) {
+            loadPlaylistCovers()
+            rows.add(Row.Header("Gespeicherte Playlists"))
+            rows.add(Row.Carousel(saved.map { plEntry(it) }))
+        }
         val mine = Playlists.mine(this)
         rows.add(Row.Header("Meine Playlists", if (mine.isEmpty()) "Lieder sammeln und als Radio-Mix hören" else null))
         if (mine.isNotEmpty()) rows.add(Row.Carousel(mine.map { (n, list) ->
@@ -1873,21 +1934,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** "Wünsch dir was": Satz eingeben oder sprechen. */
+    /** "Wünsch dir was": eigenes Fenster im Hitradar-Look mit Ideen zum Antippen. */
     private fun wishDialog() {
-        val edit = EditText(this).apply {
-            hint = "z. B. „was Ruhiges zum Einschlafen“"
-            setSingleLine()
-            setPadding(dp(20f).toInt(), dp(16f).toInt(), dp(20f).toInt(), dp(16f).toInt())
+        val v = layoutInflater.inflate(R.layout.dialog_wish, null)
+        val d = android.app.Dialog(this)
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        d.setContentView(v)
+        val edit = v.findViewById<EditText>(R.id.wishInput)
+        fun go(text: String) { if (text.isNotBlank()) { d.dismiss(); handleWish(text.trim()) } }
+        val ideas = listOf(
+            "Was Ruhiges zum Einschlafen", "Party wie auf Mallorca", "80er zum Mitsingen", "Gute Laune",
+            "Weihnachtsstimmung", "Etwas von Helene Fischer", "Rock zum Autofahren", "90er Hits", "Chillen am Abend", "Deutschrap",
+        )
+        val rowsBox = listOf(v.findViewById<ViewGroup>(R.id.wishChips1), v.findViewById<ViewGroup>(R.id.wishChips2))
+        ideas.forEachIndexed { i, idea ->
+            val chip = TextView(this).apply {
+                text = idea
+                textSize = 14f
+                setTextColor(getColor(R.color.c_e6ffffff))
+                setBackgroundResource(R.drawable.bg_chip_off)
+                val ph = dp(16f).toInt(); val pv = dp(10f).toInt()
+                setPadding(ph, pv, ph, pv)
+                setOnClickListener { go(idea) }
+            }
+            val lp = android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.marginEnd = dp(8f).toInt()
+            rowsBox[i % 2].addView(chip, lp)
         }
-        android.app.AlertDialog.Builder(this)
-            .setTitle("✨ Wünsch dir was")
-            .setMessage("Sag oder schreib, worauf du Lust hast – Stimmung, Jahrzehnt, Anlass oder Künstler.")
-            .setView(edit)
-            .setPositiveButton("Los") { _, _ -> edit.text.toString().trim().takeIf { it.isNotEmpty() }?.let { handleWish(it) } }
-            .setNeutralButton("🎤 Sprechen") { _, _ -> listen(wish = true) }
-            .setNegativeButton("Abbrechen", null)
-            .show()
+        v.findViewById<View>(R.id.wishMic).setOnClickListener { d.dismiss(); listen(wish = true) }
+        v.findViewById<View>(R.id.wishGo).setOnClickListener { go(edit.text.toString()) }
+        edit.setOnEditorActionListener { _, _, _ -> go(edit.text.toString()); true }
+        d.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.BOTTOM)
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+            setDimAmount(0.6f)
+        }
+        d.show()
     }
 
     private fun handleWish(text: String) {

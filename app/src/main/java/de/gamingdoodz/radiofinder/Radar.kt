@@ -147,6 +147,16 @@ object Radar {
     @Volatile var chartPlays: Map<String, Int> = emptyMap()
         private set
 
+    /** Neu & angesagt: Lieder, die gerade deutlich öfter im Radio laufen als vorher. */
+    suspend fun rising(): List<String> = withContext(Dispatchers.IO) {
+        val text = fetch("/rising", 8000, 500_000) ?: return@withContext emptyList()
+        runCatching {
+            val arr = JSONArray(text)
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("title")?.let { t -> Text.clean(t) } }
+                .filter { LiveIndex.isMusic(it) }
+        }.getOrDefault(emptyList())
+    }
+
     suspend fun charts(): List<Pair<String, Int>> = withContext(Dispatchers.IO) {
         chartsCache?.let { (at, l) -> if (System.currentTimeMillis() - at < 10 * 60_000L && l.isNotEmpty()) return@withContext l }
         val text = fetch("/charts", 8000, 2_000_000) ?: return@withContext chartsCache?.second.orEmpty()
