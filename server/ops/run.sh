@@ -1,3 +1,5 @@
 #!/bin/bash
-sleep 40
-curl -s "https://130-61-78-232.sslip.io:8080/cover?q=Meghan%20Trainor%20feat.%20Seth%20McFarland%20-%20White%20Christmas"; echo
+sleep 60
+curl -s https://130-61-78-232.sslip.io:8080/health; echo
+curl -s https://130-61-78-232.sslip.io:8080/rising | head -c 400; echo
+journalctl -u radar --since "-2 min" --no-pager | grep -iE "Traceback|Error" | tail -3
