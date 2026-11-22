@@ -145,7 +145,7 @@ object LiveIndex {
     /** Lied ist gleich zu Ende (weniger als 1 Minute übrig, oder ohne bekannte Länge schon über 4 Minuten). */
     fun endingSoon(n: Now, t: Long = System.currentTimeMillis()): Boolean {
         val age = t - n.since
-        val dur = Covers.get(n.title)?.durMs ?: 0L
+        val dur = Covers.byKey(n.normalized)?.durMs ?: 0L
         return if (dur > 0) dur - age < 60_000L else age > 4 * 60_000L
     }
 

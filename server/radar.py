@@ -1070,6 +1070,8 @@ async def h_mix(req):
     last = ""
     try:
         while True:
+            if req.transport is None or req.transport.is_closing():
+                break      # Hörer ist weg
             hit = None
             if first and first in ids_map() and first in now:
                 hit = (ids_map()[first], now[first])

@@ -21,6 +21,9 @@ object Covers {
 
     private fun key(radioTitle: String) = Scanner.normalize(radioTitle)
 
+    /** Wie get(), aber mit schon normalisiertem Titel (schnell, für große Listen). */
+    fun byKey(normalized: String): Info? = cache[normalized]?.takeIf { it !== NONE }
+
     /** Schon bekannt? (ohne zu suchen) */
     fun get(radioTitle: String): Info? = cache[key(radioTitle)]?.takeIf { it !== NONE }
 

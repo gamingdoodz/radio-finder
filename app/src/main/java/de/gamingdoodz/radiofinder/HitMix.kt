@@ -35,7 +35,9 @@ class HitMix(
     private var currentStationId: String? = null
     private var currentSongKey: String? = null
     private var songStartedAt = 0L
-    private val played = ArrayDeque<String>()
+    /** Zuletzt gespielte Lieder (unveränderliche Liste: wird aus mehreren Threads gelesen). */
+    @Volatile private var played: List<String> = emptyList()
+    private fun addPlayed(key: String) { played = (played + key).takeLast(25) }
 
     val isActive get() = job?.isActive == true
 
@@ -203,8 +205,14 @@ class HitMix(
 
     fun stop() {
         Radar.fast = false
+        val wasActive = job?.isActive == true
         job?.cancel()
         job = null
+        // Eingereihte "Als Nächstes"-Sender wieder entfernen
+        if (wasActive) try {
+            player()?.let { p -> if (p.mediaItemCount > p.currentMediaItemIndex + 1) p.removeMediaItems(p.currentMediaItemIndex + 1, p.mediaItemCount) }
+        } catch (_: Exception) {}
+        queued = emptyMap()
         currentStationId = null
         currentSongKey = null
         prefs(context).edit().remove("name").remove("now").apply()
@@ -262,7 +270,7 @@ class HitMix(
                 switchedTitle = norm; confirmed = true; waitingForNext = false
                 if (!fresh) songStartedAt = now
                 currentSongKey = norm
-                played.addLast(norm); while (played.size > 25) played.removeFirst()
+                addPlayed(norm)
                 prefs(context).edit().putString("now", Text.clean(title)).apply()
                 return
             }
@@ -291,7 +299,7 @@ class HitMix(
             // Länge bekannt und überschritten, Titel aber unverändert: Lied ist vorbei (Moderator redet o. Ä.)
             val overrun = NowSong.stationId == currentStationId && NowSong.overrun() &&
                 NowSong.title?.let { Scanner.normalize(it) } == switchedTitle
-            if (broken || overrun) { switchNow(); continue }
+            if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(); continue }
             if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
             if (tick % 7 != 0) continue   // ca. alle 20 Sekunden: Server-Stand + nächsten Kandidaten vorbereiten
             poll(force = false)
@@ -309,7 +317,7 @@ class HitMix(
             if (!stillHit || tooLong) {
                 if (LiveIndex.isMusic(now.title) && fitsTitle(now.normalized, now.station.id) && now.normalized !in played) {
                     switchedTitle = now.normalized; songStartedAt = now.since
-                    played.addLast(now.normalized)
+                    addPlayed(now.normalized)
                 } else switchNow()
             }
         }
@@ -370,8 +378,7 @@ class HitMix(
         currentSongKey = c.key
         switchedTitle = n.normalized
         songStartedAt = n.since
-        played.addLast(c.key)
-        while (played.size > 25) played.removeFirst()
+        addPlayed(c.key)
         prefs(context).edit().putString("now", "${n.title} · ${n.station.name}").apply()
         return n.station.toEntry(n.title).toMediaItem()
     }
@@ -427,27 +434,36 @@ class HitMix(
     // ---------- Wiedergabeliste: "Als Nächstes" zeigen, antippen springt hin ----------
 
     /** Nach dem aktuellen Sender die nächsten passenden Hits einreihen (ohne das laufende Lied zu stören). */
+    private var refreshing = false
+
     private suspend fun refreshQueue() {
-        val p = player() ?: return
+        if (refreshing || job?.isActive != true) return
+        refreshing = true
+        try { refreshQueueNow() } finally { refreshing = false }
+    }
+
+    private suspend fun refreshQueueNow() {
         val next = withContext(Dispatchers.Default) { ranked(limit = 5) }
+        val p = player() ?: return
         if (p.mediaItemCount == 0) return
         val idx = p.currentMediaItemIndex
         if (p.mediaItemCount > idx + 1) p.removeMediaItems(idx + 1, p.mediaItemCount)
         if (idx > 0) p.removeMediaItems(0, idx)
         queued = next.associateBy { "st:" + it.now.station.id }
-        if (next.isNotEmpty()) p.addMediaItems(next.map { prepareItem(it.now.station.toEntry(it.now.title).toMediaItem()) })
+        // In der Liste mit Liedtitel und Sender anzeigen
+        if (next.isNotEmpty()) p.addMediaItems(next.map { Covers.dress(it.now.station.toEntry(it.now.title)).toMediaItem() })
     }
 
     private var queued: Map<String, Choice> = emptyMap()
 
     /** Nutzer hat in der Wiedergabeliste getippt oder "Weiter" im Auto gedrückt: das ist jetzt der laufende Hit. */
-    suspend fun onJump(mediaId: String) {
+    fun onJump(mediaId: String) {
         val c = queued[mediaId] ?: return
         if (c.now.station.id == currentStationId) return
         commit(c)
         switchedAt = System.currentTimeMillis()
         confirmed = false
-        refreshQueue()
+        scope.launch { delay(1_500); refreshQueue() }
     }
 
     private fun switchTo(item: MediaItem) {

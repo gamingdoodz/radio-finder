@@ -302,7 +302,7 @@ class PlaybackService : MediaLibraryService() {
                 sameItemReplace = false
                 // Hit-Mix: in der Wiedergabeliste angetippt oder "Weiter" im Auto
                 if (hitMix.isActive && mediaItem != null && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
-                    scope.launch { hitMix.onJump(mediaItem.mediaId) }
+                    hitMix.onJump(mediaItem.mediaId)
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
                 NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
                 adMuted = false
