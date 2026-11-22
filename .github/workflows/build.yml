@@ -63,7 +63,7 @@ jobs:
 
       # Automatisch in den internen Play-Test hochladen (sobald der Schlüssel hinterlegt ist)
       # Hochladen nur nachts, von Hand oder wenn die Änderung "[play]" enthält (Tageslimit bei Google)
-      - name: In Google Play hochladen (interner Test)
+      - name: In Google Play hochladen (interner + geschlossener Test)
         if: ${{ env.PLAY_JSON != '' && (github.event_name != 'push' || contains(github.event.head_commit.message, '[play]')) }}
         uses: r0adkll/upload-google-play@v1
         with:
@@ -71,5 +71,5 @@ jobs:
           packageName: de.gamingdoodz.hitradar
           releaseFiles: Hitradar-PlayStore.aab
           mappingFile: app/build/outputs/mapping/release/mapping.txt
-          track: alpha
+          tracks: internal,alpha
           status: completed
