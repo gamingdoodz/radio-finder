@@ -31,6 +31,9 @@ class HitMix(
 
     private var job: Job? = null
     private var songs: List<LiveIndex.Song> = emptyList()
+    /** Bei Playlists: nur die Playlist-Lieder (haben Vorrang vor dem Ersatz-Genre). */
+    private var primary: List<LiveIndex.Song> = emptyList()
+    private var isPlaylist = false
     private var stations: List<Station> = emptyList()
     private var currentStationId: String? = null
     private var currentSongKey: String? = null
@@ -123,6 +126,11 @@ class HitMix(
             else -> Deezer.topGermany(100)
         }
         songs = hits.distinctBy { it.id }.map { LiveIndex.Song(it) }.filter { it.key.isNotBlank() }
+        isPlaylist = playlist != null || myList != null
+        primary = if (isPlaylist) {
+            val own = (if (myList != null) Playlists.get(context, myList) else Deezer.playlistByName(playlist ?: "")).map { it.id }.toHashSet()
+            songs.filter { it.entry.id in own }.ifEmpty { songs }
+        } else songs
 
         // Künstler aus der Hitliste: für "ähnliche" Treffer, wenn gerade kein Listen-Song läuft
         artistNames = hits.map { it.subtitle.split(Regex("[,&]| feat| x ")).first().trim() }
@@ -265,6 +273,11 @@ class HitMix(
         }
         if (music) {
             val fresh = !confirmed && sinceSwitch < 25_000   // erster Titel nach dem Umschalten
+            if (isPlaylist && !primary.any { it.matches(norm) }) {
+                // Kein Playlist-Lied: fängt woanders gerade eins aus der Playlist an? Dann dorthin.
+                val alt = withContext(Dispatchers.Default) { ranked(limit = 1, onlyPrimary = true).firstOrNull() }
+                if (alt != null) { waitingForNext = false; switchTo(commit(alt)); return }
+            }
             if (fitsTitle(norm, stationId) && norm !in played) {
                 // Neues passendes Lied auf demselben Sender: einfach weiterhören
                 switchedTitle = norm; confirmed = true; waitingForNext = false
@@ -387,7 +400,7 @@ class HitMix(
         ranked(allowRepeats, anyMusic, 1).firstOrNull()
 
     /** Die besten Kandidaten der Reihe nach (für "Als Nächstes" in der Wiedergabeliste). */
-    private fun ranked(allowRepeats: Boolean = false, anyMusic: Boolean = false, limit: Int = 6): List<Choice> {
+    private fun ranked(allowRepeats: Boolean = false, anyMusic: Boolean = false, limit: Int = 6, onlyPrimary: Boolean = false): List<Choice> {
         val t = System.currentTimeMillis()
         val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
@@ -400,9 +413,14 @@ class HitMix(
         fun theme(n: LiveIndex.Now) = themeWords?.containsMatchIn(n.title) == true
         // Schnell über den Wort-Index statt jedes Lied mit jedem laufenden Titel zu vergleichen
         val poolIds = pool.mapTo(HashSet()) { it.station.id }
-        val fromList = songs.flatMap { sg -> LiveIndex.matching(sg).filter { it.station.id in poolIds }.map { it to sg.key } }
+        fun liveOf(l: List<LiveIndex.Song>) = l.flatMap { sg -> LiveIndex.matching(sg).filter { it.station.id in poolIds }.map { it to sg.key } }
             .distinctBy { it.first.station.id }
             .filter { (_, k) -> ok(k) }
+        // Playlist: zuerst ihre eigenen Lieder, dann das Ersatz-Genre
+        val fromPrimary = if (isPlaylist) liveOf(primary) else emptyList()
+        if (onlyPrimary) return fromPrimary.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
+            .sortedBy { (n, _) -> t - n.since }.take(limit).map { Choice(it.first, it.second) }
+        val fromList = liveOf(songs)
         val fromGenre = pool.filter { it.station.id in genreIds || theme(it) }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
         val artistWords = artistNames.map { Scanner.words(it) }.filter { it.isNotEmpty() }
         val fromArtist = if (strict) emptyList() else pool.filter { n -> artistWords.any { w -> w.all { n.normalized.contains(it) } } }
@@ -414,7 +432,7 @@ class HitMix(
         val rank = HashMap<String, Int>().also { m -> songs.forEachIndexed { i, sg -> m.putIfAbsent(sg.key, i) } }
         // Sender, bei denen beim Umschalten Werbung kommt, nur nehmen, wenn es gar nicht anders geht
         fun noAds(l: List<Pair<LiveIndex.Now, String>>) = l.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
-        val tiers = listOf(fromList, fromGenre, fromArtist, fromAny)
+        val tiers = listOf(fromPrimary, fromList, fromGenre, fromArtist, fromAny)
         val list = (tiers.map { noAds(it) } + tiers).firstOrNull { it.isNotEmpty() } ?: return emptyList()
         return list.sortedBy { (n, key) ->
                 // Bekannte Lieder deutlich bevorzugen: läuft auf vielen Sendern, oft gespielt heute, weit oben in der Liste

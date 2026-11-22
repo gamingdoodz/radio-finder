@@ -269,6 +269,7 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
         findViewById<View>(R.id.fullShare).setOnClickListener { shareSong() }
         findViewById<View>(R.id.fullSimilar).setOnClickListener { currentSongTitle()?.let { moreLike(it) } }
+        findViewById<View>(R.id.fullSkipAd).setOnClickListener { skipAd() }
         findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
         findViewById<View>(R.id.fullSpeed).setOnClickListener {
             val c = controller ?: return@setOnClickListener
@@ -678,7 +679,7 @@ class MainActivity : ComponentActivity() {
         val list = Services.forUse(this, stories)
         fun go(sv: Services.Service) {
             try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Services.url(sv, query)))) }
-            catch (_: Exception) { Toast.makeText(this, "${sv.name} konnte nicht geöffnet werden", Toast.LENGTH_SHORT).show() }
+            catch (_: Exception) { showHint("${sv.name} konnte nicht geöffnet werden") }
         }
         if (list.size == 1) { go(list[0]); return }
         sheet("Öffnen in …", query, null, "", false,
@@ -716,7 +717,7 @@ class MainActivity : ComponentActivity() {
     private fun startKidsMode() {
         pinDialog("PIN für den Kinder-Modus festlegen") { pin ->
             if (pin.length < 4) {
-                Toast.makeText(this, "Bitte 4 Ziffern eingeben", Toast.LENGTH_SHORT).show(); return@pinDialog
+                showHint("Bitte 4 Ziffern eingeben"); return@pinDialog
             }
             Settings.setPin(this, pin)
             Settings.setKidsMode(this, true)
@@ -733,7 +734,7 @@ class MainActivity : ComponentActivity() {
                 musicAudience = 0; storyAudience = 0
                 selectTab(Tab.HOME)
             } else {
-                Toast.makeText(this, "Falsche PIN", Toast.LENGTH_SHORT).show()
+                showHint("Falsche PIN")
             }
         }
     }
@@ -745,7 +746,7 @@ class MainActivity : ComponentActivity() {
         val shows = storyShows[cat.key].orEmpty().take(6)
         if (shows.isEmpty()) {
             loadStories(listOf(cat))
-            Toast.makeText(this, "Lade Geschichten, bitte gleich nochmal tippen", Toast.LENGTH_SHORT).show(); return
+            showHint("Lade Geschichten, bitte gleich nochmal tippen"); return
         }
         sheet("Einschlaf-Modus", "Welche Geschichte?", null, "", false,
             "Danach leise Schlaflieder, nach 45 Minuten wird es still.",
@@ -756,14 +757,14 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val eps = Podcasts.episodes(show)
             val c = controller ?: return@launch
-            if (eps.isEmpty()) { Toast.makeText(this@MainActivity, "Keine Folgen gefunden", Toast.LENGTH_SHORT).show(); return@launch }
+            if (eps.isEmpty()) { showHint("Keine Folgen gefunden"); return@launch }
             // Nächste noch nicht gehörte Folge (beim ersten Mal Folge 1), danach Schlaflieder
             val ep = eps[Positions.nextIndex(this@MainActivity, eps)]
             c.setMediaItem(ep.toMediaItem(), 0L)
             c.prepare()
             c.play()
             c.sendCustomCommand(SessionCommand(PlaybackService.CMD_BEDTIME, Bundle.EMPTY), Bundle().apply { putInt("min", 45) })
-            Toast.makeText(this@MainActivity, "Gute Nacht! 🌙", Toast.LENGTH_SHORT).show()
+            showHint("Gute Nacht! 🌙")
         }
     }
 
@@ -774,7 +775,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT < 31) return
         val am = getSystemService(android.app.AlarmManager::class.java)
         if (am.canScheduleExactAlarms()) return
-        Toast.makeText(this, "Bitte „Wecker und Erinnerungen“ für Hitradar erlauben", Toast.LENGTH_LONG).show()
+        showHint("Bitte „Wecker und Erinnerungen“ für Hitradar erlauben", long = true)
         try {
             startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
         } catch (_: Exception) {}
@@ -790,7 +791,7 @@ class MainActivity : ComponentActivity() {
                     android.app.TimePickerDialog(this, android.R.style.Theme_Material_Dialog_Alert, { _, h, m ->
                         Settings.setAlarm(this, on = true, hour = h, minute = m)
                         ensureExactAlarm()
-                        Toast.makeText(this, "Wecker gestellt: %02d:%02d Uhr".format(h, m), Toast.LENGTH_SHORT).show()
+                        showHint("Wecker gestellt: %02d:%02d Uhr".format(h, m))
                     }, Settings.alarmHour(this), Settings.alarmMinute(this), true).show()
                 },
                 Option(R.drawable.ic_radio, "Was soll spielen?", Settings.alarmLabel(this)) { alarmSourceSheet() },
@@ -880,12 +881,12 @@ class MainActivity : ComponentActivity() {
 
     private fun startHitMix(key: String?, label: String) {
         val c = controller ?: run {
-            Toast.makeText(this, "Player startet noch, bitte nochmal tippen", Toast.LENGTH_SHORT).show(); return
+            showHint("Player startet noch, bitte nochmal tippen"); return
         }
         c.setMediaItem(hitMixItem(key, "⚡ Hit-Mix $label"))
         c.prepare()
         c.play()
-        Toast.makeText(this, "Hit-Mix sucht einen Sender mit einem Hit…", Toast.LENGTH_SHORT).show()
+        showHint("Hit-Mix sucht einen Sender mit einem Hit…")
     }
 
     private fun stopHitMix() {
@@ -905,7 +906,7 @@ class MainActivity : ComponentActivity() {
             val f = c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
             f.addListener({
                 val ok = try { f.get().resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS } catch (_: Exception) { false }
-                if (!ok) Toast.makeText(this, "Gerade läuft kein anderer Hit – ich springe automatisch, sobald einer anfängt", Toast.LENGTH_LONG).show()
+                if (!ok) showHint("Gerade läuft kein anderer Hit – ich springe automatisch, sobald einer anfängt", long = true)
             }, ContextCompat.getMainExecutor(this))
         } else c.seekToNextMediaItem()
     }
@@ -1151,7 +1152,7 @@ class MainActivity : ComponentActivity() {
                     val d = (Playlists.trending + Playlists.forNow() + Playlists.weekly() + Playlists.classics + Playlists.saved(this))
                         .firstOrNull { it.query == p.query } ?: Playlists.Def(p.name, "Playlist", p.query)
                     val now = Playlists.toggleSaved(this, d)
-                    Toast.makeText(this, if (now) "In der Bibliothek gespeichert" else "Aus der Bibliothek entfernt", Toast.LENGTH_SHORT).show()
+                    showHint(if (now) "In der Bibliothek gespeichert" else "Aus der Bibliothek entfernt")
                     render()
                 })
             }
@@ -1177,14 +1178,14 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("Neue Playlist").setView(edit)
                 .setPositiveButton("Anlegen") { _, _ ->
                     val n = edit.text.toString().trim()
-                    if (n.isNotEmpty()) { Playlists.create(this, n); Playlists.add(this, n, song); Toast.makeText(this, "Zu „$n“ hinzugefügt", Toast.LENGTH_SHORT).show(); render() }
+                    if (n.isNotEmpty()) { Playlists.create(this, n); Playlists.add(this, n, song); showHint("Zu „$n“ hinzugefügt"); render() }
                 }.setNegativeButton("Abbrechen", null).show()
         }
         if (names.isEmpty()) { newList(); return }
         sheet("Zur Playlist hinzufügen", song.title, song.artwork.ifBlank { null }, song.name, false, null,
             names.map { n -> Option(R.drawable.ic_note, n, "${Playlists.get(this, n).size} Lieder") {
                 val ok = Playlists.add(this, n, song)
-                Toast.makeText(this, if (ok) "Zu „$n“ hinzugefügt" else "Ist schon in „$n“", Toast.LENGTH_SHORT).show()
+                showHint(if (ok) "Zu „$n“ hinzugefügt" else "Ist schon in „$n“")
             } } + Option(R.drawable.ic_heart_outline, "Neue Playlist…", null) { newList() })
     }
 
@@ -1304,7 +1305,7 @@ class MainActivity : ComponentActivity() {
         } else if (WatchService.activeQuery(this) == null) {
             rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
                 WatchService.start(this, query)
-                Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
+                showHint("Wächter läuft – du kannst die App schließen", long = true)
             })
         }
 
@@ -1451,7 +1452,7 @@ class MainActivity : ComponentActivity() {
                 WatchService.startMany(this, topDe.map { e ->
                     e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " — " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
                 })
-                Toast.makeText(this, "100 Hits auf der Wunschliste – der Wächter sucht", Toast.LENGTH_LONG).show()
+                showHint("100 Hits auf der Wunschliste – der Wächter sucht", long = true)
                 render()
             })
         }
@@ -1638,7 +1639,7 @@ class MainActivity : ComponentActivity() {
                 StationRepository.clear(this)
                 popular = emptyList()
                 loadHome()
-                Toast.makeText(this, "Senderlisten werden neu geladen", Toast.LENGTH_SHORT).show()
+                showHint("Senderlisten werden neu geladen")
             },
         ))
 
@@ -1778,11 +1779,11 @@ class MainActivity : ComponentActivity() {
         val next = w.others.firstOrNull()
         if (next != null) {
             wanted = Wanted(w.song, w.title, w.others.drop(1), System.currentTimeMillis(), w.preview)
-            Toast.makeText(this, "Dort läuft schon etwas anderes – versuche ${next.name}", Toast.LENGTH_SHORT).show()
+            showHint("Dort läuft schon etwas anderes – versuche ${next.name}")
             play(next.toEntry(), emptyList())
         } else {
             wanted = null
-            Toast.makeText(this, "„${w.title}“ ist gerade überall zu Ende", Toast.LENGTH_LONG).show()
+            showHint("„${w.title}“ ist gerade überall zu Ende", long = true)
             w.preview?.let { songDialog(it, "Das Lied ist gerade zu Ende gegangen.") }
         }
     }
@@ -1796,7 +1797,7 @@ class MainActivity : ComponentActivity() {
         val ctx = try {
             @Suppress("DEPRECATION") com.google.android.gms.cast.framework.CastContext.getSharedInstance(this)
         } catch (_: Exception) {
-            Toast.makeText(this, "Zum Casten werden die Google-Play-Dienste gebraucht", Toast.LENGTH_LONG).show(); return
+            showHint("Zum Casten werden die Google-Play-Dienste gebraucht", long = true); return
         }
         val current = ctx.sessionManager.currentCastSession
         if (current != null && current.isConnected) {
@@ -1839,7 +1840,7 @@ class MainActivity : ComponentActivity() {
             .setNegativeButton("Abbrechen", null).create()
         list.setOnItemClickListener { _, _, i, _ ->
             routes.getOrNull(i)?.let { router.selectRoute(it) }
-            Toast.makeText(this, "Verbinde mit ${routes.getOrNull(i)?.name ?: "Lautsprecher"}…", Toast.LENGTH_SHORT).show()
+            showHint("Verbinde mit ${routes.getOrNull(i)?.name ?: "Lautsprecher"}…")
             dlg.dismiss()
         }
         dlg.setOnDismissListener { router.removeCallback(cb) }
@@ -1857,7 +1858,7 @@ class MainActivity : ComponentActivity() {
             if (station != null) play(station, emptyList()) else preview?.let { songDialog(it) }
             return
         }
-        Toast.makeText(this, "Prüfe, wo das Lied gerade läuft…", Toast.LENGTH_SHORT).show()
+        showHint("Prüfe, wo das Lied gerade läuft…")
         val song = LiveIndex.Song(Entry("", Kind.TRACK, title, artist, "", "", title))
         lifecycleScope.launch {
             val t0 = System.currentTimeMillis()
@@ -1877,14 +1878,13 @@ class MainActivity : ComponentActivity() {
                     .map { it.station }, System.currentTimeMillis(), preview)
                 val ads = Ads.likely(this@MainActivity, ok.station.id, ok.station.url)
                 val left = if (t - now.since > 3 * 60_000L) " (läuft schon länger)" else ""
-                Toast.makeText(this@MainActivity,
-                    "Läuft auf ${ok.station.name}$left" + if (ads) " – evtl. kurz Werbung vorab" else "", Toast.LENGTH_SHORT).show()
+                showHint("Läuft auf ${ok.station.name}$left" + if (ads) " – evtl. kurz Werbung vorab" else "")
                 play(ok.station.toEntry(now.title), emptyList())
             } else {
                 render()
                 if (preview != null) songDialog(preview, "Das Lied ist gerade zu Ende gegangen.")
                 else if (station != null) {
-                    Toast.makeText(this@MainActivity, "Das Lied ist gerade zu Ende – ${station.name} läuft trotzdem", Toast.LENGTH_SHORT).show()
+                    showHint("Das Lied ist gerade zu Ende – ${station.name} läuft trotzdem")
                     play(station, emptyList())
                 }
             }
@@ -1893,10 +1893,65 @@ class MainActivity : ComponentActivity() {
 
     private class Option(val icon: Int, val label: String, val sub: String?, val action: () -> Unit)
 
+    // ---------- Kurze Hinweise oben statt Toasts (die verdecken unten den Player) ----------
+    private var hintView: TextView? = null
+    private val hintHide = Runnable { hintView?.animate()?.alpha(0f)?.setDuration(250)?.withEndAction { hintView?.visibility = View.GONE } }
+
+    private fun showHint(text: String, long: Boolean = false) {
+        val root = findViewById<ViewGroup>(android.R.id.content) ?: return
+        val v = hintView ?: TextView(this).apply {
+            textSize = 14f
+            setTextColor(getColor(R.color.c_ffffffff))
+            setBackgroundResource(R.drawable.bg_hint)
+            elevation = dp(8f)
+            val ph = dp(18f).toInt(); val pv = dp(11f).toInt()
+            setPadding(ph, pv, ph, pv)
+            gravity = android.view.Gravity.CENTER
+            val lp = android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL)
+            lp.topMargin = dp(96f).toInt()
+            lp.leftMargin = dp(24f).toInt(); lp.rightMargin = dp(24f).toInt()
+            root.addView(this, lp)
+            hintView = this
+        }
+        v.text = text
+        v.removeCallbacks(hintHide)
+        v.animate().cancel()
+        v.visibility = View.VISIBLE
+        v.alpha = 0f
+        v.animate().alpha(1f).setDuration(150).start()
+        v.postDelayed(hintHide, if (long) 3_500 else 2_200)
+    }
+
     /**
      * Das laufende Radio-Lied nochmal von vorn: läuft es gerade woanders frisch an, sofort dorthin.
      * Sonst übernimmt der Wächter und spielt es, sobald es wieder irgendwo anfängt.
      */
+    /** Werbung oder Ansage beim Umschalten: im Hit-Mix sofort weiter, sonst dasselbe Lied auf einem anderen Sender. */
+    private fun skipAd() {
+        val c = controller ?: return
+        val id = c.currentMediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:") ?: return
+        // Merken (auch für alle anderen Nutzer): dieser Sender startet mit Werbung
+        val ms = (NowSong.sinceTune() + 15_000).coerceIn(15_000, 120_000)
+        Ads.record(this, id, ms)
+        Radar.reportAd(id, ms)
+        if (HitMix.activeName(this) != null) {
+            c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
+            showHint("Werbung übersprungen – nächster Hit")
+            return
+        }
+        val live = (c.mediaMetadata.title?.toString() ?: c.currentMediaItem?.mediaMetadata?.title?.toString())?.takeIf { LiveIndex.isMusic(it) }
+        val t = System.currentTimeMillis()
+        val other = live?.let { l ->
+            LiveIndex.findSongs(l.substringAfter(" - ").substringAfter(" – ").trim(), l.substringBefore(" - ").substringBefore(" – ").trim())
+                .filter { it.station.id != id && t - it.since < 120_000 && !Ads.likely(this, it.station.id, it.station.url) }.maxByOrNull { it.since }
+        }
+        if (other != null) {
+            showHint("Gleiches Lied auf ${other.station.name}")
+            play(other.station.toEntry(other.title), emptyList())
+        } else showHint("Gerade spielt kein anderer Sender das Lied – nach dem Spot geht's weiter", long = true)
+    }
+
     private fun playAgain() {
         val c = controller ?: return
         val item = c.currentMediaItem ?: return
@@ -1907,12 +1962,12 @@ class MainActivity : ComponentActivity() {
         val t = System.currentTimeMillis()
         val best = LiveIndex.findSongs(title, artist).filter { it.station.id != here && t - it.since < 90_000 }.firstOrNull()
         if (best != null) {
-            Toast.makeText(this, "Läuft gerade von vorn auf ${best.station.name}", Toast.LENGTH_SHORT).show()
+            showHint("Läuft gerade von vorn auf ${best.station.name}")
             play(best.station.toEntry(best.title), emptyList())
             return
         }
         WatchService.start(this, "$title — $artist", skipStation = here)
-        Toast.makeText(this, "Wächter läuft: Sobald „$title“ woanders anfängt, geht's los", Toast.LENGTH_LONG).show()
+        showHint("Wächter läuft: Sobald „$title“ woanders anfängt, geht's los", long = true)
         render()
     }
 
@@ -1934,7 +1989,7 @@ class MainActivity : ComponentActivity() {
             .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
             .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, if (wish) "Was möchtest du hören?" else "Lied, Künstler oder Sender")
         try { speech.launch(i) } catch (_: Exception) {
-            Toast.makeText(this, "Spracheingabe ist auf diesem Handy nicht verfügbar", Toast.LENGTH_SHORT).show()
+            showHint("Spracheingabe ist auf diesem Handy nicht verfügbar")
         }
     }
 
@@ -1979,7 +2034,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleWish(text: String) {
-        Toast.makeText(this, "Einen Moment, ich suche passende Musik…", Toast.LENGTH_SHORT).show()
+        showHint("Einen Moment, ich suche passende Musik…")
         lifecycleScope.launch {
             val w = Radar.wish(text) ?: localWish(text)
             val artist = w?.artist?.let { Deezer.artist(it) }
@@ -2056,7 +2111,7 @@ class MainActivity : ComponentActivity() {
                 song?.let {
                     Option(R.drawable.ic_bell, "Wächter für dieses Lied", "Spielt es, sobald es wieder im Radio läuft") {
                         WatchService.start(this, it)
-                        Toast.makeText(this, "Wächter läuft", Toast.LENGTH_SHORT).show()
+                        showHint("Wächter läuft")
                         render()
                     }
                 },
@@ -2151,7 +2206,7 @@ class MainActivity : ComponentActivity() {
             listOfNotNull(
                 Option(R.drawable.ic_bell, "Wächter starten", "Spielt das Lied komplett ab, sobald es im Radio kommt") {
                     WatchService.start(this, "$clean — $firstArtist")
-                    Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
+                    showHint("Wächter läuft – du kannst die App schließen", long = true)
                     render()
                 },
                 if (e.url.isNotBlank()) Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) } else null,
@@ -2166,7 +2221,7 @@ class MainActivity : ComponentActivity() {
     private fun play(entry: Entry, section: List<Entry>) {
         val c = controller
         if (c == null) {
-            Toast.makeText(this, "Player startet noch, bitte nochmal tippen", Toast.LENGTH_SHORT).show()
+            showHint("Player startet noch, bitte nochmal tippen")
             return
         }
         if (entry.kind == Kind.TRACK && !entry.preview) {
@@ -2200,7 +2255,7 @@ class MainActivity : ComponentActivity() {
         fun set(min: Int, label: String) {
             val args = Bundle().apply { putInt("min", min) }
             controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_SLEEP, Bundle.EMPTY), args)
-            Toast.makeText(this, if (min == 0) "Schlaf-Timer aus" else "Musik stoppt in $label", Toast.LENGTH_SHORT).show()
+            showHint(if (min == 0) "Schlaf-Timer aus" else "Musik stoppt in $label")
         }
         val running = Settings.sleepEnd(this) > System.currentTimeMillis()
         val options = choices.map { (m, l) -> Option(R.drawable.ic_sun, l, null) { set(m, l) } }.toMutableList()
@@ -2338,6 +2393,8 @@ class MainActivity : ComponentActivity() {
         val id = mediaId.removePrefix("st:")
         val known = Ads.duration(this, id)
         val elapsed = NowSong.sinceTune()
+        // Bekannte Vorab-Werbung: Countdown, auch wenn der Sender währenddessen schon den Liedtitel schickt
+        if (known > 0 && elapsed < known) return AdInfo(known - elapsed, known, elapsed)
         if (live != null && LiveIndex.isMusic(live) && !Ads.isAd(live)) return null
         if (Ads.isAd(live)) return AdInfo(if (known > elapsed) known - elapsed else -1, known, elapsed)
         // Bekannte Vorab-Werbung: Countdown (mit etwas Puffer)
@@ -2352,7 +2409,7 @@ class MainActivity : ComponentActivity() {
     private fun adText(ad: AdInfo): String {
         val muted = if (ad.total > 0 && Settings.muteAds(this)) " · stumm" else ""
         return when {
-            ad.left > 0 -> "📢 Werbung$muted · gleich geht's weiter (${fmt(ad.left)})"
+            ad.left > 0 -> "📢 Werbung$muted · nach dem Spot geht's weiter (${fmt(ad.left)})"
             ad.left == 0L -> "📢 Werbung$muted · gleich geht's los"
             else -> "📢 Werbung · läuft seit ${fmt(ad.elapsed)}"
         }
@@ -2379,6 +2436,8 @@ class MainActivity : ComponentActivity() {
         if (isStation) {
             val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
             val ad = adInfo(c, item.mediaId, live)
+            findViewById<View>(R.id.fullSkipAd).visibility =
+                if (!kids() && (ad != null || NowSong.sinceTune() < 90_000)) View.VISIBLE else View.GONE
             val miniP = findViewById<ProgressBar>(R.id.miniProgress)
             if (ad != null) {
                 val t = adText(ad)

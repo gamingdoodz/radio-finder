@@ -443,6 +443,21 @@
                 android:visibility="gone">
 
                 <TextView
+                    android:id="@+id/fullSkipAd"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_search"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="📢 Werbung? Überspringen"
+                    android:textColor="@color/c_ff2ee6a8"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <TextView
                     android:id="@+id/fullAgain"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"

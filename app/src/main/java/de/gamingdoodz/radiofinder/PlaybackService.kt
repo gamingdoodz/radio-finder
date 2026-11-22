@@ -370,12 +370,15 @@ class PlaybackService : MediaLibraryService() {
                 val first = NowSong.title == null
                 NowSong.title = clean
                 // Erster Titel nach dem Einschalten: Startzeit vom Server, sonst unbekannt. Wechsel beim Hören: jetzt.
-                NowSong.startMs = if (first) LiveIndex.get(stationId)?.takeIf { Text.clean(it.title) == clean }?.since?.takeIf { it < now } ?: 0L
+                val norm = Scanner.normalize(clean)
+                NowSong.startMs = if (first) LiveIndex.get(stationId)?.takeIf { it.normalized == norm || LiveIndex.Song(
+                    Entry("", Kind.TRACK, clean.substringAfter(" - ").substringAfter(" – ").trim(),
+                        clean.substringBefore(" - ").substringBefore(" – ").trim(), "", "", "")).matches(it.normalized) }
+                    ?.since?.takeIf { it < now } ?: 0L
                 else now
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
             }
             NowSong.localAt = now
-            if (adMuted) { adMuted = false; exo?.volume = 1f }
             LiveIndex.titleFromStream(stationId, clean)
         } else if (NowSong.title != null) {
             // Lied vorbei: jetzt Moderation, Jingle oder Werbung
@@ -393,7 +396,9 @@ class PlaybackService : MediaLibraryService() {
             if (!Settings.muteAds(this@PlaybackService) || session?.player !== localPlayer || !p.isPlaying) return
             val known = Ads.duration(this@PlaybackService, id)
             val since = NowSong.sinceTune()
-            val shouldMute = NowSong.title == null && known > 0 && since < known + 10_000
+            // Bekannte Werbung: ihre Dauer lang stumm (auch wenn der Sender schon den Liedtitel schickt),
+            // ohne Titel bis zu 10 s länger, falls der Spot länger dauert
+            val shouldMute = known > 0 && (since < known || (NowSong.title == null && since < known + 10_000))
             if (shouldMute && !adMuted) { adMuted = true; p.volume = 0f }
             else if (!shouldMute && adMuted) { adMuted = false; p.volume = 1f }
         }

@@ -352,7 +352,8 @@ async def h_popular(req):
                 mixes[k] = mixes.get(k, 0) + n * w
         out = {
             "songs": [{"title": pop_titles.get(k, k), "score": round(v, 1)}
-                      for k, v in sorted(songs.items(), key=lambda kv: -kv[1])[:60] if v >= 2],
+                      for k, v in sorted(songs.items(), key=lambda kv: -kv[1])[:120]
+                      if v >= 2 and real_song(k, pop_titles.get(k, k))][:60],
             "mixes": [{"key": k, "score": round(v, 1)} for k, v in sorted(mixes.items(), key=lambda kv: -kv[1])[:20]],
         }
         _pop_cache.update(t=time.time(), body=gzip.compress(json.dumps(out, ensure_ascii=False).encode(), 6))
@@ -571,7 +572,9 @@ async def h_charts(req):
             if h >= now_h - 24:
                 for k, n in c.items():
                     total[k] = total.get(k, 0) + n
-        top = sorted(((k, n) for k, n in total.items() if is_song(chart_titles.get(k, k))), key=lambda kv: -kv[1])[:100]
+        top = sorted(((k, n) for k, n in total.items() if is_song(chart_titles.get(k, k))), key=lambda kv: -kv[1])[:160]
+        # Nur echte Lieder (keine Sender-Slogans/Sendungen); was noch nicht nachgeschlagen ist, kommt beim nächsten Mal
+        top = [(k, n) for k, n in top if real_song(k, chart_titles.get(k, k))][:100]
         out = [{"title": chart_titles.get(k, k), "plays": n} for k, n in top if n >= 3]
         _charts_cache.update(t=time.time(), body=gzip.compress(json.dumps(out, ensure_ascii=False).encode(), 6))
     if "gzip" in req.headers.get("Accept-Encoding", ""):
@@ -584,7 +587,7 @@ _rising_cache = {"t": 0, "body": None}
 
 async def h_rising(req):
     """Aufsteiger: Lieder, die in den letzten 6 Stunden viel öfter laufen als davor (neu oder gerade angesagt)."""
-    if not _rising_cache["body"] or time.time() - _rising_cache["t"] > 900:
+    if not _rising_cache["body"] or time.time() - _rising_cache["t"] > 600:
         now_h = int(time.time() // 3600)
         recent: dict = {}
         before: dict = {}
@@ -596,7 +599,7 @@ async def h_rising(req):
                 target[k] = target.get(k, 0) + n
         scored = []
         for k, r in recent.items():
-            if r < 6 or not is_song(chart_titles.get(k, k)):
+            if r < 6 or not is_song(chart_titles.get(k, k)) or not real_song(k, chart_titles.get(k, k)):
                 continue
             b = before.get(k, 0) * 6 / 24
             if r > 1.6 * b + 2:
@@ -1159,6 +1162,16 @@ def ending_soon(n, t=None) -> bool:
     age = (t or time.time()) - n["since"]
     dur = (covers.get(n["norm"]) or {}).get("dur", 0)
     return dur - age < 60 if dur else age > 240
+
+
+def real_song(norm: str, title: str) -> bool:
+    """Echtes Lied (bei Deezer gefunden), keine Hörspielfolge, kein Sender-Slogan. Unbekannt: nachschlagen, erst mal nein."""
+    c = covers.get(norm)
+    if c is None:
+        if len(cover_queue) < 5000:
+            cover_queue[norm] = title
+        return False
+    return bool(c)
 
 
 def plays24(norm: str) -> int:
