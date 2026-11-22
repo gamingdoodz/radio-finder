@@ -53,11 +53,19 @@ def put(st: dict, title: str):
     title = html.unescape(title).strip()
     t = time.time()
     old = now.get(st["id"])
-    since = old["since"] if old and old["title"] == title and t - old["time"] < FRESH_SECONDS else t
+    if old and old["title"] == title and t - old["time"] < FRESH_SECONDS:
+        since = old["since"]
+    elif old and t - old["time"] < 120:
+        since = (old["time"] + t) / 2     # Wechsel lag zwischen den zwei Abfragen: Mitte ist die beste Schätzung
+    else:
+        since = t
     norm = normalize(title)
     now[st["id"]] = {"title": title, "norm": norm, "since": since, "time": t}
+    # Liedlänge im Hintergrund holen (für die genaue Prüfung am Liedende)
+    if since != (old or {}).get("since") and is_song(title) and (norm not in covers or (covers[norm] and "dur" not in covers[norm])) and len(cover_queue) < 5000:
+        cover_queue[norm] = title
     # Neues Lied auf einem Sender aus DE/AT/CH: für die Radio-Charts zählen
-    if since == t and is_song(title) and not TALK.search(title):
+    if (not old or old["title"] != title) and is_song(title) and not TALK.search(title):
         if st.get("cc") in ("DE", "AT", "CH"):
             count_play(norm, title, st["id"], t)
         learn_neighbors(st["id"], norm, title)
@@ -147,6 +155,25 @@ SHARED: dict = {}  # gemeinsam genutzte Verbindung (vom Scanner)
 
 
 # ---------------- Cover für alle: einmal bei Deezer holen, für alle Nutzer merken ----------------
+cover_queue: dict = {}   # norm -> Titel, dessen Länge/Cover noch geholt werden soll
+
+
+async def cover_worker():
+    """Holt Liedlängen nach und nach (Deezer erlaubt nur wenige Anfragen pro Sekunde)."""
+    while True:
+        await asyncio.sleep(0.4)
+        if not cover_queue or "session" not in SHARED:
+            continue
+        norm, title = next(iter(cover_queue.items()))
+        cover_queue.pop(norm, None)
+        if norm in covers and (not covers[norm] or "dur" in covers[norm]):
+            continue
+        try:
+            await find_cover(title)
+        except Exception:
+            pass
+
+
 COVERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "covers.json")
 covers: dict = {}          # norm -> {"art","title","artist"} oder {} (= nichts gefunden)
 _cover_sem = asyncio.Semaphore(4)
@@ -745,6 +772,16 @@ async def check(session, st):
     if t:
         put(st, t)
         fails[sid] = 0
+        # Liedlänge bekannt: genau dann nochmal schauen, wenn das Lied zu Ende sein müsste
+        n = now.get(sid)
+        if n and is_song(n["title"]):
+            dur = (covers.get(n["norm"]) or {}).get("dur", 0)
+            if dur:
+                left = n["since"] + dur - time.time()
+                if left > 0:
+                    return max(8, min(left - 3, 90))
+                if left > -150:
+                    return 12      # müsste vorbei sein: kurz nacheinander prüfen, bis der Wechsel kommt
         return 60 + (hash(sid) % 30)
     f = fails.get(sid, 0) + 1
     fails[sid] = f
@@ -791,6 +828,7 @@ async def scanner():
         load_covers()
         load_popular()
         load_traffic()
+        asyncio.create_task(cover_worker())
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
         workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]

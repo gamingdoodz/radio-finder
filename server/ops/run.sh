@@ -1,7 +1,9 @@
 #!/bin/bash
-sleep 75
-echo "== Mix-Stream 40 s:"
-curl -s -m 40 -o /tmp/mix.mp3 -w "HTTP %{http_code}, %{size_download} Bytes, %{content_type}\n" "https://130-61-78-232.sslip.io:8080/mix?g="
-file /tmp/mix.mp3 2>/dev/null | head -1
-curl -s -m 30 -o /dev/null -w "Mix Weihnachten: HTTP %{http_code}, %{size_download} Bytes\n" "https://130-61-78-232.sslip.io:8080/mix?g=xmas"
-journalctl -u radar --since "-3 min" --no-pager | grep -iE "Traceback|Error" | tail -5
+sleep 240
+curl -s https://130-61-78-232.sslip.io:8080/health; echo
+journalctl -u radar --since "-5 min" --no-pager | grep -iE "Traceback|Error" | tail -5
+python3 - <<'PY'
+import json
+c = json.load(open("/root/radio-finder/server/covers.json")) if __import__("os").path.exists("/root/radio-finder/server/covers.json") else {}
+print("Cover gespeichert:", len(c), "davon mit Länge:", sum(1 for v in c.values() if v and v.get("dur")))
+PY
