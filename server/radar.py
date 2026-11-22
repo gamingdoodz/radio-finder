@@ -982,7 +982,7 @@ def mix_pick(genre, played, exclude):
         if rx is not None and not (rx.search(st.get("tags", "")) or rx.search(n["title"].lower())):
             continue
         age = t - n["since"]
-        if age > 150:      # nur frisch angefangene Lieder
+        if age > 150 or ending_soon(n, t):      # nur frisch angefangene Lieder
             continue
         sc = age + (240 if sid in ads else 0) - (0 if rx is not None else min(plays24(n["norm"]), 60) * 20)
         if score is None or sc < score:
@@ -1147,6 +1147,13 @@ async def alexa_verify(req, body: bytes) -> bool:
         return False
 
 
+def ending_soon(n, t=None) -> bool:
+    """Lied ist gleich vorbei: weniger als 1 Minute übrig (Länge bekannt) oder schon über 4 Minuten alt."""
+    age = (t or time.time()) - n["since"]
+    dur = (covers.get(n["norm"]) or {}).get("dur", 0)
+    return dur - age < 60 if dur else age > 240
+
+
 def plays24(norm: str) -> int:
     h0 = int(time.time() // 3600) - 24
     return sum(c.get(norm, 0) for h, c in chart_hours.items() if h >= h0)
@@ -1161,7 +1168,7 @@ def alexa_pick(query: str = "", genre: str = "", exclude: str = ""):
     best, score = None, None
     for sid, n in fresh():
         st = m.get(sid)
-        if not st or sid == exclude or not is_song(n["title"]) or TALK.search(n["title"]):
+        if not st or sid == exclude or not is_song(n["title"]) or TALK.search(n["title"]) or ending_soon(n, t):
             continue
         if words:
             if not all(w in n["norm"] for w in words):

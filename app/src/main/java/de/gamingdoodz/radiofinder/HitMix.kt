@@ -295,6 +295,9 @@ class HitMix(
             if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
             if (tick % 7 != 0) continue   // ca. alle 20 Sekunden: Server-Stand + nächsten Kandidaten vorbereiten
             poll(force = false)
+            // Liedlängen der frisch angefangenen Lieder holen (damit fast vorbei nicht gewählt wird)
+            LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) && System.currentTimeMillis() - it.since < 150_000 && !Covers.known(it.title) }
+                .sortedByDescending { it.since }.take(12).forEach { n -> scope.launch { Covers.load(n.title) } }
             candidate = withContext(Dispatchers.Default) { choose() }?.let { System.currentTimeMillis() to it }
             // Ohne Titel im Stream (z. B. beim Casten oder Sender ohne Titel): Server-Stand entscheidet
             val local = !Cast.active && System.currentTimeMillis() - lastLocal < 10 * 60_000L
@@ -377,7 +380,8 @@ class HitMix(
         val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
         val pool = LiveIndex.fresh().filter {
-            (ids == null || it.station.id in ids) && it.station.id != currentStationId && it.normalized != currentTitle && LiveIndex.isMusic(it.title)
+            (ids == null || it.station.id in ids) && it.station.id != currentStationId && it.normalized != currentTitle &&
+                LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it, t)
         }
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
 

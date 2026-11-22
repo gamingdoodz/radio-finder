@@ -142,12 +142,19 @@ object LiveIndex {
     }
 
     /** Laufende Lieder: bekannte zuerst, dann frisch angefangene (je Lied nur einmal). */
+    /** Lied ist gleich zu Ende (weniger als 1 Minute übrig, oder ohne bekannte Länge schon über 4 Minuten). */
+    fun endingSoon(n: Now, t: Long = System.currentTimeMillis()): Boolean {
+        val age = t - n.since
+        val dur = Covers.get(n.title)?.durMs ?: 0L
+        return if (dur > 0) dur - age < 60_000L else age > 4 * 60_000L
+    }
+
     fun topMusic(): List<Now> {
         valid(topCache)?.let { return it }
         val g = gen
         val pop = popularity()
         val t = System.currentTimeMillis()
-        return fresh().filter { isMusic(it.title) }
+        return fresh().filter { isMusic(it.title) && !endingSoon(it, t) }
             .sortedByDescending { score(it, pop, t) }
             .distinctBy { it.normalized }
             .take(300)

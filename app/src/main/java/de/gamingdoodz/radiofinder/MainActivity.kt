@@ -1849,9 +1849,9 @@ class MainActivity : ComponentActivity() {
     private fun tapSong(title: String, artist: String, station: Entry?, preview: Entry?) {
         val t = System.currentTimeMillis()
         val candidates = LiveIndex.findSongs(title, artist).distinctBy { it.station.id }
-            .sortedWith(compareBy<LiveIndex.Now> { if (Ads.likely(this, it.station.id, it.station.url)) 1 else 0 }
+            .sortedWith(compareBy<LiveIndex.Now> { if (LiveIndex.endingSoon(it)) 1 else 0 }.then(compareBy<LiveIndex.Now> { if (Ads.likely(this, it.station.id, it.station.url)) 1 else 0 }
                 .thenBy { if (Cast.active && !Cast.isHttps(it.station.url)) 1 else 0 }   // Casten: https direkt
-                .thenByDescending { it.since })
+                .thenByDescending { it.since }))
             .take(6)
         if (candidates.isEmpty()) {
             if (station != null) play(station, emptyList()) else preview?.let { songDialog(it) }
