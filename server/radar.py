@@ -1052,7 +1052,7 @@ by_id = lambda: {s["id"]: s for s in stations}
 
 
 def item(st, n):
-    return {"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"],
+    return {"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"], "cc": st.get("cc", ""),
             "title": n["title"], "since": int(n["since"]), "seen": int(n["time"])}
 
 
@@ -1154,7 +1154,7 @@ async def h_sync(req):
         old = next((s for v, _, s in _snaps if v == frm), None)
         if old is None:
             # Erstes Mal oder zu alt: alles, mit Senderdaten
-            rows = [[sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val]
+            rows = [[sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val, ids[sid].get("cc", "")]
                     for sid, val in snap.items() if sid in ids]
             out = {"v": ver, "t": int(t), "full": 1, "rows": rows}
         else:
@@ -1166,7 +1166,7 @@ async def h_sync(req):
                 if o is not None:
                     rows.append([sid, *val])  # Sender kennt die App schon
                 elif sid in ids:
-                    rows.append([sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val])
+                    rows.append([sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val, ids[sid].get("cc", "")])
             gone = [sid for sid in old if sid not in snap]
             out = {"v": ver, "t": int(t), "rows": rows, "gone": gone}
         body = gzip.compress(json.dumps(out, separators=(",", ":"), ensure_ascii=False).encode(), 6)

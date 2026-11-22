@@ -34,7 +34,10 @@ object Radar {
     @Volatile private var lastFail = 0L
     private val lock = Mutex()
 
-    fun init(context: Context) { appContext = context.applicationContext }
+    fun init(context: Context) { appContext = context.applicationContext; Region.load(context) }
+
+    /** Länder geändert: alles neu vom Server holen. */
+    fun resetSync() { synchronized(known) { known.clear() }; version = 0L; lastTry = 0L; LiveIndex.clear() }
 
     /** Stream eines Senders über den Server (nur fürs Casten bei Sendern ohne https). */
     fun relayUrl(stationId: String): String? = "${servers[0]}/relay?id=${java.net.URLEncoder.encode(stationId, "UTF-8")}"
@@ -62,6 +65,7 @@ object Radar {
             val id = o.optString("id").ifBlank { return@mapNotNull null }
             val url = o.optString("url").ifBlank { return@mapNotNull null }
             val title = o.optString("title").ifBlank { return@mapNotNull null }
+            if (!Region.allows(if (o.has("cc")) o.optString("cc") else null)) return@mapNotNull null
             Station(id, o.optString("name", "Radio"), url, o.optString("favicon"), false) to
                 Triple(title, o.optLong("since") * 1000L, o.optLong("seen") * 1000L)
         }
@@ -83,6 +87,7 @@ object Radar {
             val r = rows.optJSONArray(i) ?: continue
             val id = r.optString(0)
             if (r.length() >= 7) {
+                if (!Region.allows(if (r.length() >= 8) r.optString(7) else null)) continue
                 val st = Station(id, r.optString(1, "Radio"), r.optString(2), r.optString(3), false)
                 known[id] = Live(st, r.optString(4), r.optLong(5) * 1000L, r.optLong(6) * 1000L)
             } else if (r.length() >= 4) {

@@ -1240,7 +1240,12 @@ class MainActivity : ComponentActivity() {
             loadCovers(list)
             limited("radio", list, n) { rows.add(Row.Item(Covers.dress(it), list, "● LIVE")) }
         }
-        if (WatchService.activeQuery(this) == null) {
+        val asGenre = Genres.fromText(query)
+        if (asGenre != null) {
+            // Musikrichtung statt Lied: der Wächter sucht genaue Titel, hier passt der Hit-Mix
+            rows.add(Row.Empty("Der Wächter sucht bestimmte Lieder. Für „${asGenre.name}“ spielt der Hit-Mix nur passende Lieder."))
+            rows.add(button(R.drawable.ic_bolt, "${asGenre.name}-Mix starten") { startHitMix(asGenre.key, "– ${asGenre.name}") })
+        } else if (WatchService.activeQuery(this) == null) {
             rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
                 WatchService.start(this, query)
                 Toast.makeText(this, "Wächter läuft – du kannst die App schließen", Toast.LENGTH_LONG).show()
@@ -1508,6 +1513,7 @@ class MainActivity : ComponentActivity() {
         val norm = Settings.normalize(this)
         val mine = Services.all.filter { it.key in Services.mine(this) }
         settingsGroup("Wiedergabe", listOf(
+            Row.Setting(R.drawable.ic_radio, "Sender aus", "Gegen fremdsprachige Werbung", value = Region.label(this)) { regionSheet() },
             Row.Setting(R.drawable.ic_eq, "Audioqualität", if (q == 3) "Gerade: " + (if (Settings.highQuality(this)) "Hoch (WLAN)" else "Normal (mobil)") else "Für freie Musik",
                 value = listOf("Sparend", "Normal", "Hoch", "Auto")[q.coerceIn(0, 3)]) { qualitySheet() },
             Row.Setting(R.drawable.ic_radio, "Lautstärke angleichen", "Alle Sender gleich laut",
@@ -1625,6 +1631,20 @@ class MainActivity : ComponentActivity() {
                 val on = Settings.homeOn(this, key)
                 Option(if (on) R.drawable.ic_heart else R.drawable.ic_heart_outline, name, if (on) "Wird angezeigt" else "Ausgeblendet") {
                     Settings.setHomeOn(this, key, !on); homeSheet(); render()
+                }
+            })
+    }
+
+    private fun regionSheet() {
+        sheet("Sender aus", "Für Suche, Hit-Mix und Wächter", null, "", false, null,
+            Region.options.map { (key, ns) ->
+                val (n, sub) = ns
+                Option(if (key == Settings.region(this)) R.drawable.ic_play else R.drawable.ic_radio, n, sub) {
+                    Settings.setRegion(this, key)
+                    Region.load(this)
+                    Radar.resetSync()
+                    lifecycleScope.launch { Radar.sync(force = true); render() }
+                    render()
                 }
             })
     }

@@ -32,6 +32,8 @@ object LiveIndex {
     @Volatile var lastRefresh = 0L
         private set
 
+    fun clear() { map.clear(); rebuild() }
+
     fun put(s: Station, raw: String) {
         val title = Text.clean(raw)
         val t = System.currentTimeMillis()
