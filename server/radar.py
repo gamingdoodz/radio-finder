@@ -205,11 +205,16 @@ async def find_cover(title: str):
     song = re.sub(r"\(.*?\)|\[.*?\]", "", song).strip()
     res = {}
     try:
-        async with _cover_sem:
-            async with SHARED["session"].get("https://api.deezer.com/search",
-                                             params={"q": f"{artist} {song}", "limit": "5"},
-                                             timeout=aiohttp.ClientTimeout(total=8)) as r:
-                data = await r.json(content_type=None)
+        # Erst genau, dann nur mit dem Hauptkünstler (z. B. "feat. Seth McFarland" falsch geschrieben)
+        main_artist = re.split(r"(?i)\s+(?:feat\.?|ft\.?|featuring|x|&|und|and|vs\.?)\s+|,", artist)[0].strip()
+        data = {}
+        for q in dict.fromkeys([f"{artist} {song}", f"{main_artist} {song}"]):
+            async with _cover_sem:
+                async with SHARED["session"].get("https://api.deezer.com/search", params={"q": q, "limit": "5"},
+                                                 timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    data = await r.json(content_type=None)
+            if data.get("data"):
+                break
         words_t = [w for w in normalize(song).split() if len(w) >= 2]
         words_a = [w for w in normalize(artist).split() if len(w) >= 3]
         for o in data.get("data", []):

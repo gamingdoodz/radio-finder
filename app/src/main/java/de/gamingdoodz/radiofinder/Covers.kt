@@ -39,9 +39,9 @@ object Covers {
         }
         val artist = radioTitle.substringBefore(" - ").substringBefore(" – ").trim()
         val title = radioTitle.substringAfter(" - ").substringAfter(" – ").replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim()
-        val hit = Deezer.search("$artist $title", 5).firstOrNull { e ->
-            LiveIndex.Song(e).matches(k)
-        }
+        val main = artist.split(Regex("(?i)\\s+(feat\\.?|ft\\.?|featuring|x|&|und|and|vs\\.?)\\s+|,")).first().trim()
+        val hit = (Deezer.search("$artist $title", 5).ifEmpty { if (main != artist) Deezer.search("$main $title", 5) else emptyList() })
+            .firstOrNull { e -> LiveIndex.Song(e).matches(k) }
         if (hit == null || hit.artwork.isBlank()) { missing.add(k); null }
         else Info(hit.artwork, hit.title, hit.subtitle, Deezer.durations[hit.id] ?: 0L).also { cache[k] = it; coverUrls.add(hit.artwork) }
     }
