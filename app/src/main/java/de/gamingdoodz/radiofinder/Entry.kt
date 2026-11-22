@@ -125,16 +125,47 @@ fun folderItem(id: String, title: String): MediaItem =
         .build()
 
 /** Abspielbarer Eintrag, der den Hit-Mix startet (genreKey = null: Deutsche Charts). */
-fun hitMixItem(genreKey: String?, title: String): MediaItem =
-    MediaItem.Builder()
-        .setMediaId("hitmix:" + (genreKey ?: ""))
+fun hitMixItem(genreKey: String?, title: String, sub: String = "Hit-Mix", group: String? = null): MediaItem {
+    val key = genreKey ?: ""
+    // Playlists bekommen ihren Namen aufs Bild, Mixe ein großes Symbol
+    val label = if (key.startsWith("pl:") || key.startsWith("my:")) title.removePrefix("⚡ ") else ""
+    return MediaItem.Builder()
+        .setMediaId("hitmix:$key")
         .setMediaMetadata(
             MediaMetadata.Builder()
-                .setTitle(title)
-                .setArtist("Nur Hits aus dem Radio")
+                .setTitle(title.removePrefix("⚡ "))
+                .setArtist(sub)
+                .setArtworkUri(ArtProvider.tile("hitmix:$key", label))
                 .setIsPlayable(true)
                 .setIsBrowsable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                .apply { group?.let { setExtras(android.os.Bundle().apply { putString(GROUP_HINT, it) }) } }
                 .build()
         )
         .build()
+}
+
+const val GROUP_HINT = "android.media.browse.CONTENT_STYLE_GROUP_TITLE_HINT"
+
+/** In Android Auto unter einer Überschrift zusammenfassen. */
+fun MediaItem.inGroup(group: String): MediaItem {
+    val m = mediaMetadata
+    val extras = android.os.Bundle(m.extras ?: android.os.Bundle()).apply { putString(GROUP_HINT, group) }
+    return buildUpon().setMediaMetadata(m.buildUpon().setExtras(extras).build()).build()
+}
+
+/** Nachrichten-Eintrag (neueste Folge wird beim Abspielen geholt). */
+fun newsItem(key: String, title: String, sub: String, group: String): MediaItem =
+    MediaItem.Builder()
+        .setMediaId("news:$key")
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title).setArtist(sub)
+                .setArtworkUri(ArtProvider.tile("news:$key"))
+                .setIsPlayable(true).setIsBrowsable(false)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+                .setExtras(android.os.Bundle().apply { putString(GROUP_HINT, group) })
+                .build()
+        )
+        .build()
+const val TRAFFIC_ID = "traffic"

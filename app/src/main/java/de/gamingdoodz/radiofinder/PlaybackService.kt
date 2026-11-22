@@ -188,6 +188,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         Radar.init(this)
+        ArtProvider.init(this)
         scope.launch { Blocklist.refresh(applicationContext) }
         scope.launch { Radar.loadAds() }
         val http = DefaultHttpDataSource.Factory()
@@ -619,11 +620,44 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    /** Neueste Nachrichtenfolge (Tagesschau in 100 Sekunden bzw. Deutschlandfunk-Nachrichten). */
+    private suspend fun latestNews(key: String): MediaItem? {
+        val term = if (key == "dlf") "Deutschlandfunk Nachrichten" else "tagesschau in 100 Sekunden"
+        val show = Podcasts.search(term, limit = 3).firstOrNull() ?: return null
+        val ep = Podcasts.episodes(show).lastOrNull() ?: return null
+        return ep.toMediaItem()
+    }
+
+    private var trafficCache: Pair<Long, List<MediaItem>>? = null
+
+    /** Regionale Sender mit Verkehrsmeldungen (meist alle 30 Minuten und bei Staus sofort). */
+    private suspend fun trafficStations(): List<MediaItem> {
+        trafficCache?.let { (t, l) -> if (System.currentTimeMillis() - t < 24 * 3600_000L && l.isNotEmpty()) return l }
+        val list = listOf(
+            "Bayern 3" to "Bayern", "Antenne Bayern" to "Bayern", "SWR3" to "Baden-Württemberg, Rheinland-Pfalz",
+            "hr3" to "Hessen", "WDR 2" to "Nordrhein-Westfalen", "NDR 2" to "Niedersachsen, Hamburg, Schleswig-Holstein, MV",
+            "MDR JUMP" to "Sachsen, Sachsen-Anhalt, Thüringen", "Antenne Brandenburg" to "Berlin, Brandenburg",
+            "SR 1" to "Saarland", "Bremen Vier" to "Bremen", "Hitradio Ö3" to "Österreich", "Radio SRF 1" to "Schweiz",
+        )
+        val items = coroutineScope {
+            list.map { (name, region) ->
+                async {
+                    val e = Radar.stations(name)?.firstOrNull { Scanner.normalize(it.name).startsWith(Scanner.normalize(name)) }
+                        ?: Radar.stations(name)?.firstOrNull()
+                    e?.copy(title = name, subtitle = "Verkehr: $region")?.toMediaItem()
+                }
+            }.awaitAll().filterNotNull()
+        }
+        if (items.isNotEmpty()) trafficCache = System.currentTimeMillis() to items
+        return items
+    }
+
     private suspend fun resolveRaw(item: MediaItem): MediaItem? {
         val query = item.requestMetadata.searchQuery
         val uri = item.requestMetadata.mediaUri
         return when {
             !query.isNullOrBlank() -> findForVoice(query)
+            item.mediaId.startsWith("news:") -> latestNews(item.mediaId.removePrefix("news:"))
             item.localConfiguration != null -> item
             uri != null -> item.buildUpon().setUri(uri).build()
             else -> itemCache[item.mediaId]
@@ -732,31 +766,51 @@ class PlaybackService : MediaLibraryService() {
                     folderItem(MUSIC_ID, "Musik"),
                     folderItem(STORIES_ID, "Hörspiele"),
                 )
-                FORYOU_ID -> listOf(hitMixItem(null, "⚡ Hit-Mix – nur Hits")) +
-                    (if (Favorites.all(applicationContext).count { it.kind == Kind.STATION } >= 2)
-                        listOf(hitMixItem("favs", "⚡ Lieblingssender-Mix")) else emptyList()) +
-                    Moments.now().filter { it.action == Moments.Action.HITMIX }.map { hitMixItem(it.genreKey, "⚡ " + it.title) } +
-                    listOf(folderItem(FAV_ID, "⭐ Favoriten"), folderItem(RECENT_ID, "🕘 Zuletzt gehört"))
-                RADIO_ID -> listOf(
-                    folderItem(LIVE_ID, "🔴 Jetzt im Radio"),
-                    folderItem(CHARTS_LIVE_ID, "🔥 Charts gerade im Radio"),
-                    folderItem(RADIOCHARTS_ID, "📊 Meistgespielt im Radio"),
-                    folderItem(POPULAR_ID, "📻 Beliebte Sender"),
-                    folderItem(HITS_ID, "🔎 Letzte Suche"),
-                )
-                MUSIC_ID -> listOf(
-                    hitMixItem("pl:community", "⚡ Beliebt bei Hitradar-Hörern"),
-                    folderItem("playlists", "🎶 Playlists"),
-                    folderItem(FREE_ID, "🎵 Freie Musik – Charts"),
-                    folderItem(FREEGENRES_ID, "♾️ Freie Musik endlos"),
-                    folderItem(KIDS_ID, "🧸 Kinderlieder"),
-                )
-                "playlists" -> Playlists.mine(applicationContext).keys.map { hitMixItem("my:$it", "⚡ $it") } +
-                    (Playlists.saved(applicationContext) + Playlists.trending + Playlists.forNow() + Playlists.weekly() + Playlists.classics)
-                        .distinctBy { it.query }.map { hitMixItem("pl:${it.query}", "⚡ ${it.name}") }
+                FORYOU_ID -> buildList {
+                    val g1 = "Hit-Mix"
+                    add(hitMixItem(null, "Hit-Mix", "Nur Hits aus dem Radio", g1))
+                    if (Favorites.all(applicationContext).count { it.kind == Kind.STATION } >= 2) add(hitMixItem("favs", "Lieblingssender", "Mix aus deinen Sendern", g1))
+                    Moments.now().filter { it.action == Moments.Action.HITMIX }.forEach { add(hitMixItem(it.genreKey, it.title, "Passt gerade", g1)) }
+                    val g2 = "Playlists für dich"
+                    (Playlists.trending.take(1) + Playlists.forNow() + Playlists.weekly().take(1)).distinctBy { it.query }
+                        .forEach { add(hitMixItem("pl:${it.query}", it.name, "Playlist", g2)) }
+                    val g3 = "Deine Sachen"
+                    Playlists.saved(applicationContext).forEach { add(hitMixItem("pl:${it.query}", it.name, "Gespeichert", g3)) }
+                    add(folderItem(FAV_ID, "⭐ Favoriten").inGroup(g3))
+                    add(folderItem(RECENT_ID, "🕘 Zuletzt gehört").inGroup(g3))
+                }
+                RADIO_ID -> {
+                    val g1 = "Nachrichten & Verkehr"
+                    val g2 = "Radio"
+                    listOf(
+                        newsItem("ts100", "Tagesschau", "In 100 Sekunden · immer aktuell", g1),
+                        newsItem("dlf", "Deutschlandfunk", "Nachrichten · stündlich neu", g1),
+                        folderItem(TRAFFIC_ID, "🚗 Verkehr in deiner Region").inGroup(g1),
+                        folderItem(LIVE_ID, "🔴 Jetzt im Radio").inGroup(g2),
+                        folderItem(CHARTS_LIVE_ID, "🔥 Charts gerade im Radio").inGroup(g2),
+                        folderItem(RADIOCHARTS_ID, "📊 Meistgespielt im Radio").inGroup(g2),
+                        folderItem(POPULAR_ID, "📻 Beliebte Sender").inGroup(g2),
+                        folderItem(HITS_ID, "🔎 Letzte Suche").inGroup(g2),
+                    )
+                }
+                MUSIC_ID -> buildList {
+                    Playlists.trending.forEach { add(hitMixItem("pl:${it.query}", it.name, "Gerade angesagt", "Gerade angesagt")) }
+                    Playlists.forNow().forEach { add(hitMixItem("pl:${it.query}", it.name, "Passend zu jetzt", "Passend zu jetzt")) }
+                    Playlists.weekly().forEach { add(hitMixItem("pl:${it.query}", it.name, "Neu diese Woche", "Neu diese Woche")) }
+                    Genres.all.filter { it.key != "kids" }.forEach { add(hitMixItem(it.key, it.name, "Hit-Mix", "Genres")) }
+                    val g = "Mehr Musik"
+                    add(folderItem("playlists", "🎶 Alle Playlists").inGroup(g))
+                    add(folderItem(FREE_ID, "🎵 Freie Musik – Charts").inGroup(g))
+                    add(folderItem(FREEGENRES_ID, "♾️ Freie Musik endlos").inGroup(g))
+                    add(folderItem(KIDS_ID, "🧸 Kinderlieder").inGroup(g))
+                }
+                TRAFFIC_ID -> trafficStations()
+                "playlists" -> Playlists.mine(applicationContext).keys.map { hitMixItem("my:$it", it, "Eigene Playlist", "Eigene") } +
+                    (Playlists.saved(applicationContext) + Playlists.classics + Playlists.trending + Playlists.forNow() + Playlists.weekly())
+                        .distinctBy { it.query }.map { hitMixItem("pl:${it.query}", it.name, "Playlist", "Playlists") }
                 FAV_ID -> Favorites.all(applicationContext).map { it.toMediaItem() }
                 MOMENTS_ID -> Moments.now().filter { it.action == Moments.Action.HITMIX }
-                    .map { hitMixItem(it.genreKey, "⚡ " + it.title) }
+                    .map { hitMixItem(it.genreKey, it.title) }
                 RECENT_ID -> Recent.all(applicationContext).map { it.toMediaItem() }
                 STORY_CONT_ID -> Recent.all(applicationContext)
                     .filter { it.id.startsWith("pc:") || it.id.startsWith("ia:") }.map { it.toMediaItem() }
@@ -778,7 +832,7 @@ class PlaybackService : MediaLibraryService() {
                         val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
                         LiveIndex.findSong(ti, a)
                     }.distinctBy { it.station.id }
-                    listOf(hitMixItem("radiocharts", "⚡ Mix: Meistgespielt im Radio")) +
+                    listOf(hitMixItem("radiocharts", "Mix: Meistgespielt", "Hit-Mix")) +
                         withCovers(live.map { it.station.toEntry(it.title) })
                 }
                 CHARTS_LIVE_ID -> {
@@ -792,7 +846,7 @@ class PlaybackService : MediaLibraryService() {
                         .map { it.station.toEntry(it.title) })
                 }
                 HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
-                KIDS_ID -> listOf(hitMixItem("kids", "⚡ Kinder-Hit-Mix")) + kidsEntries().map { it.toMediaItem() }
+                KIDS_ID -> listOf(hitMixItem("kids", "Kinder-Hit-Mix", "Nur Kinderlieder")) + kidsEntries().map { it.toMediaItem() }
                 FREE_ID -> FreeMusic.charts().map { it.toMediaItem() }
                 POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
                 FREEGENRES_ID -> FREE_TAGS.map { (name, tag) -> folderItem("ftag:$tag", name) }
