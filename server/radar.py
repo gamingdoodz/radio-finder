@@ -864,9 +864,9 @@ async def h_relay(req):
                     break
                 await resp.write(chunk)
             return resp
-    except (asyncio.CancelledError, ConnectionResetError):
+    except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception:   # z. B. Lautsprecher hat aufgelegt: still beenden
         return resp if resp is not None and resp.prepared else web.Response(status=502)
     finally:
         relays["n"] -= 1
