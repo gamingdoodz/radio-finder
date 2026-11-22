@@ -30,6 +30,7 @@ jobs:
           open=$(gh issue list -R "$REPO" --state open --search "Server nicht erreichbar in:title" --json number --jq '.[0].number')
           if [ "$ok" = 1 ]; then
             echo "Server läuft."
+            echo "Port 443 (Alexa): $(curl -s -m 10 -o /dev/null -w '%{http_code}' https://130-61-78-232.sslip.io/health)"
             # Datenvolumen: Oracle gibt 10 TB im Monat frei, ab 9 TB warnen
             gb=$(echo "$r" | grep -o '"traffic_gb": [0-9.]*' | grep -o '[0-9.]*$' || echo 0)
             echo "Datenvolumen diesen Monat: ${gb:-0} GB"
