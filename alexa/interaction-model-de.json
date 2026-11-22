@@ -1,0 +1,268 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "hit radar",
+      "intents": [
+        {
+          "name": "PlaySongIntent",
+          "slots": [
+            {
+              "name": "song",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "spiel {song}",
+            "spiele {song}",
+            "spiel das lied {song}",
+            "spiel mal {song}",
+            "ich will {song} hören",
+            "ich möchte {song} hören",
+            "such {song}",
+            "suche {song}",
+            "finde {song}",
+            "wo läuft {song}"
+          ]
+        },
+        {
+          "name": "HitMixIntent",
+          "slots": [
+            {
+              "name": "genre",
+              "type": "GENRE"
+            }
+          ],
+          "samples": [
+            "hit mix",
+            "den hit mix",
+            "starte den hit mix",
+            "starte hit mix",
+            "spiel den hit mix",
+            "hits",
+            "spiel hits",
+            "nur hits",
+            "hit mix mit {genre}",
+            "{genre} mix",
+            "starte {genre} mix",
+            "spiel {genre} mix",
+            "{genre} hits",
+            "spiel {genre} hits",
+            "mix mit {genre}"
+          ]
+        },
+        {
+          "name": "AMAZON.PauseIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.ResumeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NextIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.PreviousIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StartOverIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.RepeatIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.LoopOnIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.LoopOffIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.ShuffleOnIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.ShuffleOffIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        }
+      ],
+      "types": [
+        {
+          "name": "GENRE",
+          "values": [
+            {
+              "name": {
+                "value": "rock"
+              }
+            },
+            {
+              "name": {
+                "value": "pop"
+              }
+            },
+            {
+              "name": {
+                "value": "schlager"
+              }
+            },
+            {
+              "name": {
+                "value": "party"
+              }
+            },
+            {
+              "name": {
+                "value": "weihnachten"
+              }
+            },
+            {
+              "name": {
+                "value": "weihnachtslieder"
+              }
+            },
+            {
+              "name": {
+                "value": "achtziger"
+              }
+            },
+            {
+              "name": {
+                "value": "80er"
+              }
+            },
+            {
+              "name": {
+                "value": "neunziger"
+              }
+            },
+            {
+              "name": {
+                "value": "90er"
+              }
+            },
+            {
+              "name": {
+                "value": "2000er"
+              }
+            },
+            {
+              "name": {
+                "value": "oldies"
+              }
+            },
+            {
+              "name": {
+                "value": "rap"
+              }
+            },
+            {
+              "name": {
+                "value": "hip hop"
+              }
+            },
+            {
+              "name": {
+                "value": "deutschrap"
+              }
+            },
+            {
+              "name": {
+                "value": "dance"
+              }
+            },
+            {
+              "name": {
+                "value": "techno"
+              }
+            },
+            {
+              "name": {
+                "value": "house"
+              }
+            },
+            {
+              "name": {
+                "value": "chill"
+              }
+            },
+            {
+              "name": {
+                "value": "entspannt"
+              }
+            },
+            {
+              "name": {
+                "value": "sommer"
+              }
+            },
+            {
+              "name": {
+                "value": "jazz"
+              }
+            },
+            {
+              "name": {
+                "value": "klassik"
+              }
+            },
+            {
+              "name": {
+                "value": "latin"
+              }
+            },
+            {
+              "name": {
+                "value": "country"
+              }
+            },
+            {
+              "name": {
+                "value": "kinder"
+              }
+            },
+            {
+              "name": {
+                "value": "kinderlieder"
+              }
+            },
+            {
+              "name": {
+                "value": "charts"
+              }
+            },
+            {
+              "name": {
+                "value": "hits"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

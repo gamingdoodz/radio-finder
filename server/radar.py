@@ -8,6 +8,7 @@ API:
   GET /now?limit=<n>         -> alles, was gerade läuft (neueste zuerst)
 """
 import asyncio
+import base64
 import gzip
 import html
 import json
@@ -872,6 +873,174 @@ async def h_relay(req):
         relays["n"] -= 1
 
 
+# ---------------- Alexa-Skill: "Alexa, sag Hit Radar, spiel Last Christmas" ----------------
+PUBLIC = os.environ.get("PUBLIC_URL", "https://130-61-78-232.sslip.io")   # Alexa braucht https auf Port 443
+TAG_WORDS = {"xmas": "christmas|weihnacht|xmas", "kids": "kinder|kids|children", "chill": "chill|lounge|relax|ambient",
+             "party": "party|ballermann|apres", "80s": "80s|80er", "90s": "90s|90er", "2000s": "2000s|00s", "oldies": "oldies|60s|70s",
+             "deutschrap": "deutschrap|deutsch rap", "rap": "hip ?hop|rap", "rock": "rock|metal", "schlager": "schlager",
+             "dance": "dance|techno|house|edm|electro", "summer": "summer|hits", "jazz": "jazz|soul|blues", "classic": "classical|klassik",
+             "latin": "latin|reggaeton", "country": "country", "charts": "charts|top 40|hits|pop"}
+_alexa_certs: dict = {}
+
+
+async def alexa_verify(req, body: bytes) -> bool:
+    """Prüft, dass die Anfrage wirklich von Amazon kommt (Pflicht für Alexa-Skills)."""
+    try:
+        from urllib.parse import urlparse
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+        url = req.headers.get("SignatureCertChainUrl", "")
+        sig = req.headers.get("Signature-256", "")
+        u = urlparse(url)
+        path = os.path.normpath(u.path)
+        if u.scheme.lower() != "https" or (u.hostname or "").lower() != "s3.amazonaws.com" \
+                or not path.startswith("/echo.api/") or (u.port not in (None, 443)) or not sig:
+            return False
+        certs = _alexa_certs.get(url)
+        if not certs:
+            async with SHARED["session"].get(url, ssl=True, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                pem = await r.read()
+            certs = x509.load_pem_x509_certificates(pem)
+            try:  # ganze Kette bis zu einer vertrauenswürdigen Stelle prüfen
+                from cryptography.x509.verification import PolicyBuilder, Store
+                with open("/etc/ssl/certs/ca-certificates.crt", "rb") as f:
+                    store = Store(x509.load_pem_x509_certificates(f.read()))
+                PolicyBuilder().store(store).build_server_verifier(x509.DNSName("echo-api.amazon.com")).verify(certs[0], certs[1:])
+            except ImportError:
+                san = certs[0].extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+                if "echo-api.amazon.com" not in san.get_values_for_type(x509.DNSName):
+                    return False
+            _alexa_certs[url] = certs
+        c = certs[0]
+        nowdt = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        if not (c.not_valid_before_utc <= nowdt <= c.not_valid_after_utc):
+            _alexa_certs.pop(url, None)
+            return False
+        c.public_key().verify(base64.b64decode(sig), body, padding.PKCS1v15(), hashes.SHA256())
+        ts = json.loads(body)["request"]["timestamp"]
+        t = __import__("datetime").datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        return abs(time.time() - t) <= 150
+    except Exception as e:
+        print("Alexa-Prüfung fehlgeschlagen:", e, flush=True)
+        return False
+
+
+def plays24(norm: str) -> int:
+    h0 = int(time.time() // 3600) - 24
+    return sum(c.get(norm, 0) for h, c in chart_hours.items() if h >= h0)
+
+
+def alexa_pick(query: str = "", genre: str = "", exclude: str = ""):
+    """Bester Sender: Lied läuft gerade (frisch angefangen), möglichst ohne Vorab-Werbung."""
+    m = ids_map()
+    t = time.time()
+    words = [w for w in normalize(query).split() if w]
+    rx = re.compile(TAG_WORDS.get(genre, "")) if genre and genre in TAG_WORDS else None
+    best, score = None, None
+    for sid, n in fresh():
+        st = m.get(sid)
+        if not st or sid == exclude or not is_song(n["title"]) or TALK.search(n["title"]):
+            continue
+        if words:
+            if not all(w in n["norm"] for w in words):
+                continue
+        elif rx is not None and not (rx.search(st.get("tags", "")) or rx.search(n["title"].lower())):
+            continue
+        age = t - n["since"]
+        known = 0 if words else min(plays24(n["norm"]), 60) * 20
+        sc = age + (240 if sid in ads else 0) + (600 if age > 200 else 0) - known
+        if score is None or sc < score:
+            best, score = (st, n), sc
+    return best
+
+
+def alexa_play(st, n, token: str, speech: str = ""):
+    out = {"version": "1.0", "response": {"shouldEndSession": True, "directives": [{
+        "type": "AudioPlayer.Play", "playBehavior": "REPLACE_ALL",
+        "audioItem": {"stream": {"url": f"{PUBLIC}/relay?id={st['id']}", "token": token, "offsetInMilliseconds": 0},
+                      "metadata": {"title": n["title"][:100], "subtitle": st["name"][:100]}}}]}}
+    if speech:
+        out["response"]["outputSpeech"] = {"type": "PlainText", "text": speech}
+    return out
+
+
+def alexa_say(text: str, end: bool = True):
+    return {"version": "1.0", "response": {"outputSpeech": {"type": "PlainText", "text": text}, "shouldEndSession": end}}
+
+
+def spoken(title: str) -> str:
+    a, _, b = title.partition(" - ")
+    return f"{b.strip()} von {a.strip()}" if b else title
+
+
+async def h_alexa(req):
+    body = await req.read()
+    if not await alexa_verify(req, body):
+        return web.Response(status=400)
+    data = json.loads(body)
+    r = data.get("request", {})
+    typ = r.get("type", "")
+    token = (data.get("context", {}).get("AudioPlayer", {}) or {}).get("token", "") or r.get("token", "")
+    if not relay_ok():
+        return web.json_response(alexa_say("Hit Radar macht gerade eine Pause. Bitte versuch es später nochmal."))
+
+    def mix(genre="", exclude="", speech=True):
+        hit = alexa_pick(genre=genre, exclude=exclude) or alexa_pick(exclude=exclude)
+        if not hit:
+            return alexa_say("Gerade finde ich nichts Passendes. Versuch es gleich nochmal.")
+        st, n = hit
+        return alexa_play(st, n, f"mix|{genre}|{st['id']}", f"Hit-Mix. {spoken(n['title'])}." if speech else "")
+
+    if typ == "LaunchRequest":
+        return web.json_response(mix())
+    if typ == "IntentRequest":
+        intent = r.get("intent", {})
+        name = intent.get("name", "")
+        slots = {k: (v.get("value") or "") for k, v in (intent.get("slots") or {}).items()}
+        if name == "PlaySongIntent" and slots.get("song"):
+            q = slots["song"]
+            hit = alexa_pick(query=q)
+            if not hit:
+                return web.json_response(alexa_say(f"{q} läuft gerade auf keinem Sender. Sag zum Beispiel: Hit-Mix.", end=False))
+            st, n = hit
+            return web.json_response(alexa_play(st, n, f"song|{q}|{st['id']}", f"{spoken(n['title'])} auf {st['name']}."))
+        if name == "HitMixIntent":
+            g = (wish_rules(slots.get("genre", "")) or {}).get("genre", "") if slots.get("genre") else ""
+            return web.json_response(mix(g))
+        if name in ("AMAZON.NextIntent", "AMAZON.ShuffleOnIntent"):
+            g = token.split("|")[1] if token.startswith("mix|") else ""
+            return web.json_response(mix(g, exclude=token.rsplit("|", 1)[-1], speech=False))
+        if name in ("AMAZON.ResumeIntent", "AMAZON.StartOverIntent", "AMAZON.RepeatIntent", "AMAZON.PreviousIntent"):
+            sid = token.rsplit("|", 1)[-1] if token else ""
+            st = ids_map().get(sid)
+            if st:
+                n = now.get(sid) or {"title": st["name"]}
+                return web.json_response(alexa_play(st, n, token))
+            return web.json_response(mix())
+        if name in ("AMAZON.PauseIntent", "AMAZON.StopIntent", "AMAZON.CancelIntent"):
+            return web.json_response({"version": "1.0", "response": {"shouldEndSession": True,
+                                                                  "directives": [{"type": "AudioPlayer.Stop"}]}})
+        if name == "AMAZON.HelpIntent":
+            return web.json_response(alexa_say("Sag zum Beispiel: spiel Last Christmas. Oder: starte den Hit-Mix. "
+                                               "Oder: Hit-Mix mit Rock. Was möchtest du hören?", end=False))
+        if name == "AMAZON.FallbackIntent":
+            return web.json_response(alexa_say("Das habe ich nicht verstanden. Sag zum Beispiel: spiel Last Christmas.", end=False))
+        return web.json_response(alexa_say("Das geht bei Hit Radar leider nicht."))
+    if typ == "AudioPlayer.PlaybackFailed" and token:
+        # Sender geht nicht: gleiches Lied woanders oder nächster Hit
+        kind, q, sid = (token.split("|") + ["", "", ""])[:3]
+        hit = alexa_pick(query=q, exclude=sid) if kind == "song" else None
+        if hit:
+            st, n = hit
+            return web.json_response({"version": "1.0", "response": {"directives":
+                alexa_play(st, n, f"song|{q}|{st['id']}")["response"]["directives"]}})
+        return web.json_response({"version": "1.0", "response": {"directives":
+            mix(q if kind == "mix" else "", exclude=sid, speech=False)["response"]["directives"]}})
+    # Andere Ereignisse (gestartet, gestoppt, Sitzung beendet): nichts sagen
+    return web.json_response({"version": "1.0", "response": {}})
+
+
 # ---------------- API ----------------
 
 def fresh():
@@ -1015,7 +1184,7 @@ async def main():
                     web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations),
                     web.get("/cover", h_cover), web.get("/verify", h_verify), web.get("/list", h_list),
                     web.get("/event", h_event), web.get("/popular", h_popular),
-                    web.get("/relay", h_relay)])
+                    web.get("/relay", h_relay), web.post("/alexa", h_alexa)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
