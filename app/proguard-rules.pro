@@ -20,3 +20,4 @@
 -dontwarn com.google.j2objc.annotations.**
 -dontwarn javax.annotation.**
 -dontwarn org.checkerframework.**
+-keep class de.gamingdoodz.radiofinder.CastOptionsProvider { *; }

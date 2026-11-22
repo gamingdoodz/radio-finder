@@ -410,6 +410,15 @@
                     android:textSize="12sp"
                     android:textStyle="bold" />
 
+                <ImageButton
+                    android:id="@+id/fullCast"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_search"
+                    android:contentDescription="Auf Lautsprecher abspielen"
+                    android:src="@drawable/ic_cast" />
+
                 <TextView
                     android:id="@+id/fullSleep"
                     android:layout_width="wrap_content"

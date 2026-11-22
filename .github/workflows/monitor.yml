@@ -30,6 +30,16 @@ jobs:
           open=$(gh issue list -R "$REPO" --state open --search "Server nicht erreichbar in:title" --json number --jq '.[0].number')
           if [ "$ok" = 1 ]; then
             echo "Server läuft."
+            # Datenvolumen: Oracle gibt 10 TB im Monat frei, ab 9 TB warnen
+            gb=$(echo "$r" | grep -o '"traffic_gb": [0-9.]*' | grep -o '[0-9.]*$' || echo 0)
+            echo "Datenvolumen diesen Monat: ${gb:-0} GB"
+            warn=$(gh issue list -R "$REPO" --state open --search "Datenvolumen in:title" --json number --jq '.[0].number')
+            if [ "$(echo "${gb:-0} >= 9000" | bc)" = 1 ]; then
+              [ -z "$warn" ] && gh issue create -R "$REPO" --title "Datenvolumen fast aufgebraucht" \
+                --body "Der Server hat diesen Monat schon ${gb} GB gesendet (frei sind 10.000 GB). Die Weiterleitung fürs Casten ist ab 8.000 GB automatisch pausiert. Am Monatsanfang geht es von selbst wieder."
+            elif [ -n "$warn" ] && [ "$(echo "${gb:-0} < 8000" | bc)" = 1 ]; then
+              gh issue close "$warn" -R "$REPO" -c "Neuer Monat, Datenvolumen wieder frei ✅"
+            fi
             if [ -n "$open" ]; then gh issue close "$open" -R "$REPO" -c "Server läuft wieder ✅"; fi
           else
             echo "Server antwortet nicht!"

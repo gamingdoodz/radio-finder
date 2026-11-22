@@ -755,6 +755,7 @@ async def scanner():
         load_ads()
         load_covers()
         load_popular()
+        load_traffic()
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
         workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
@@ -769,6 +770,7 @@ async def scanner():
             el = time.time() - stats["since"]
             last_round.update(seconds=int(el), at=int(time.time()))
             print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
+            update_traffic()
             if int(el) // 60 % 10 == 0:
                 save_charts()
                 save_ads()
@@ -782,6 +784,92 @@ async def scanner():
                     ids.clear(); ids.update({s["id"]: s for s in stations})
                     schedule_all()
                 stats.update(checked=0, since=time.time())
+
+
+# ---------------- Casten: Sender ohne https weiterleiten (mit Datenbremse) ----------------
+TRAFFIC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "traffic.json")
+RELAY_STOP = 8 * 1000 ** 4      # ab 8 TB im Monat keine Weiterleitung mehr (Oracle: 10 TB frei)
+RELAY_MAX = 400                 # gleichzeitige Weiterleitungen
+traffic = {"month": "", "bytes": 0, "last": 0}
+relays = {"n": 0}
+
+
+def tx_bytes() -> int:
+    """Gesendete Bytes des ganzen Servers (alle Netzwerkkarten außer lo) – zählt auch andere Dienste mit."""
+    total = 0
+    try:
+        for dev in os.listdir("/sys/class/net"):
+            if dev == "lo":
+                continue
+            with open(f"/sys/class/net/{dev}/statistics/tx_bytes") as f:
+                total += int(f.read().strip())
+    except Exception:
+        pass
+    return total
+
+
+def load_traffic():
+    try:
+        with open(TRAFFIC_FILE, encoding="utf-8") as f:
+            traffic.update(json.load(f))
+    except Exception:
+        pass
+    traffic["last"] = tx_bytes()   # Zähler startet nach Neustart des Rechners bei 0
+
+
+def update_traffic():
+    month = time.strftime("%Y-%m")
+    cur = tx_bytes()
+    delta = cur - traffic["last"] if cur >= traffic["last"] else cur
+    traffic["last"] = cur
+    if traffic["month"] != month:
+        traffic.update(month=month, bytes=0)
+    traffic["bytes"] += max(0, delta)
+    try:
+        with open(TRAFFIC_FILE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(traffic, f)
+        os.replace(TRAFFIC_FILE + ".tmp", TRAFFIC_FILE)
+    except Exception:
+        pass
+
+
+def relay_ok() -> bool:
+    return traffic["bytes"] < RELAY_STOP and relays["n"] < RELAY_MAX
+
+
+async def h_relay(req):
+    """Reicht einen Senderstream unverändert durch (nur bekannte Sender, nichts wird gespeichert)."""
+    st = ids_map().get(req.query.get("id") or "")
+    if not st:
+        return web.Response(status=404)
+    if not relay_ok():
+        return web.Response(status=503, text="Weiterleitung pausiert")
+    relays["n"] += 1
+    resp = None
+    try:
+        # Eigene Verbindungen, damit Weiterleitungen die Sendersuche nicht ausbremsen
+        if "relay" not in SHARED:
+            SHARED["relay"] = aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=RELAY_MAX + 20, ssl=False),
+                                                    headers={"User-Agent": UA})
+        async with SHARED["relay"].get(st["url"], headers={"Icy-MetaData": "0"},
+                                         timeout=aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=30)) as r:
+            if r.status >= 400:
+                return web.Response(status=502)
+            resp = web.StreamResponse(headers={
+                "Content-Type": r.headers.get("Content-Type", "audio/mpeg").split(";")[0],
+                "Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*"})
+            await resp.prepare(req)
+            async for chunk in r.content.iter_chunked(16384):
+                if traffic["bytes"] >= RELAY_STOP:
+                    break
+                await resp.write(chunk)
+            return resp
+    except (asyncio.CancelledError, ConnectionResetError):
+        raise
+    except Exception:
+        return resp if resp is not None and resp.prepared else web.Response(status=502)
+    finally:
+        relays["n"] -= 1
 
 
 # ---------------- API ----------------
@@ -807,7 +895,8 @@ def gz(resp):
 
 async def h_health(_):
     return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()),
-                              "checked": stats["checked"], "queue": len(due)})
+                              "checked": stats["checked"], "queue": len(due),
+                              "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"]})
 
 
 _search_cache: dict = {}  # Suchwörter -> (Zeit, Antwort)
@@ -925,7 +1014,8 @@ async def main():
                     web.get("/similar", h_similar), web.get("/wish", h_wish),
                     web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations),
                     web.get("/cover", h_cover), web.get("/verify", h_verify), web.get("/list", h_list),
-                    web.get("/event", h_event), web.get("/popular", h_popular)])
+                    web.get("/event", h_event), web.get("/popular", h_popular),
+                    web.get("/relay", h_relay)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()

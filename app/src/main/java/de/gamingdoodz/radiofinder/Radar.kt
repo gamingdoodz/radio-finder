@@ -36,6 +36,9 @@ object Radar {
 
     fun init(context: Context) { appContext = context.applicationContext }
 
+    /** Stream eines Senders über den Server (nur fürs Casten bei Sendern ohne https). */
+    fun relayUrl(stationId: String): String? = "${servers[0]}/relay?id=${java.net.URLEncoder.encode(stationId, "UTF-8")}"
+
     /** Hit-Mix läuft: öfter aktualisieren. Sonst seltener, das spart Akku und Daten. */
     @Volatile var fast = false
 

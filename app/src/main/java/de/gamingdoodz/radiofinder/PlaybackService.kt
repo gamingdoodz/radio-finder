@@ -13,6 +13,9 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.cast.CastPlayer
+import androidx.media3.cast.SessionAvailabilityListener
+import com.google.android.gms.cast.framework.CastContext
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -321,9 +324,11 @@ class PlaybackService : MediaLibraryService() {
                 return if (c == t) m else m.buildUpon().setTitle(c).build()
             }
         }
+        localPlayer = shown
         session = MediaLibrarySession.Builder(this, shown, LibraryCallback())
             .setSessionActivity(openApp)
             .build()
+        setupCast()
         Favorites.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
         Settings.prefs(this).registerOnSharedPreferenceChangeListener(settingsListener)
         // Ein alter Hit-Mix von vor einem Neustart läuft nicht mehr
@@ -332,6 +337,89 @@ class PlaybackService : MediaLibraryService() {
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
         if (left > 0) sleepHandler.postDelayed(sleepRunnable, (left - 60_000L).coerceAtLeast(0L)) else Settings.setSleepEnd(this, 0L)
+    }
+
+    // ---------------- Casten (Google Home, Nest, Chromecast) ----------------
+    private var localPlayer: Player? = null
+    private var castWrapper: CastWrapper? = null
+
+    /** Der Lautsprecher bekommt nur abspielbare Adressen (https bzw. über den Server). */
+    @OptIn(UnstableApi::class)
+    private inner class CastWrapper(cp: CastPlayer) : ForwardingPlayer(cp) {
+        val originals = HashMap<String, MediaItem>()
+        private fun conv(items: List<MediaItem>) = items.mapNotNull { o -> Cast.convert(o)?.also { originals[o.mediaId] = o } }
+        override fun setMediaItem(mediaItem: MediaItem) = super.setMediaItems(conv(listOf(mediaItem)))
+        override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) = super.setMediaItems(conv(listOf(mediaItem)), 0, startPositionMs)
+        override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) = super.setMediaItems(conv(listOf(mediaItem)), resetPosition)
+        override fun setMediaItems(mediaItems: List<MediaItem>) = super.setMediaItems(conv(mediaItems))
+        override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) = super.setMediaItems(conv(mediaItems), resetPosition)
+        override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) =
+            super.setMediaItems(conv(mediaItems), startIndex, startPositionMs)
+        override fun addMediaItem(mediaItem: MediaItem) = super.addMediaItems(conv(listOf(mediaItem)))
+        override fun addMediaItem(index: Int, mediaItem: MediaItem) = super.addMediaItems(index, conv(listOf(mediaItem)))
+        override fun addMediaItems(mediaItems: List<MediaItem>) = super.addMediaItems(conv(mediaItems))
+        override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) = super.addMediaItems(index, conv(mediaItems))
+        // Nur Cover-Tausch: auf dem Lautsprecher nicht neu laden
+        override fun replaceMediaItem(index: Int, mediaItem: MediaItem) {
+            if (getMediaItemAt(index).mediaId == mediaItem.mediaId) return
+            conv(listOf(mediaItem)).firstOrNull()?.let { super.replaceMediaItem(index, it) }
+        }
+        override fun replaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>) =
+            super.replaceMediaItems(fromIndex, toIndex, conv(mediaItems))
+        override fun getMediaMetadata(): MediaMetadata {
+            val m = super.getMediaMetadata()
+            val t = m.title?.toString() ?: return m
+            val c = Text.clean(t)
+            return if (c == t) m else m.buildUpon().setTitle(c).build()
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun setupCast() {
+        val ctx = try {
+            @Suppress("DEPRECATION") CastContext.getSharedInstance(this)
+        } catch (_: Exception) { return }   // ohne Google-Play-Dienste kein Casten
+        val cp = CastPlayer(ctx)
+        castWrapper = CastWrapper(cp)
+        cp.addListener(object : Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // Sender geht auf dem Lautsprecher nicht: im Hit-Mix einfach weiter
+                if (hitMix.isActive) scope.launch { hitMix.next() }
+            }
+        })
+        cp.setSessionAvailabilityListener(object : SessionAvailabilityListener {
+            override fun onCastSessionAvailable() = switchPlayer(true)
+            override fun onCastSessionUnavailable() = switchPlayer(false)
+        })
+        if (cp.isCastSessionAvailable) switchPlayer(true)
+    }
+
+    /** Wiedergabe zwischen Handy und Lautsprecher umziehen (gleicher Sender bzw. gleiche Stelle). */
+    private fun switchPlayer(toCast: Boolean) {
+        val s = session ?: return
+        val target = (if (toCast) castWrapper else localPlayer) ?: return
+        val old = s.player
+        if (old === target) return
+        val back = castWrapper?.originals
+        val items = (0 until old.mediaItemCount).map { i ->
+            old.getMediaItemAt(i).let { if (!toCast) back?.get(it.mediaId) ?: it else it }
+        }
+        val index = old.currentMediaItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+        val live = items.getOrNull(index)?.mediaId?.startsWith("st:") == true
+        val pos = old.currentPosition
+        val play = old.playWhenReady || toCast
+        Cast.active = toCast
+        Cast.deviceName = if (toCast) try {
+            @Suppress("DEPRECATION") CastContext.getSharedInstance(this).sessionManager.currentCastSession?.castDevice?.friendlyName
+        } catch (_: Exception) { null } else null
+        old.stop()
+        s.player = target
+        if (items.isNotEmpty()) {
+            if (live) target.setMediaItems(items, index, if (toCast) 0L else C.TIME_UNSET) else target.setMediaItems(items, index, pos)
+            target.prepare()
+            target.playWhenReady = play
+        }
+        if (!toCast) castWrapper?.originals?.clear()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -352,6 +440,7 @@ class PlaybackService : MediaLibraryService() {
         sleepHandler.removeCallbacks(fadeInRunnable)
         try { dynamics?.release() } catch (_: Exception) {}
         session?.run {
+            if (player !== localPlayer) localPlayer?.release()
             player.release()
             release()
         }

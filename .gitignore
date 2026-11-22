@@ -11,3 +11,4 @@ server/similar.json
 server/ads.json
 server/covers.json
 server/popular.json
+server/traffic.json

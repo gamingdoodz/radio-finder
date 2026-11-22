@@ -67,6 +67,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-session:$media3")
+    implementation("androidx.media3:media3-cast:$media3")
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("io.coil-kt:coil:2.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")

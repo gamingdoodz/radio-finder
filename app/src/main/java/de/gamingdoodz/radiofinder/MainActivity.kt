@@ -263,6 +263,7 @@ class MainActivity : ComponentActivity() {
             controller?.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let { Favorites.toggle(this, it) }
         }
         findViewById<View>(R.id.fullSleep).setOnClickListener { sleepDialog() }
+        findViewById<View>(R.id.fullCast).setOnClickListener { castDialog() }
         findViewById<View>(R.id.fullBack30).setOnClickListener { controller?.seekBack() }
         findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
         findViewById<View>(R.id.fullShare).setOnClickListener { shareSong() }
@@ -1704,10 +1705,66 @@ class MainActivity : ComponentActivity() {
      * Lied antippen: alle Sender suchen, auf denen es gerade läuft, direkt nachsehen, ob es dort
      * wirklich noch läuft, und den besten nehmen – ohne Vorab-Werbung und möglichst frisch angefangen.
      */
+    /** Google Home, Nest-Lautsprecher, Chromecast im WLAN suchen und darauf abspielen. */
+    private fun castDialog() {
+        val ctx = try {
+            @Suppress("DEPRECATION") com.google.android.gms.cast.framework.CastContext.getSharedInstance(this)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Zum Casten werden die Google-Play-Dienste gebraucht", Toast.LENGTH_LONG).show(); return
+        }
+        val current = ctx.sessionManager.currentCastSession
+        if (current != null && current.isConnected) {
+            AlertDialog.Builder(this).setTitle(current.castDevice?.friendlyName ?: "Lautsprecher")
+                .setMessage("Hitradar spielt gerade auf diesem Lautsprecher.")
+                .setPositiveButton("Trennen") { _, _ -> ctx.sessionManager.endCurrentSession(true) }
+                .setNegativeButton("Schließen", null).show()
+            return
+        }
+        val router = androidx.mediarouter.media.MediaRouter.getInstance(this)
+        val selector = androidx.mediarouter.media.MediaRouteSelector.Builder()
+            .addControlCategory(com.google.android.gms.cast.CastMediaControlIntent.categoryForCast(
+                com.google.android.gms.cast.CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID))
+            .build()
+        val routes = ArrayList<androidx.mediarouter.media.MediaRouter.RouteInfo>()
+        val adapter = android.widget.ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, ArrayList())
+        val pad = dp(20f).toInt()
+        val status = TextView(this).apply {
+            setPadding(pad, pad / 2, pad, pad / 2)
+            setTextColor(getColor(R.color.c_b3ffffff))
+            text = "Suche Lautsprecher im WLAN…"
+        }
+        val list = android.widget.ListView(this).apply { this.adapter = adapter }
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; addView(status); addView(list) }
+        fun refresh() {
+            routes.clear()
+            routes.addAll(router.routes.filter { !it.isDefault && it.isEnabled && it.matchesSelector(selector) })
+            adapter.clear(); adapter.addAll(routes.map { it.name })
+            status.text = if (routes.isEmpty()) "Suche Lautsprecher im WLAN…\nHandy und Lautsprecher müssen im selben WLAN sein."
+                else "Wähle einen Lautsprecher:"
+        }
+        val cb = object : androidx.mediarouter.media.MediaRouter.Callback() {
+            override fun onRouteAdded(r: androidx.mediarouter.media.MediaRouter, route: androidx.mediarouter.media.MediaRouter.RouteInfo) = refresh()
+            override fun onRouteRemoved(r: androidx.mediarouter.media.MediaRouter, route: androidx.mediarouter.media.MediaRouter.RouteInfo) = refresh()
+            override fun onRouteChanged(r: androidx.mediarouter.media.MediaRouter, route: androidx.mediarouter.media.MediaRouter.RouteInfo) = refresh()
+        }
+        router.addCallback(selector, cb, androidx.mediarouter.media.MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN)
+        refresh()
+        val dlg = AlertDialog.Builder(this).setTitle("Auf Lautsprecher abspielen").setView(box)
+            .setNegativeButton("Abbrechen", null).create()
+        list.setOnItemClickListener { _, _, i, _ ->
+            routes.getOrNull(i)?.let { router.selectRoute(it) }
+            Toast.makeText(this, "Verbinde mit ${routes.getOrNull(i)?.name ?: "Lautsprecher"}…", Toast.LENGTH_SHORT).show()
+            dlg.dismiss()
+        }
+        dlg.setOnDismissListener { router.removeCallback(cb) }
+        dlg.show()
+    }
+
     private fun tapSong(title: String, artist: String, station: Entry?, preview: Entry?) {
         val t = System.currentTimeMillis()
         val candidates = LiveIndex.findSongs(title, artist).distinctBy { it.station.id }
             .sortedWith(compareBy<LiveIndex.Now> { if (Ads.likely(this, it.station.id, it.station.url)) 1 else 0 }
+                .thenBy { if (Cast.active && !Cast.isHttps(it.station.url)) 1 else 0 }   // Casten: https direkt
                 .thenByDescending { it.since })
             .take(6)
         if (candidates.isEmpty()) {
@@ -2235,6 +2292,7 @@ class MainActivity : ComponentActivity() {
 
         val sleepEnd = Settings.sleepEnd(this)
         val sleepLeft = sleepEnd - System.currentTimeMillis()
+        findViewById<ImageButton>(R.id.fullCast).setImageResource(if (Cast.active) R.drawable.ic_cast_on else R.drawable.ic_cast)
         findViewById<TextView>(R.id.fullSleep).text =
             if (sleepEnd > 0 && sleepLeft > 0) "☾ ${(sleepLeft / 60_000) + 1} min" else "☾ Timer"
 
