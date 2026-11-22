@@ -27,6 +27,10 @@ object LiveIndex {
     }
 
     private const val MAX_AGE = 4 * 60_000L
+    /** Lieder mit unbekanntem Anfang gelten als 30 Minuten alt. */
+    const val UNKNOWN_AGE = 30 * 60_000L
+
+    fun sinceKnown(n: Now, t: Long = System.currentTimeMillis()) = t - n.since < UNKNOWN_AGE - 60_000L
     private val map = ConcurrentHashMap<String, Now>()
     private val refreshLock = Mutex()
     @Volatile var lastRefresh = 0L
@@ -58,8 +62,9 @@ object LiveIndex {
         val t = if (seenMs in 1..now) seenMs else now
         val old = map[s.id]
         if (old != null && old.time > t) return
-        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) minOf(old.since, sinceMs)
-        else if (sinceMs in 1..t) sinceMs else t
+        // sinceMs = -1: Anfang unbekannt -> als "läuft schon lange" behandeln (wird nicht als frisches Lied gewählt)
+        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) (if (sinceMs > 0) minOf(old.since, sinceMs) else old.since)
+        else if (sinceMs in 1..t) sinceMs else if (sinceMs < 0) t - UNKNOWN_AGE else t
         map[s.id] = Now(old?.station ?: s, title, t, since)
     }
 
@@ -144,6 +149,7 @@ object LiveIndex {
     /** Laufende Lieder: bekannte zuerst, dann frisch angefangene (je Lied nur einmal). */
     /** Lied ist gleich zu Ende (weniger als 1 Minute übrig, oder ohne bekannte Länge schon über 4 Minuten). */
     fun endingSoon(n: Now, t: Long = System.currentTimeMillis()): Boolean {
+        if (!sinceKnown(n, t)) return false     // Anfang unbekannt: nicht als "fast vorbei" werten
         val age = t - n.since
         val dur = Covers.byKey(n.normalized)?.durMs ?: 0L
         return if (dur > 0) dur - age < 60_000L else age > 4 * 60_000L

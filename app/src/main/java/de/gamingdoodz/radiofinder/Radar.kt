@@ -67,7 +67,7 @@ object Radar {
             val title = o.optString("title").ifBlank { return@mapNotNull null }
             if (!Region.allows(if (o.has("cc")) o.optString("cc") else null)) return@mapNotNull null
             Station(id, o.optString("name", "Radio"), url, o.optString("favicon"), false) to
-                Triple(title, o.optLong("since") * 1000L, o.optLong("seen") * 1000L)
+                Triple(title, if (o.optBoolean("exact", true)) o.optLong("since") * 1000L else -1L, o.optLong("seen") * 1000L)
         }
     }
 
@@ -89,10 +89,13 @@ object Radar {
             if (r.length() >= 7) {
                 if (!Region.allows(if (r.length() >= 8) r.optString(7) else null)) continue
                 val st = Station(id, r.optString(1, "Radio"), r.optString(2), r.optString(3), false)
-                known[id] = Live(st, r.optString(4), r.optLong(5) * 1000L, r.optLong(6) * 1000L)
+                // since = -1: Liedanfang unbekannt (Server hat das Lied erst mittendrin gesehen)
+                val exact = r.length() < 9 || r.optInt(8, 1) == 1
+                known[id] = Live(st, r.optString(4), if (exact) r.optLong(5) * 1000L else -1L, r.optLong(6) * 1000L)
             } else if (r.length() >= 4) {
                 val k = known[id] ?: continue
-                k.title = r.optString(1); k.since = r.optLong(2) * 1000L; k.seen = r.optLong(3) * 1000L
+                val exact = r.length() < 5 || r.optInt(4, 1) == 1
+                k.title = r.optString(1); k.since = if (exact) r.optLong(2) * 1000L else -1L; k.seen = r.optLong(3) * 1000L
             }
         }
         o.optJSONArray("gone")?.let { g -> for (i in 0 until g.length()) known.remove(g.optString(i)) }

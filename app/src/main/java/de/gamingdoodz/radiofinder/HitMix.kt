@@ -409,7 +409,8 @@ class HitMix(
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
         val pool = LiveIndex.fresh().filter {
             (ids == null || it.station.id in ids) && it.station.id != currentStationId && it.normalized != currentTitle &&
-                LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it, t)
+                LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it, t) &&
+                (anyMusic || LiveIndex.sinceKnown(it, t))   // nur Lieder, deren Anfang bekannt ist (sonst evtl. mittendrin)
         }
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
 

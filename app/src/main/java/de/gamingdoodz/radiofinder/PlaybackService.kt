@@ -374,7 +374,7 @@ class PlaybackService : MediaLibraryService() {
                 NowSong.startMs = if (first) LiveIndex.get(stationId)?.takeIf { it.normalized == norm || LiveIndex.Song(
                     Entry("", Kind.TRACK, clean.substringAfter(" - ").substringAfter(" – ").trim(),
                         clean.substringBefore(" - ").substringBefore(" – ").trim(), "", "", "")).matches(it.normalized) }
-                    ?.since?.takeIf { it < now } ?: 0L
+                    ?.takeIf { LiveIndex.sinceKnown(it, now) }?.since?.takeIf { it < now && now - it < 9 * 60_000L } ?: 0L
                 else now
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
             }
