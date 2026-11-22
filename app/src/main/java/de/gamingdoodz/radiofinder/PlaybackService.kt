@@ -773,6 +773,13 @@ class PlaybackService : MediaLibraryService() {
                 updateFavButton()
             }
             if (customCommand.customAction == CMD_NEXT) {
+                // Weiter gedrückt, bevor überhaupt ein Lied kam: das war Werbung am Senderanfang -> merken (auch für andere)
+                val sid = NowSong.stationId
+                if (hitMix.isActive && sid != null && NowSong.title == null && NowSong.sinceTune() in 4_000..60_000) {
+                    val ms = NowSong.sinceTune() + 10_000
+                    Ads.record(this@PlaybackService, sid, ms)
+                    Radar.reportAd(sid, ms)
+                }
                 val p = session.player
                 if (hitMix.isActive) {
                     @Suppress("DEPRECATION")

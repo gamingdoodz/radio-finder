@@ -442,20 +442,7 @@
                 android:orientation="horizontal"
                 android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/fullSkipAd"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginEnd="10dp"
-                    android:background="@drawable/bg_search"
-                    android:gravity="center"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:text="📢 Werbung? Überspringen"
-                    android:textColor="@color/c_ff2ee6a8"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:visibility="gone" />
+                
 
                 <TextView
                     android:id="@+id/fullAgain"
@@ -465,10 +452,14 @@
                     android:gravity="center"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="↻ Nochmal von vorn hören"
-                    android:textColor="@color/c_ff2ee6a8"
+                    android:text="Von vorn"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold"
+                    android:singleLine="true"
+                    android:drawableStart="@drawable/ic_replay"
+                    android:drawableTint="@color/c_ff2ee6a8"
+                    android:drawablePadding="6dp"
                     android:visibility="gone" />
 
                 <TextView
@@ -480,10 +471,14 @@
                     android:gravity="center"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="⚡ Mix beenden"
+                    android:text="Mix beenden"
                     android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold"
+                    android:singleLine="true"
+                    android:drawableStart="@drawable/ic_stop_small"
+                    android:drawableTint="@color/c_ff2ee6a8"
+                    android:drawablePadding="6dp"
                     android:visibility="gone" />
 
                 <TextView
@@ -495,10 +490,14 @@
                     android:gravity="center"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="✨ Mehr davon"
-                    android:textColor="@color/c_ff2ee6a8"
+                    android:text="Mehr davon"
+                    android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold"
+                    android:singleLine="true"
+                    android:drawableStart="@drawable/ic_sparkle_small"
+                    android:drawableTint="@color/c_ff2ee6a8"
+                    android:drawablePadding="6dp"
                     android:visibility="gone" />
 
                 <TextView
@@ -514,6 +513,10 @@
                     android:textColor="@color/c_ffffffff"
                     android:textSize="13sp"
                     android:textStyle="bold"
+                    android:singleLine="true"
+                    android:drawableStart="@drawable/ic_share"
+                    android:drawableTint="@color/c_ff2ee6a8"
+                    android:drawablePadding="6dp"
                     android:visibility="gone" />
 
                 <TextView

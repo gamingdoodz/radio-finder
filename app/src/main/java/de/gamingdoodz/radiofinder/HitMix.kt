@@ -296,7 +296,10 @@ class HitMix(
     }
 
     private suspend fun switchNow() {
-        val next = withContext(Dispatchers.Default) { takeCandidate() ?: pickNext() }
+        // Lieber andere Musik als Moderation: notfalls auch ein schon gespieltes oder irgendein Lied (nicht bei Themen-Mixen)
+        val next = withContext(Dispatchers.Default) {
+            takeCandidate() ?: pickNext() ?: pickNext(allowRepeats = true) ?: if (!strict) pickNext(allowRepeats = true, anyMusic = true) else null
+        }
         if (next != null) { waitingForNext = false; switchTo(next) }
         else waitingForNext = true
     }

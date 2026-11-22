@@ -269,7 +269,6 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
         findViewById<View>(R.id.fullShare).setOnClickListener { shareSong() }
         findViewById<View>(R.id.fullSimilar).setOnClickListener { currentSongTitle()?.let { moreLike(it) } }
-        findViewById<View>(R.id.fullSkipAd).setOnClickListener { skipAd() }
         findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
         findViewById<View>(R.id.fullSpeed).setOnClickListener {
             val c = controller ?: return@setOnClickListener
@@ -1927,48 +1926,28 @@ class MainActivity : ComponentActivity() {
      * Das laufende Radio-Lied nochmal von vorn: läuft es gerade woanders frisch an, sofort dorthin.
      * Sonst übernimmt der Wächter und spielt es, sobald es wieder irgendwo anfängt.
      */
-    /** Werbung oder Ansage beim Umschalten: im Hit-Mix sofort weiter, sonst dasselbe Lied auf einem anderen Sender. */
-    private fun skipAd() {
-        val c = controller ?: return
-        val id = c.currentMediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:") ?: return
-        // Merken (auch für alle anderen Nutzer): dieser Sender startet mit Werbung
-        val ms = (NowSong.sinceTune() + 15_000).coerceIn(15_000, 120_000)
-        Ads.record(this, id, ms)
-        Radar.reportAd(id, ms)
-        if (HitMix.activeName(this) != null) {
-            c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
-            showHint("Werbung übersprungen – nächster Hit")
-            return
-        }
-        val live = (c.mediaMetadata.title?.toString() ?: c.currentMediaItem?.mediaMetadata?.title?.toString())?.takeIf { LiveIndex.isMusic(it) }
+    /** Läuft das aktuelle Lied gerade auf einem anderen Sender frisch an (höchstens 60 s alt)? */
+    private fun againTarget(live: String?): LiveIndex.Now? {
+        if (live == null || !LiveIndex.isMusic(live)) return null
+        val here = controller?.currentMediaItem?.mediaId?.removePrefix("st:") ?: return null
+        val norm = Scanner.normalize(live)
         val t = System.currentTimeMillis()
-        val other = live?.let { l ->
-            LiveIndex.findSongs(l.substringAfter(" - ").substringAfter(" – ").trim(), l.substringBefore(" - ").substringBefore(" – ").trim())
-                .filter { it.station.id != id && t - it.since < 120_000 && !Ads.likely(this, it.station.id, it.station.url) }.maxByOrNull { it.since }
-        }
-        if (other != null) {
-            showHint("Gleiches Lied auf ${other.station.name}")
-            play(other.station.toEntry(other.title), emptyList())
-        } else showHint("Gerade spielt kein anderer Sender das Lied – nach dem Spot geht's weiter", long = true)
+        return LiveIndex.fresh().filter { it.station.id != here && it.normalized == norm && t - it.since < 60_000 }.maxByOrNull { it.since }
     }
 
+    /** Das laufende Radio-Lied von vorn: nur wenn es woanders gerade anfängt – vorher kurz prüfen, ob es dort noch läuft. */
     private fun playAgain() {
-        val c = controller ?: return
-        val item = c.currentMediaItem ?: return
-        val live = c.mediaMetadata.title?.toString()?.takeIf { LiveIndex.isMusic(it) } ?: return
-        val artist = live.substringBefore(" - ").substringBefore(" – ").trim()
-        val title = live.substringAfter(" - ").substringAfter(" – ").trim()
-        val here = item.mediaId.removePrefix("st:")
-        val t = System.currentTimeMillis()
-        val best = LiveIndex.findSongs(title, artist).filter { it.station.id != here && t - it.since < 90_000 }.firstOrNull()
-        if (best != null) {
-            showHint("Läuft gerade von vorn auf ${best.station.name}")
-            play(best.station.toEntry(best.title), emptyList())
-            return
+        val live = controller?.mediaMetadata?.title?.toString()
+        val target = againTarget(live) ?: run { showHint("Gerade fängt es nirgends neu an"); return }
+        lifecycleScope.launch {
+            val res = Radar.verify(listOf(target.station.id))
+            val nowTitle = res?.get(target.station.id)?.first
+            if (res != null && (nowTitle == null || Scanner.normalize(nowTitle) != target.normalized)) {
+                showHint("Gerade fängt es nirgends neu an"); return@launch
+            }
+            showHint("Von vorn auf ${target.station.name}")
+            play(target.station.toEntry(target.title), emptyList())
         }
-        WatchService.start(this, "$title — $artist", skipStation = here)
-        showHint("Wächter läuft: Sobald „$title“ woanders anfängt, geht's los", long = true)
-        render()
     }
 
     // ================= KI: Sprechen, Wünsch dir was, Mehr wie dieses =================
@@ -2360,7 +2339,7 @@ class MainActivity : ComponentActivity() {
             findViewById<View>(R.id.fullNext).visibility = if (canNext) View.VISIBLE else View.GONE
             findViewById<View>(R.id.fullPrev).visibility = if (c.hasPreviousMediaItem()) View.VISIBLE else View.GONE
             findViewById<EqualizerView>(R.id.fullEq).apply { bars = 9; this.playing = c.isPlaying }
-            findViewById<View>(R.id.fullSeek).visibility = if (isStation) View.INVISIBLE else View.VISIBLE
+            findViewById<View>(R.id.fullSeek).visibility = if (isStation && !NowSong.known()) View.INVISIBLE else View.VISIBLE
             val story = item.mediaId.startsWith("pc:") || item.mediaId.startsWith("ia:")
             val againOk = isStation && live != null && LiveIndex.isMusic(live)
             val canShare = (isStation && live != null && isMusic(live)) || (!isStation && !story)
@@ -2370,7 +2349,8 @@ class MainActivity : ComponentActivity() {
             val mixOn = HitMix.activeName(this) != null
             findViewById<View>(R.id.fullStopMix).visibility = if (mixOn) View.VISIBLE else View.GONE
             if (mixOn) findViewById<View>(R.id.fullStoryBar).visibility = View.VISIBLE
-            findViewById<View>(R.id.fullAgain).visibility = if (againOk && !story) View.VISIBLE else View.GONE
+            // "Von vorn" nur, wenn das Lied gerade wirklich woanders frisch anfängt (sonst würde etwas anderes kommen)
+            findViewById<View>(R.id.fullAgain).visibility = if (againOk && !story && againTarget(live) != null) View.VISIBLE else View.GONE
             listOf(R.id.fullBack30, R.id.fullSpeed, R.id.fullFwd30).forEach {
                 findViewById<View>(it).visibility = if (story) View.VISIBLE else View.GONE
             }
@@ -2436,8 +2416,6 @@ class MainActivity : ComponentActivity() {
         if (isStation) {
             val live = c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
             val ad = adInfo(c, item.mediaId, live)
-            findViewById<View>(R.id.fullSkipAd).visibility =
-                if (!kids() && (ad != null || NowSong.sinceTune() < 90_000)) View.VISIBLE else View.GONE
             val miniP = findViewById<ProgressBar>(R.id.miniProgress)
             if (ad != null) {
                 val t = adText(ad)
