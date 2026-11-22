@@ -2333,7 +2333,7 @@ class MainActivity : ComponentActivity() {
         if (!mediaId.startsWith("st:") || !c.isPlaying) return null
         val id = mediaId.removePrefix("st:")
         val known = Ads.duration(this, id)
-        val elapsed = c.currentPosition.coerceAtLeast(0)
+        val elapsed = NowSong.sinceTune()
         if (live != null && LiveIndex.isMusic(live) && !Ads.isAd(live)) return null
         if (Ads.isAd(live)) return AdInfo(if (known > elapsed) known - elapsed else -1, known, elapsed)
         // Bekannte Vorab-Werbung: Countdown (mit etwas Puffer)
@@ -2345,10 +2345,13 @@ class MainActivity : ComponentActivity() {
         return null
     }
 
-    private fun adText(ad: AdInfo) = when {
-        ad.left > 0 -> "📢 Werbung · noch ${fmt(ad.left)}"
-        ad.left == 0L -> "📢 Werbung · gleich geht's los"
-        else -> "📢 Werbung · läuft seit ${fmt(ad.elapsed)}"
+    private fun adText(ad: AdInfo): String {
+        val muted = if (ad.total > 0 && Settings.muteAds(this)) " · stumm" else ""
+        return when {
+            ad.left > 0 -> "📢 Werbung$muted · gleich geht's weiter (${fmt(ad.left)})"
+            ad.left == 0L -> "📢 Werbung$muted · gleich geht's los"
+            else -> "📢 Werbung · läuft seit ${fmt(ad.elapsed)}"
+        }
     }
 
     private var lastTitleCheck = 0L
@@ -2394,6 +2397,13 @@ class MainActivity : ComponentActivity() {
 
         val miniP = findViewById<ProgressBar>(R.id.miniProgress)
         if (!isStation && dur > 0) { miniP.max = dur.toInt(); miniP.progress = pos.toInt() }
+        // Radio-Lied mit bekanntem Anfang und Länge: Laufleiste wie bei einem normalen Lied
+        val songKnown = isStation && NowSong.known() && NowSong.stationId == item.mediaId.removePrefix("st:")
+        if (songKnown && adInfo(c, item.mediaId, c.mediaMetadata.title?.toString()) == null) {
+            miniP.visibility = View.VISIBLE
+            miniP.max = NowSong.durMs.toInt()
+            miniP.progress = NowSong.elapsed().coerceAtMost(NowSong.durMs).toInt()
+        }
 
         val sleepEnd = Settings.sleepEnd(this)
         val sleepLeft = sleepEnd - System.currentTimeMillis()
@@ -2406,9 +2416,19 @@ class MainActivity : ComponentActivity() {
         val posText = findViewById<TextView>(R.id.fullPos)
         val durText = findViewById<TextView>(R.id.fullDur)
         if (isStation) {
-            posText.text = "Läuft seit ${fmt(pos)}"
-            durText.text = "LIVE"
+            val e = NowSong.elapsed().coerceAtMost(if (NowSong.durMs > 0) NowSong.durMs else Long.MAX_VALUE)
+            when {
+                songKnown -> {
+                    seek.visibility = View.VISIBLE; seek.isEnabled = false
+                    seek.max = NowSong.durMs.toInt().coerceAtLeast(1); seek.progress = e.toInt()
+                    posText.text = fmt(e); durText.text = "-" + fmt((NowSong.durMs - e).coerceAtLeast(0))
+                }
+                NowSong.startMs > 0 -> { seek.visibility = View.INVISIBLE
+                     posText.text = "Lied läuft seit ${fmt(e)}"; durText.text = "LIVE" }
+                else -> { seek.visibility = View.INVISIBLE; posText.text = "Läuft seit ${fmt(NowSong.sinceTune())}"; durText.text = "LIVE" }
+            }
         } else {
+            seek.isEnabled = true
             if (!seeking) {
                 seek.max = dur.toInt().coerceAtLeast(1)
                 seek.progress = pos.toInt()

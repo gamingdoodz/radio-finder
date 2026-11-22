@@ -34,6 +34,12 @@ object LiveIndex {
 
     fun clear() { map.clear(); rebuild() }
 
+    /** Titel aus dem laufenden Stream übernehmen (Sender ist schon bekannt). */
+    fun titleFromStream(stationId: String, title: String) {
+        val old = map[stationId] ?: return
+        put(old.station, title)
+    }
+
     fun put(s: Station, raw: String) {
         val title = Text.clean(raw)
         val t = System.currentTimeMillis()

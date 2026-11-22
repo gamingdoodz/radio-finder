@@ -44,6 +44,10 @@ object Settings {
     fun share(context: Context) = prefs(context).getBoolean("share", true)
     fun setShare(context: Context, v: Boolean) = prefs(context).edit().putBoolean("share", v).apply()
 
+    /** Werbung am Senderanfang stumm schalten (mit Countdown). */
+    fun muteAds(context: Context) = prefs(context).getBoolean("mute_ads", true)
+    fun setMuteAds(context: Context, on: Boolean) = prefs(context).edit().putBoolean("mute_ads", on).apply()
+
     /** Aus welchen Ländern Sender genommen werden (gegen fremdsprachige Werbung). */
     fun region(context: Context) = prefs(context).getString("region", "all") ?: "all"
     fun setRegion(context: Context, r: String) = prefs(context).edit().putString("region", r).apply()

@@ -171,7 +171,7 @@ def save_covers():
 
 async def find_cover(title: str):
     key = normalize(title)
-    if key in covers:
+    if key in covers and (not covers[key] or "dur" in covers[key]):
         return covers[key]
     artist = re.split(r" - | – ", title, 1)[0].strip()
     song = re.split(r" - | – ", title, 1)[-1]
@@ -190,7 +190,8 @@ async def find_cover(title: str):
             if words_t and all(w in key for w in normalize(t).split() if len(w) >= 2) and (not words_a or any(w in a for w in words_a)):
                 art = (o.get("album") or {}).get("cover_big") or ""
                 if art:
-                    res = {"art": art, "title": o.get("title_short") or o.get("title"), "artist": (o.get("artist") or {}).get("name", "")}
+                    res = {"art": art, "title": o.get("title_short") or o.get("title"), "artist": (o.get("artist") or {}).get("name", ""),
+                           "dur": int(o.get("duration") or 0)}
                     break
     except Exception:
         return None  # später nochmal versuchen

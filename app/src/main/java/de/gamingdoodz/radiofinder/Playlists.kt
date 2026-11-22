@@ -91,6 +91,20 @@ object Playlists {
 
     val classics get() = curated.map { (n, q) -> Def(n, "Playlist", q) }
 
+    /** Welches Genre passt zur Playlist? Wird gespielt, wenn gerade kein Playlist-Lied läuft. */
+    fun genreFor(query: String, name: String): String {
+        val t = "$query $name".lowercase()
+        val rules = listOf(
+            "xmas" to "weihnacht|christmas", "kids" to "kinder", "party" to "apres|après|ballermann|party|karneval|fasching|oktoberfest|grill|halloween",
+            "chill" to "chill|kuschel|sleep|einschlaf|sonntag|sunday|akustik|acoustic|singer|love",
+            "80s" to "80er|neue deutsche welle", "90s" to "90er|eurodance", "2000s" to "2000er|throwback|pop punk|pop-punk",
+            "rock" to "rock", "deutschrap" to "deutschrap", "rap" to "rap|hip hop", "schlager" to "schlager",
+            "dance" to "dance|disco|festival|workout|motivation", "latin" to "latin|reggae",
+            "summer" to "sommer|frühling|gute laune|morning|morgen|roadtrip|driving|autofahren|feierabend",
+        )
+        return rules.firstOrNull { (_, rx) -> Regex(rx).containsMatchIn(t) }?.first ?: "charts"
+    }
+
     /** Alle bekannten (für Namen beim Abspielen). */
     fun nameFor(query: String): String =
         (trending + forNow() + weekly() + classics + pool).firstOrNull { it.query == query }?.name ?: query

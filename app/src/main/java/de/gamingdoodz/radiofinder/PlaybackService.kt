@@ -262,6 +262,7 @@ class PlaybackService : MediaLibraryService() {
                 if (!item.mediaId.startsWith("st:")) return
                 val t = mediaMetadata.title?.toString()?.trim().orEmpty()
                 val id = item.mediaId.removePrefix("st:")
+                onStreamTitle(id, t)
                 if (LiveIndex.isMusic(t)) Ads.markIcy(this@PlaybackService, id)
                 if (!musicSeen && stationStart > 0) {
                     if (LiveIndex.isMusic(t) && !Ads.isAd(t)) {
@@ -300,6 +301,9 @@ class PlaybackService : MediaLibraryService() {
                 }
                 sameItemReplace = false
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
+                NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
+                adMuted = false
+                if (exo?.volume == 0f) exo?.volume = 1f
                 // Tempo gilt nur für Hörspiele und Hörbücher
                 if (!isStory(mediaItem?.mediaId)) session?.player?.setPlaybackSpeed(1f)
                 if (mediaItem?.mediaId?.startsWith("jm:") == true) checkEndless() else if (mediaItem != null) endlessTag = null
@@ -324,6 +328,15 @@ class PlaybackService : MediaLibraryService() {
                 val c = Text.clean(t)
                 return if (c == t) m else m.buildUpon().setTitle(c).build()
             }
+            // Radio: Laufleiste wie bei einem normalen Lied (Start und Länge bekannt)
+            private fun song() = currentMediaItem?.mediaId?.startsWith("st:") == true && NowSong.known()
+            override fun getDuration() = if (song()) NowSong.durMs else super.getDuration()
+            override fun getContentDuration() = if (song()) NowSong.durMs else super.getContentDuration()
+            override fun getCurrentPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getCurrentPosition()
+            override fun getContentPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getContentPosition()
+            override fun getBufferedPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getBufferedPosition()
+            override fun getContentBufferedPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getContentBufferedPosition()
+            override fun isCurrentMediaItemLive() = if (song()) false else super.isCurrentMediaItemLive()
         }
         localPlayer = shown
         session = MediaLibrarySession.Builder(this, shown, LibraryCallback())
@@ -335,9 +348,52 @@ class PlaybackService : MediaLibraryService() {
         // Ein alter Hit-Mix von vor einem Neustart läuft nicht mehr
         HitMix.prefs(this).edit().clear().apply()
         sleepHandler.postDelayed(posRunnable, 15_000)
+        sleepHandler.postDelayed(adMuteCheck, 1_000)
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
         if (left > 0) sleepHandler.postDelayed(sleepRunnable, (left - 60_000L).coerceAtLeast(0L)) else Settings.setSleepEnd(this, 0L)
+    }
+
+    // ---------------- Liedposition, Lied-Ende, Werbung stumm ----------------
+    private var adMuted = false
+
+    /** Titel direkt aus dem Stream (genau zum Hören passend, ohne Verzögerung). */
+    private fun onStreamTitle(stationId: String, raw: String) {
+        val now = System.currentTimeMillis()
+        val clean = Text.clean(raw)
+        val music = LiveIndex.isMusic(clean) && !Ads.isAd(clean)
+        if (music) {
+            if (clean != NowSong.title) {
+                val first = NowSong.title == null
+                NowSong.title = clean
+                // Erster Titel nach dem Einschalten: Startzeit vom Server, sonst unbekannt. Wechsel beim Hören: jetzt.
+                NowSong.startMs = if (first) LiveIndex.get(stationId)?.takeIf { Text.clean(it.title) == clean }?.since?.takeIf { it < now } ?: 0L
+                else now
+                NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
+            }
+            NowSong.localAt = now
+            if (adMuted) { adMuted = false; exo?.volume = 1f }
+            LiveIndex.titleFromStream(stationId, clean)
+        } else if (NowSong.title != null) {
+            // Lied vorbei: jetzt Moderation, Jingle oder Werbung
+            NowSong.title = null; NowSong.startMs = 0L; NowSong.durMs = 0L; NowSong.localAt = now
+        }
+        if (hitMix.isActive) scope.launch { hitMix.onStreamTitle(stationId, clean, music) }
+    }
+
+    /** Bekannte Vorab-Werbung eines Senders: stumm schalten, bis Musik kommt (höchstens die gelernte Dauer + 10 s). */
+    private val adMuteCheck = object : Runnable {
+        override fun run() {
+            sleepHandler.postDelayed(this, 1_000)
+            val p = exo ?: return
+            val id = NowSong.stationId ?: return
+            if (!Settings.muteAds(this@PlaybackService) || session?.player !== localPlayer || !p.isPlaying) return
+            val known = Ads.duration(this@PlaybackService, id)
+            val since = NowSong.sinceTune()
+            val shouldMute = NowSong.title == null && known > 0 && since < known + 10_000
+            if (shouldMute && !adMuted) { adMuted = true; p.volume = 0f }
+            else if (!shouldMute && adMuted) { adMuted = false; p.volume = 1f }
+        }
     }
 
     // ---------------- Casten (Google Home, Nest, Chromecast) ----------------
@@ -433,6 +489,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         savePosition()
         sleepHandler.removeCallbacks(posRunnable)
+        sleepHandler.removeCallbacks(adMuteCheck)
         hitMix.stop()
         sleepHandler.removeCallbacks(sleepRunnable)
         Settings.setSleepEnd(this, 0L)
@@ -514,11 +571,17 @@ class PlaybackService : MediaLibraryService() {
         val id = item.mediaId
         if (!stationLogos.containsKey(id)) stationLogos[id] = item.mediaMetadata.artworkUri
         scope.launch {
-            val cover = if (LiveIndex.isMusic(title)) Covers.load(title)?.artwork?.let { android.net.Uri.parse(it) } else null
+            val info = if (LiveIndex.isMusic(title)) Covers.load(title) else null
+            val cover = info?.artwork?.let { android.net.Uri.parse(it) }
+            // Liedlänge für Laufleiste und Lied-Ende
+            var durNew = false
+            if (info != null && info.durMs > 0 && NowSong.title == Text.clean(title) && NowSong.durMs != info.durMs) {
+                NowSong.durMs = info.durMs; durNew = true
+            }
             val target = cover ?: stationLogos[id]
             val p = session?.player ?: return@launch
             val cur = p.currentMediaItem ?: return@launch
-            if (cur.mediaId != id || cur.mediaMetadata.artworkUri == target) return@launch
+            if (cur.mediaId != id || (cur.mediaMetadata.artworkUri == target && !durNew)) return@launch
             sameItemReplace = true
             p.replaceMediaItem(p.currentMediaItemIndex,
                 cur.buildUpon().setMediaMetadata(cur.mediaMetadata.buildUpon().setArtworkUri(target).build()).build())

@@ -9,11 +9,11 @@ import java.util.concurrent.ConcurrentHashMap
  * Gemerkt wird auch, wenn nichts gefunden wurde, damit nicht ständig neu gesucht wird.
  */
 object Covers {
-    class Info(val artwork: String, val title: String, val artist: String)
+    class Info(val artwork: String, val title: String, val artist: String, val durMs: Long = 0L)
 
     private val cache = ConcurrentHashMap<String, Info>()
     private val missing = ConcurrentHashMap.newKeySet<String>()
-    private val NONE = Info("", "", "")
+    private val NONE = Info("", "", "", 0L)
     private val coverUrls = ConcurrentHashMap.newKeySet<String>()
 
     /** Ist dieses Bild ein Lied-Cover (und kein Senderlogo)? */
@@ -32,10 +32,10 @@ object Covers {
         cache[k]?.let { return@withContext it.takeIf { i -> i !== NONE } }
         if (k in missing) return@withContext null
         // Zuerst der Server: der hat das Cover meist schon für einen anderen Nutzer geholt
-        Radar.coverBlocking(radioTitle)?.let { (art, t, a) ->
-            return@withContext if (art.isBlank()) { missing.add(k); null }
-            else Info(art, t.ifBlank { radioTitle.substringAfter(" - ") }, a.ifBlank { radioTitle.substringBefore(" - ") })
-                .also { cache[k] = it; coverUrls.add(art) }
+        Radar.coverBlocking(radioTitle)?.let { c ->
+            return@withContext if (c.art.isBlank()) { missing.add(k); null }
+            else Info(c.art, c.title.ifBlank { radioTitle.substringAfter(" - ") }, c.artist.ifBlank { radioTitle.substringBefore(" - ") }, c.durMs)
+                .also { cache[k] = it; coverUrls.add(c.art) }
         }
         val artist = radioTitle.substringBefore(" - ").substringBefore(" – ").trim()
         val title = radioTitle.substringAfter(" - ").substringAfter(" – ").replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim()
@@ -43,7 +43,7 @@ object Covers {
             LiveIndex.Song(e).matches(k)
         }
         if (hit == null || hit.artwork.isBlank()) { missing.add(k); null }
-        else Info(hit.artwork, hit.title, hit.subtitle).also { cache[k] = it; coverUrls.add(hit.artwork) }
+        else Info(hit.artwork, hit.title, hit.subtitle, Deezer.durations[hit.id] ?: 0L).also { cache[k] = it; coverUrls.add(hit.artwork) }
     }
 
     /** Eintrag für einen Sender mit Lied: Cover und schöne Schreibweise, wenn bekannt. */

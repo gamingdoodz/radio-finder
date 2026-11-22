@@ -230,11 +230,13 @@ object Radar {
     }
 
     /** Cover vom Server (einmal für alle Nutzer geholt). null = Server nicht erreichbar, leer = kein Cover. */
-    fun coverBlocking(radioTitle: String): Triple<String, String, String>? {
+    class CoverInfo(val art: String, val title: String, val artist: String, val durMs: Long)
+
+    fun coverBlocking(radioTitle: String): CoverInfo? {
         val text = fetch("/cover?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 10_000, 100_000) ?: return null
         return runCatching {
             val o = JSONObject(text)
-            Triple(o.optString("art"), o.optString("title"), o.optString("artist"))
+            CoverInfo(o.optString("art"), o.optString("title"), o.optString("artist"), o.optLong("dur") * 1000L)
         }.getOrNull()
     }
 

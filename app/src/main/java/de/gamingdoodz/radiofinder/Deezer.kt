@@ -92,6 +92,9 @@ object Deezer {
     /** Beliebtheit laut Deezer (höher = bekannter). */
     val rank = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    /** Liedlänge in ms (für Laufleiste und "Lied ist vorbei"). */
+    val durations = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private suspend fun load(path: String): List<Entry> = withContext(Dispatchers.IO) {
         val text = Net.get("https://api.deezer.com/$path") ?: return@withContext emptyList()
         try {
@@ -103,6 +106,7 @@ object Deezer {
                 val title = o.optString("title_short").ifBlank { o.optString("title") }
                 val album = o.optJSONObject("album")
                 rank["dz:" + o.optLong("id")] = o.optInt("rank")
+                durations["dz:" + o.optLong("id")] = o.optInt("duration") * 1000L
                 Entry(
                     id = "dz:" + o.optLong("id"),
                     kind = Kind.TRACK,

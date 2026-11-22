@@ -56,7 +56,10 @@ class HitMix(
         stop()
         // "artist:<id>:<Name>" = nur Lieder eines Künstlers
         val artist = genreKey?.takeIf { it.startsWith("artist:") }?.split(":", limit = 3)
+        val plKey = genreKey?.takeIf { it.startsWith("pl:") || it.startsWith("my:") }
+        // Playlists: passendes Genre als Ersatz, wenn gerade kein Playlist-Lied läuft
         val genre = Genres.all.firstOrNull { it.key == genreKey }
+            ?: plKey?.let { k -> Playlists.genreFor(k.substring(3), Playlists.nameFor(k.substring(3))) }?.let { g -> Genres.all.firstOrNull { it.key == g } }
         val favMix = genreKey == "favs"
         val chartsMix = genreKey == "radiocharts"
         val similarTo = genreKey?.takeIf { it.startsWith("similar:") }?.removePrefix("similar:")
@@ -93,8 +96,8 @@ class HitMix(
                 val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
                 Entry("cm:" + t.hashCode(), Kind.TRACK, ti, a, "", "", ti)
             }.ifEmpty { Deezer.topGermany(100) }
-            playlist != null -> Deezer.playlistByName(playlist).ifEmpty { Deezer.topGermany(100) }
-            myList != null -> Playlists.get(context, myList).ifEmpty { Deezer.topGermany(100) }
+            playlist != null -> Deezer.playlistByName(playlist) + genreHits(genre)
+            myList != null -> Playlists.get(context, myList) + genreHits(genre)
             similarTo != null -> {
                 // Ähnliche Lieder vom Server + weitere Lieder desselben Künstlers
                 val artist = similarTo.substringBefore(" - ").substringBefore(" – ").trim()
@@ -159,9 +162,19 @@ class HitMix(
 
         poll(force = true)
         val first = withContext(Dispatchers.Default) { pickNext() }
+        if (first != null) { switchedAt = System.currentTimeMillis(); confirmed = false }
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
         job = scope.launch { loop() }
         return first?.let { prepareItem(it) }
+    }
+
+    /** Hits eines Genres (für Playlists als Ersatz hinten angehängt). */
+    private suspend fun genreHits(g: Genre?): List<Entry> = when {
+        g == null || g.key == "charts" -> Deezer.topGermany(100)
+        g.key == "kids" -> Deezer.kidsHits()
+        g.playlist != null -> Deezer.playlistByName(g.playlist)
+        g.deezerGenre != null && g.deezerGenre != 0 -> Deezer.genreChart(g.deezerGenre, 50)
+        else -> Deezer.topGermany(100)
     }
 
     /**
@@ -201,14 +214,19 @@ class HitMix(
 
     /** Sofort zum nächsten Hit springen. Gibt false zurück, wenn wirklich nichts Passendes läuft. */
     suspend fun next(): Boolean {
-        // Weiter: Server-Stand kurz auffrischen (nur Änderungen, geht schnell). Ohne Server selbst nachsehen.
-        if (!Radar.sync(force = true)) {
-            val priority = (stations.filter { it.id in genreIds } + stations).distinctBy { it.id }.take(40)
-            withTimeoutOrNull(4_000) { LiveIndex.refresh(priority, maxAgeMs = 10_000L) }
-        }
+        // Sofort: vorbereiteten Kandidaten nehmen bzw. aus dem vorhandenen Stand wählen (kein Warten aufs Netz)
         val item = withContext(Dispatchers.Default) {
-            pickNext() ?: pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true)
+            takeCandidate() ?: pickNext() ?: pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true)
+        } ?: run {
+            // Gar nichts im Speicher: dann doch kurz nachsehen
+            if (!Radar.sync(force = true)) {
+                val priority = (stations.filter { it.id in genreIds } + stations).distinctBy { it.id }.take(40)
+                withTimeoutOrNull(4_000) { LiveIndex.refresh(priority, maxAgeMs = 10_000L) }
+            }
+            withContext(Dispatchers.Default) { pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true) }
         }
+        // Im Hintergrund frische Daten für den nächsten Sprung
+        scope.launch { Radar.sync(force = true) }
         if (item == null) {
             waitingForNext = true
             prefs(context).edit().putString("now", "Gerade läuft kein anderer Hit – ich springe, sobald einer anfängt").apply()
@@ -219,38 +237,95 @@ class HitMix(
         return true
     }
 
+    /** Zeitpunkt des letzten Umschaltens und ob der erwartete Titel im Stream bestätigt wurde. */
+    private var switchedAt = 0L
+    private var confirmed = false
+    private var lastLocal = 0L
+    private var candidate: Pair<Long, Choice>? = null
+
+    /** Titel aus dem Stream des laufenden Senders (kommt genau dann, wenn er sich ändert). */
+    suspend fun onStreamTitle(stationId: String, title: String, music: Boolean) {
+        if (stationId != currentStationId || job?.isActive != true) return
+        val now = System.currentTimeMillis()
+        lastLocal = now
+        val norm = Scanner.normalize(title)
+        val sinceSwitch = now - switchedAt
+        if (music && (switchedTitle == null || norm == switchedTitle)) {
+            // Läuft wie erwartet
+            switchedTitle = norm; confirmed = true; waitingForNext = false
+            return
+        }
+        if (music) {
+            val fresh = !confirmed && sinceSwitch < 25_000   // erster Titel nach dem Umschalten
+            if (fitsTitle(norm, stationId) && norm !in played) {
+                // Neues passendes Lied auf demselben Sender: einfach weiterhören
+                switchedTitle = norm; confirmed = true; waitingForNext = false
+                if (!fresh) songStartedAt = now
+                currentSongKey = norm
+                played.addLast(norm); while (played.size > 25) played.removeFirst()
+                prefs(context).edit().putString("now", Text.clean(title)).apply()
+                return
+            }
+            switchNow()
+            return
+        }
+        // Keine Musik mehr (Moderation, Jingle, Werbung): direkt weiter.
+        // Kurz nach dem Umschalten nicht – da kommt oft erst der Sendername oder Vorab-Werbung.
+        if (confirmed || sinceSwitch > 25_000) switchNow()
+    }
+
+    private suspend fun switchNow() {
+        val next = withContext(Dispatchers.Default) { takeCandidate() ?: pickNext() }
+        if (next != null) { waitingForNext = false; switchTo(next) }
+        else waitingForNext = true
+    }
+
     private suspend fun loop() {
+        var tick = 0
         while (scope.isActive && job?.isActive != false) {
-            delay(if (waitingForNext) 10_000 else 20_000)
+            delay(3_000)
+            tick++
             val p = player() ?: continue
-            // Pausiert: nichts tun
             if (!p.playWhenReady) continue
-            poll(force = false)
-            val now = currentStationId?.let { LiveIndex.get(it) }
-            // Läuft noch dasselbe Lied wie beim Umschalten? Dann bleiben.
-            val stillHit = now != null && (switchedTitle == null || now.normalized == switchedTitle) &&
-                LiveIndex.isMusic(now.title)
             val broken = p.playbackState == Player.STATE_IDLE || p.playerError != null
-            // Hit vorbei (anderes Lied, Werbung, Moderation) oder Sender kaputt -> weiter
-            if (waitingForNext || !stillHit || broken || System.currentTimeMillis() - songStartedAt > 7 * 60_000L) {
-                val next = withContext(Dispatchers.Default) {
-                    pickNext() ?: if (broken || waitingForNext) pickNext(allowRepeats = true) else null
-                }
-                if (next != null) {
-                    waitingForNext = false
-                    switchTo(next)
-                } else if (now != null && LiveIndex.isMusic(now.title) && fits(now)) {
-                    // Nichts Neues gefunden, aber hier läuft wieder ein passendes Lied: bleiben
-                    switchedTitle = now.normalized
-                    songStartedAt = now.since
-                    waitingForNext = false
-                } else if (!broken) {
-                    // Hier läuft gerade nichts Passendes: sobald woanders eins anfängt, springen
-                    waitingForNext = true
-                }
+            // Länge bekannt und überschritten, Titel aber unverändert: Lied ist vorbei (Moderator redet o. Ä.)
+            val overrun = NowSong.stationId == currentStationId && NowSong.overrun() &&
+                NowSong.title?.let { Scanner.normalize(it) } == switchedTitle
+            if (broken || overrun) { switchNow(); continue }
+            if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
+            if (tick % 7 != 0) continue   // ca. alle 20 Sekunden: Server-Stand + nächsten Kandidaten vorbereiten
+            poll(force = false)
+            candidate = withContext(Dispatchers.Default) { choose() }?.let { System.currentTimeMillis() to it }
+            // Ohne Titel im Stream (z. B. beim Casten oder Sender ohne Titel): Server-Stand entscheidet
+            val local = !Cast.active && System.currentTimeMillis() - lastLocal < 10 * 60_000L
+            if (local) continue
+            val now = currentStationId?.let { LiveIndex.get(it) } ?: continue
+            val stillHit = (switchedTitle == null || now.normalized == switchedTitle) && LiveIndex.isMusic(now.title)
+            val tooLong = NowSong.durMs == 0L && System.currentTimeMillis() - songStartedAt > 9 * 60_000L
+            if (!stillHit || tooLong) {
+                if (LiveIndex.isMusic(now.title) && fitsTitle(now.normalized, now.station.id) && now.normalized !in played) {
+                    switchedTitle = now.normalized; songStartedAt = now.since
+                    played.addLast(now.normalized)
+                } else switchNow()
             }
         }
     }
+
+    /** Vorbereiteten Kandidaten nehmen, wenn er noch stimmt (läuft noch dasselbe Lied, nicht zu alt). */
+    private fun takeCandidate(): MediaItem? {
+        val (at, c) = candidate ?: return null
+        candidate = null
+        if (System.currentTimeMillis() - at > 60_000L) return null
+        val cur = LiveIndex.get(c.now.station.id) ?: return null
+        if (cur.normalized != c.now.normalized || c.now.station.id == currentStationId) return null
+        if (c.key in played) return null
+        return commit(c)
+    }
+
+    /** Passt dieses Lied zum Mix? (Liste, Genre-Sender, Thema oder bekannter Hit bei offenen Mixen) */
+    private fun fitsTitle(norm: String, stationId: String): Boolean =
+        songs.any { it.matches(norm) } || stationId in genreIds || themeWords?.containsMatchIn(norm) == true ||
+            (!strict && genreIds.isEmpty() && (Radar.chartPlays[norm] ?: 0) >= 15)
 
     private var rotation = 0
 
@@ -280,7 +355,24 @@ class HitMix(
      * 1. ein Song aus der Hitliste, 2. Musik auf einem Genre-Sender,
      * 3. ein Song von einem Künstler aus der Liste, 4. (nur bei "Weiter") irgendeine Musik.
      */
-    private fun pickNext(allowRepeats: Boolean = false, anyMusic: Boolean = false): MediaItem? {
+    class Choice(val now: LiveIndex.Now, val key: String)
+
+    private fun pickNext(allowRepeats: Boolean = false, anyMusic: Boolean = false): MediaItem? =
+        choose(allowRepeats, anyMusic)?.let { commit(it) }
+
+    private fun commit(c: Choice): MediaItem {
+        val n = c.now
+        currentStationId = n.station.id
+        currentSongKey = c.key
+        switchedTitle = n.normalized
+        songStartedAt = n.since
+        played.addLast(c.key)
+        while (played.size > 25) played.removeFirst()
+        prefs(context).edit().putString("now", "${n.title} · ${n.station.name}").apply()
+        return n.station.toEntry(n.title).toMediaItem()
+    }
+
+    private fun choose(allowRepeats: Boolean = false, anyMusic: Boolean = false): Choice? {
         val t = System.currentTimeMillis()
         val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
@@ -321,23 +413,12 @@ class HitMix(
                 age + relay + (if (age > 180_000L) 300_000L else 0L) +
                     (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist
             } ?: return null
-        val (n, key) = best
-        currentStationId = n.station.id
-        currentSongKey = key
-        switchedTitle = n.normalized
-        songStartedAt = n.since
-        played.addLast(key)
-        while (played.size > 25) played.removeFirst()
-        prefs(context).edit().putString("now", "${n.title} · ${n.station.name}").apply()
-        return n.station.toEntry(n.title).toMediaItem()
+        return Choice(best.first, best.second)
     }
 
-    /** Passt dieses Lied zum Mix? */
-    private fun fits(n: LiveIndex.Now): Boolean =
-        songs.any { it.matches(n.normalized) } || n.station.id in genreIds ||
-            themeWords?.containsMatchIn(n.title) == true
-
     private fun switchTo(item: MediaItem) {
+        switchedAt = System.currentTimeMillis()
+        confirmed = false
         val p = player() ?: return
         p.setMediaItem(prepareItem(item))
         p.prepare()
