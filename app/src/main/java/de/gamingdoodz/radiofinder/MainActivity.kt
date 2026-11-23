@@ -256,6 +256,8 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullNext).setOnClickListener { next() }
         findViewById<View>(R.id.fullPrev).setOnClickListener { controller?.seekToPreviousMediaItem() }
         findViewById<View>(R.id.fullStop).setOnClickListener {
+            wanted = null
+            if (HitMix.activeName(this) != null) stopHitMix()
             controller?.stop()
             controller?.clearMediaItems()
             showFull(false)

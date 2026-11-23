@@ -287,6 +287,11 @@ class PlaybackService : MediaLibraryService() {
                 updateArtwork(item, t)
             }
 
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+                    Settings.prefs(this@PlaybackService).edit().putLong("user_stopped", if (playWhenReady) 0L else System.currentTimeMillis()).apply()
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!isPlaying) savePosition()
                 if (isPlaying && stationStart == 0L && session?.player?.currentMediaItem?.mediaId?.startsWith("st:") == true) {
@@ -355,6 +360,15 @@ class PlaybackService : MediaLibraryService() {
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
         if (left > 0) sleepHandler.postDelayed(sleepRunnable, (left - 60_000L).coerceAtLeast(0L)) else Settings.setSleepEnd(this, 0L)
+    }
+
+    /** Selbst gestoppt (in den letzten 12 h) und der Start kommt nicht von der App, Android Auto oder der Benachrichtigung? */
+    private fun blockAutoStart(c: MediaSession.ControllerInfo): Boolean {
+        val stopped = Settings.prefs(this).getLong("user_stopped", 0L)
+        if (stopped == 0L || System.currentTimeMillis() - stopped > 12 * 3600_000L) return false
+        val pkg = c.packageName
+        return pkg != packageName && pkg != "com.android.systemui" && !pkg.startsWith("com.google.android.projection") &&
+            pkg != "com.google.android.apps.automotive.media"
     }
 
     // ---------------- Liedposition, Lied-Ende, Werbung stumm ----------------
@@ -1020,10 +1034,20 @@ class PlaybackService : MediaLibraryService() {
             mediaItems.mapNotNull { resolve(it) }.toMutableList()
         }
 
+        override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
+            // Kopfhörer/Auto verbindet sich und schickt "Play": nicht starten, wenn der Nutzer vorher selbst gestoppt hat
+            val key = intent.getParcelableExtra<android.view.KeyEvent>(Intent.EXTRA_KEY_EVENT)
+            val play = key?.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY ||
+                (key?.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && session.player.playWhenReady.not())
+            if (play && blockAutoStart(controllerInfo)) return true
+            return super.onMediaButtonEvent(session, controllerInfo, intent)
+        }
+
         override fun onPlaybackResumption(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo
-        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = if (blockAutoStart(controller))
+            Futures.immediateFailedFuture(UnsupportedOperationException("vom Nutzer gestoppt")) else scope.future {
             val last = Recent.all(applicationContext).firstOrNull()
             val item = last?.toMediaItem()?.let { liveTitle(it) }
                 ?: hitMix.start(null)

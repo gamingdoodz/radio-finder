@@ -271,6 +271,13 @@ class HitMix(
             switchedTitle = norm; confirmed = true; waitingForNext = false
             return
         }
+        if (music && !confirmed && sinceSwitch < 25_000 && !strict) {
+            // Erster Titel nach dem Umschalten ist ein anderes Lied als erwartet: nicht gleich wieder springen
+            switchedTitle = norm; confirmed = true; waitingForNext = false
+            currentSongKey = norm; addPlayed(norm)
+            prefs(context).edit().putString("now", Text.clean(title)).apply()
+            return
+        }
         if (music) {
             val fresh = !confirmed && sinceSwitch < 25_000   // erster Titel nach dem Umschalten
             if (isPlaylist && !primary.any { it.matches(norm) }) {
@@ -295,7 +302,19 @@ class HitMix(
         if (confirmed || sinceSwitch > 25_000) switchNow()
     }
 
-    private suspend fun switchNow() {
+    private val autoSwitches = ArrayDeque<Long>()
+
+    /** Höchstens 3 automatische Sprünge pro Minute, und nie in den ersten 20 s nach einem Sprung (außer der Sender ist kaputt). */
+    private fun mayAutoSwitch(force: Boolean = false): Boolean {
+        val t = System.currentTimeMillis()
+        while (autoSwitches.isNotEmpty() && t - autoSwitches.first() > 60_000L) autoSwitches.removeFirst()
+        if (force) return autoSwitches.size < 6
+        return autoSwitches.size < 3 && t - switchedAt > 20_000L
+    }
+
+    private suspend fun switchNow(force: Boolean = false) {
+        if (!mayAutoSwitch(force)) { waitingForNext = true; return }
+        autoSwitches.addLast(System.currentTimeMillis())
         // Lieber andere Musik als Moderation: notfalls auch ein schon gespieltes oder irgendein Lied (nicht bei Themen-Mixen)
         val next = withContext(Dispatchers.Default) {
             takeCandidate() ?: pickNext() ?: pickNext(allowRepeats = true) ?: if (!strict) pickNext(allowRepeats = true, anyMusic = true) else null
@@ -310,12 +329,14 @@ class HitMix(
             delay(3_000)
             tick++
             val p = player() ?: continue
+            // Gestoppt (Stopp gedrückt, Liste leer): Mix beenden – nicht von selbst wieder anfangen
+            if (switchedAt > 0 && (p.mediaItemCount == 0 || (p.playbackState == Player.STATE_IDLE && p.playerError == null))) { stop(); return }
             if (!p.playWhenReady) continue
-            val broken = p.playbackState == Player.STATE_IDLE || p.playerError != null
+            val broken = p.playerError != null
             // Länge bekannt und überschritten, Titel aber unverändert: Lied ist vorbei (Moderator redet o. Ä.)
             val overrun = NowSong.stationId == currentStationId && NowSong.overrun() &&
                 NowSong.title?.let { Scanner.normalize(it) } == switchedTitle
-            if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(); continue }
+            if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(force = broken); continue }
             if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
             if (tick % 7 != 0) continue   // ca. alle 20 Sekunden: Server-Stand + nächsten Kandidaten vorbereiten
             poll(force = false)
