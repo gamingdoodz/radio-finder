@@ -37,7 +37,10 @@ object Radar {
     fun init(context: Context) { appContext = context.applicationContext; Region.load(context) }
 
     /** Länder geändert: alles neu vom Server holen. */
-    fun resetSync() { synchronized(known) { known.clear() }; version = 0L; lastTry = 0L; LiveIndex.clear() }
+    fun resetSync() { synchronized(known) { resetGen++; known.clear(); version = 0L }; lastTry = 0L; LiveIndex.clear() }
+
+    /** Zählt jedes Zurücksetzen: Antworten, die noch für die alte Region angefragt wurden, werden verworfen. */
+    @Volatile private var resetGen = 0
 
     /** Stream eines Senders über den Server (nur fürs Casten bei Sendern ohne https). */
     fun relayUrl(stationId: String): String? = "${servers[0]}/relay?id=${java.net.URLEncoder.encode(stationId, "UTF-8")}"
@@ -77,7 +80,8 @@ object Radar {
     @Volatile private var version = 0L
 
     /** Abgleich über /sync: beim ersten Mal alles, danach nur Änderungen. true = geklappt. */
-    private fun applySync(text: String): Boolean {
+    private fun applySync(text: String, gen: Int): Boolean = synchronized(known) {
+        if (gen != resetGen) return false
         val o = JSONObject(text)
         val full = o.optInt("full", 0) == 1
         val t = o.optLong("t") * 1000L
@@ -125,14 +129,17 @@ object Radar {
         if (!lock.tryLock()) return@withContext ok
         try {
             lastTry = t
+            val gen = resetGen
             // Neu: nur Änderungen holen (viel weniger Daten). Alter Server: wie bisher alles.
             val synced = fetch("/sync?from=$version", 15_000, 10_000_000)
-                ?.let { runCatching { applySync(it) }.getOrDefault(false) } == true
+                ?.let { runCatching { applySync(it, gen) }.getOrDefault(false) } == true
+            if (gen != resetGen) return@withContext false
             if (!synced) {
                 version = 0L
                 val text = fetch("/now?limit=8000&music=1", 15_000, 10_000_000)
                 val list = text?.let { runCatching { parse(it) }.getOrNull() }
                 if (list.isNullOrEmpty()) { lastFail = t; return@withContext false }
+                if (gen != resetGen) return@withContext false
                 list.forEach { (s, n) -> LiveIndex.putRemote(s, n.first, n.second, n.third) }
             }
             LiveIndex.rebuild() // Listen hier im Hintergrund neu berechnen, damit die Anzeige nicht hängt

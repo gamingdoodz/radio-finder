@@ -109,7 +109,7 @@ object Podcasts {
         var channelImage = ""
         var text = StringBuilder()
         var event = p.eventType
-        while (event != XmlPullParser.END_DOCUMENT && out.size < 500) {
+        while (event != XmlPullParser.END_DOCUMENT && out.size < 2000) {   // lange Feeds: auch die ersten Folgen finden
             when (event) {
                 XmlPullParser.START_TAG -> {
                     text = StringBuilder()

@@ -112,6 +112,28 @@ class PlaybackService : MediaLibraryService() {
             }
         }
     }
+    /** Letztes freies Lied ist vorbei: ähnliche Lieder (gleicher Künstler, sonst Charts) anhängen und weiterspielen. */
+    private fun autoContinue() {
+        val p = session?.player ?: return
+        val last = p.currentMediaItem ?: return
+        val id = last.mediaId
+        if (!(id.startsWith("jm:") || id.startsWith("au:")) || hitMix.isActive) return
+        if (last.mediaMetadata.extras?.getBoolean("preview", false) == true) return
+        scope.launch {
+            val have = (0 until p.mediaItemCount).mapTo(HashSet()) { p.getMediaItemAt(it).mediaId }
+            val artist = last.mediaMetadata.artist?.toString()?.substringBefore(" · ")?.trim().orEmpty()
+            val more = (if (artist.length >= 2) FreeMusic.search(artist) else emptyList()) + FreeMusic.charts()
+            val items = more.filter { (it.id.startsWith("jm:") || it.id.startsWith("au:")) && !it.preview && it.id !in have }
+                .distinctBy { it.id }.take(30).map { it.toMediaItem() }
+            val now = session?.player ?: return@launch
+            // Inzwischen etwas anderes gewählt oder gestoppt: nichts tun
+            if (items.isEmpty() || now.playbackState != Player.STATE_ENDED || now.currentMediaItem?.mediaId != id) return@launch
+            now.addMediaItems(items)
+            now.seekTo(now.currentMediaItemIndex + 1, 0L)
+            now.prepare(); now.play()
+        }
+    }
+
     // Werbung am Senderanfang messen
     private var stationStart = 0L
     private var musicSeen = false
@@ -224,6 +246,8 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) retries = 0
+                // Liste mit freien Liedern zu Ende: wie ein normaler Player mit passender Musik weitermachen
+                if (state == Player.STATE_ENDED && !bedtime) autoContinue()
                 // Einschlaf-Modus: nach der Geschichte leise Schlaflieder
                 if (state == Player.STATE_ENDED && bedtime) {
                     scope.launch {

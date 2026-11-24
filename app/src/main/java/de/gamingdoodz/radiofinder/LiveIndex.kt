@@ -16,7 +16,7 @@ object LiveIndex {
     /** Ein Song zum Wiedererkennen im Radio (Titel- und Künstlerwörter). */
     class Song(val entry: Entry) {
         val titleWords = Scanner.words(
-            entry.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ").substringBefore(" - ")
+            entry.title.replace(BRACKETS, " ").substringBefore(" - ")
         ).filter { it.length >= 2 }
         private val artistWords = Scanner.words(entry.subtitle).filter { it.length >= 3 }
         val key: String = titleWords.joinToString(" ")
@@ -26,6 +26,8 @@ object LiveIndex {
                 (artistWords.isEmpty() || artistWords.any { normalizedRadioTitle.contains(it) })
     }
 
+    /** Klammern im Titel (Remix, feat. …) – einmal anlegen statt bei jedem Vergleich neu. */
+    private val BRACKETS = Regex("\\(.*?\\)|\\[.*?\\]")
     private const val MAX_AGE = 4 * 60_000L
     /** Lieder mit unbekanntem Anfang gelten als 30 Minuten alt. */
     const val UNKNOWN_AGE = 30 * 60_000L
@@ -128,7 +130,7 @@ object LiveIndex {
 
     private fun <T> valid(c: Cache<T>?): T? {
         if (c == null) return null
-        return if (c.gen == gen && System.currentTimeMillis() - c.at < 180_000) c.value else null
+        return if (c.gen == gen && System.currentTimeMillis() - c.at < 330_000) c.value else null
     }
 
     /** Alles, was gerade läuft. */
@@ -199,7 +201,7 @@ object LiveIndex {
     /** Alle Sender mit diesem Song, zuletzt angefangene zuerst. Länger als 5 Minuten = wohl schon vorbei. */
     fun findSongs(title: String, artist: String): List<Now> {
         val song = Song(Entry("", Kind.TRACK, title, artist, "", "", title))
-        val words = Scanner.words(title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " ").substringBefore(" - ")).filter { it.length >= 2 }
+        val words = Scanner.words(title.replace(BRACKETS, " ").substringBefore(" - ")).filter { it.length >= 2 }
         if (words.isEmpty()) return emptyList()
         val idx = index()
         // Nur Titel, die das seltenste Wort enthalten, genauer prüfen

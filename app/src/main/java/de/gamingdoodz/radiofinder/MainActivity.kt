@@ -46,11 +46,13 @@ import androidx.recyclerview.widget.RecyclerView
 import coil.dispose
 import coil.load
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -139,6 +141,8 @@ class MainActivity : ComponentActivity() {
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
+    /** Getippt, bevor der Player verbunden war: wird nachgeholt, sobald er da ist (kein "nochmal tippen"). */
+    private var pendingAction: (() -> Unit)? = null
     private var liveJob: Job? = null
     private var seeking = false
     private val ticker = Handler(Looper.getMainLooper())
@@ -323,8 +327,11 @@ class MainActivity : ComponentActivity() {
                 }
             })
             updatePlayer()
+            pendingAction?.let { a -> pendingAction = null; a() }
         }, ContextCompat.getMainExecutor(this))
         ticker.post(tick)
+        // Wecker neu planen (z. B. nachdem "Genaue Wecker" erlaubt wurde: dann pünktlich statt ungefähr)
+        try { AlarmScheduler.schedule(this) } catch (_: Exception) {}
         Jamendo.highQuality = Settings.highQuality(this)
         startLiveRefresh()
         checkUpdate()
@@ -343,6 +350,7 @@ class MainActivity : ComponentActivity() {
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         controller = null
+        pendingAction = null
         ticker.removeCallbacks(tick)
         liveJob?.cancel()
         super.onStop()
@@ -587,13 +595,15 @@ class MainActivity : ComponentActivity() {
             if (myId != searchId) return@launch
             if (!deep) {
                 val words = Scanner.words(q)
-                stationHits = all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() }
+                stationHits = withContext(Dispatchers.Default) { all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() } }
+                if (myId != searchId) return@launch
                 render()
                 Radar.stations(q)?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } }
                 return@launch
             }
             val words = Scanner.words(q)
-            stationHits = all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() }
+            stationHits = withContext(Dispatchers.Default) { all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() } }
+            if (myId != searchId) return@launch
             launch { Radar.stations(q)?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } } }
             val toScan = all.filter { !LiveIndex.isFresh(it) }
             scanTotal = toScan.size
@@ -882,7 +892,8 @@ class MainActivity : ComponentActivity() {
 
     private fun startHitMix(key: String?, label: String) {
         val c = controller ?: run {
-            showHint("Player startet noch, bitte nochmal tippen"); return
+            pendingAction = { startHitMix(key, label) }
+            showHint("Player startet…"); return
         }
         c.setMediaItem(hitMixItem(key, "⚡ Hit-Mix $label"))
         c.prepare()
@@ -902,7 +913,7 @@ class MainActivity : ComponentActivity() {
         button(R.drawable.ic_bolt, "Hit-Mix $label") { startHitMix(key, label) }
 
     private fun next() {
-        val c = controller ?: return
+        val c = controller ?: run { pendingAction = { next() }; return }
         if (HitMix.activeName(this) != null) {
             val f = c.sendCustomCommand(SessionCommand(PlaybackService.CMD_NEXT, Bundle.EMPTY), Bundle.EMPTY)
             f.addListener({
@@ -2202,7 +2213,8 @@ class MainActivity : ComponentActivity() {
     private fun play(entry: Entry, section: List<Entry>) {
         val c = controller
         if (c == null) {
-            showHint("Player startet noch, bitte nochmal tippen")
+            pendingAction = { play(entry, section) }
+            showHint("Player startet…")
             return
         }
         if (entry.kind == Kind.TRACK && !entry.preview) {
@@ -2223,7 +2235,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun togglePlay() {
-        val c = controller ?: return
+        val c = controller ?: run { pendingAction = { togglePlay() }; return }
         when {
             c.isPlaying -> c.pause()
             c.playbackState == Player.STATE_IDLE && c.mediaItemCount > 0 -> { c.prepare(); c.play() }

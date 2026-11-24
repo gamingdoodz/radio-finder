@@ -98,8 +98,11 @@ class WatchService : Service() {
             if (list.isEmpty()) stop(context)
         }
 
+        /** Wächter beenden und alle Wunschlieder entfernen (sonst startet er beim nächsten Öffnen von selbst wieder). */
         fun stop(context: Context) {
-            context.startService(Intent(context, WatchService::class.java).setAction(ACTION_STOP))
+            saveQueries(context, emptyList())
+            prefs(context).edit().remove("since").apply()
+            try { context.startService(Intent(context, WatchService::class.java).setAction(ACTION_STOP)) } catch (_: Exception) {}
         }
 
         fun prefs(context: Context): SharedPreferences =
@@ -142,7 +145,7 @@ class WatchService : Service() {
         Radar.init(this)
         createChannels()
         when (intent?.action) {
-            ACTION_STOP -> { job?.cancel(); finish(); return START_NOT_STICKY }
+            ACTION_STOP -> { job?.cancel(); saveQueries(this, emptyList()); prefs(this).edit().remove("since").apply(); finish(); return START_NOT_STICKY }
             ACTION_NOW -> { waitJob?.cancel(); return START_NOT_STICKY }
             ACTION_PLAY -> {
                 // Aus der Benachrichtigung "Jetzt hören" getippt
@@ -154,18 +157,13 @@ class WatchService : Service() {
                     if (job?.isActive != true) finish()
                 }
                 if (job?.isActive == true) return START_NOT_STICKY
-                ServiceCompat.startForeground(
-                    this, ID_RUN, runningNotification("Starte Wiedergabe…", false),
-                    if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-                )
+                goForeground("Starte Wiedergabe…", false)
                 return START_NOT_STICKY
             }
         }
+        // Auch beim sofortigen Beenden erst in den Vordergrund (sonst beendet Android die App)
+        if (!goForeground("Startet…", true)) return START_NOT_STICKY
         if (queries(this).isEmpty()) { finish(); return START_NOT_STICKY }
-        ServiceCompat.startForeground(
-            this, ID_RUN, runningNotification("Startet…", true),
-            if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        )
         if (job?.isActive != true) job = scope.launch { watch() }
         else setStatus("Neuer Wunsch dazu – suche…", true)
         return START_NOT_STICKY
@@ -283,6 +281,23 @@ class WatchService : Service() {
     private fun setStatus(status: String, searching: Boolean) {
         prefs(this).edit().putString("status", status).apply()
         getSystemService(NotificationManager::class.java).notify(ID_RUN, runningNotification(status, searching))
+    }
+
+    /** Vordergrund-Dienst starten; geht das nicht (z. B. Zeitlimit von Android erreicht), sauber beenden. */
+    private fun goForeground(text: String, searching: Boolean): Boolean = try {
+        ServiceCompat.startForeground(
+            this, ID_RUN, runningNotification(text, searching),
+            if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
+        )
+        true
+    } catch (_: Exception) {
+        job?.cancel(); finish(); false
+    }
+
+    /** Android 15+: Zeitlimit für Hintergrund-Dienste erreicht – sofort aufhören statt abzustürzen. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        job?.cancel()
+        finish()
     }
 
     private fun finish() {

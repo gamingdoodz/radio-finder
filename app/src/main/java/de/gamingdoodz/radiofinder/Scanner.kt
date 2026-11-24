@@ -115,8 +115,9 @@ object Scanner {
             }
         } catch (_: FoundException) {
             // gefunden, Rest abgebrochen
+        } finally {
+            searchingSelf = false
         }
-        searchingSelf = false
         return synchronized(hits) { hits.toList() }
     }
 
