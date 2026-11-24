@@ -41,6 +41,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
@@ -663,10 +664,18 @@ class PlaybackService : MediaLibraryService() {
         if (theme != null) {
             hitMix.start(if (theme == "charts") null else theme)?.let { updateFavButton(); return it }
         }
-        val stations = StationRepository.load(applicationContext)
+        // 1. Läuft das Lied gerade irgendwo? (Server-Stand, sofort)
+        Radar.sync()
         val words = Scanner.words(query)
+        LiveIndex.find(query).filter { LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it) }.maxByOrNull { it.since }?.let {
+            return liveTitle(it.station.toEntry(it.title).toMediaItem())
+        }
+        // 2. Ein Sender mit dem Namen (alle ~50.000 auf dem Server)
+        Radar.stations(query)?.firstOrNull()?.let { return it.toMediaItem() }
+        val stations = StationRepository.load(applicationContext)
         stations.firstOrNull { Scanner.matches(it.name, words) }?.let { return it.toEntry().toMediaItem() }
-        val hit = withTimeoutOrNull(20_000) {
+        // 3. Ohne Server: selbst kurz suchen
+        val hit = if (Radar.ok) null else withTimeoutOrNull(8_000) {
             Scanner.scan(stations, query, stopAfterFirst = true).firstOrNull()
         }
         if (hit != null) {
@@ -705,12 +714,22 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    /** Neueste Nachrichtenfolge (Tagesschau in 100 Sekunden bzw. Deutschlandfunk-Nachrichten). */
+    /** Neueste Nachrichtenfolge (Tagesschau in 100 Sekunden bzw. Deutschlandfunk-Nachrichten). Notfalls Deutschlandfunk live. */
     private suspend fun latestNews(key: String): MediaItem? {
         val term = if (key == "dlf") "Deutschlandfunk Nachrichten" else "tagesschau in 100 Sekunden"
-        val show = Podcasts.search(term, limit = 3).firstOrNull() ?: return null
-        val ep = Podcasts.episodes(show).lastOrNull() ?: return null
-        return ep.toMediaItem()
+        val ep = withTimeoutOrNull(8_000) {
+            val show = Podcasts.search(term, limit = 3).firstOrNull()
+            show?.let { Podcasts.episodes(it).lastOrNull() }
+        }
+        return ep?.toMediaItem() ?: Radar.stations("Deutschlandfunk")?.firstOrNull()?.toMediaItem()
+    }
+
+    /** Irgendein Sender, auf dem gerade Musik läuft (Ersatz, damit nie "nicht geladen" kommt). */
+    private suspend fun anyMusicStation(): MediaItem? {
+        Radar.sync()
+        val n = withContext(Dispatchers.Default) { LiveIndex.topMusic().firstOrNull { !Ads.likely(this@PlaybackService, it.station.id, it.station.url) } }
+        return n?.let { liveTitle(it.station.toEntry(it.title).toMediaItem()) }
+            ?: StationRepository.load(applicationContext, big = false).firstOrNull()?.toEntry()?.toMediaItem()
     }
 
     private var trafficCache: Pair<Long, List<MediaItem>>? = null
@@ -850,7 +869,8 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
-            val items: List<MediaItem> = when (parentId) {
+            // Fehler (z. B. kein Netz) nie bis zu Android Auto durchreichen: dann eben eine leere Liste
+            val items: List<MediaItem> = try { withTimeout(15_000) { when (parentId) {
                 // Android Auto zeigt bis zu 4 Ordner als Reiter: übersichtlich wie in der App
                 ROOT_ID -> listOf(
                     folderItem(FORYOU_ID, "Für dich"),
@@ -961,7 +981,8 @@ class PlaybackService : MediaLibraryService() {
                         shows[parentId]?.let { Podcasts.episodes(it) }.orEmpty().map { it.toMediaItem() }
                     else -> emptyList()
                 }
-            }
+            } } } catch (e: kotlinx.coroutines.CancellationException) { if (e is kotlinx.coroutines.TimeoutCancellationException) emptyList() else throw e }
+            catch (_: Exception) { emptyList() }
             remember(items)
             LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
         }
@@ -987,11 +1008,15 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<Void>> {
             searchResults[query] = emptyList()
             scope.launch {
-                val stations = StationRepository.load(applicationContext)
+                Radar.sync()
                 val words = Scanner.words(query)
                 val radioHits = Collections.synchronizedList(mutableListOf<MediaItem>())
-                val named = stations.filter { Scanner.matches(it.name, words) }.take(10)
-                    .map { it.toEntry().toMediaItem() }
+                // Läuft gerade irgendwo (Server-Stand): sofort da
+                LiveIndex.find(query).filter { LiveIndex.isMusic(it.title) }.sortedByDescending { it.since }.take(15)
+                    .forEach { radioHits.add(it.station.toEntry(it.title).toMediaItem()) }
+                val stations = if (Radar.ok) emptyList() else StationRepository.load(applicationContext)
+                val named = (Radar.stations(query)?.take(10)?.map { it.toMediaItem() }
+                    ?: stations.filter { Scanner.matches(it.name, words) }.take(10).map { it.toEntry().toMediaItem() })
                 var free: List<MediaItem> = emptyList()
 
                 fun publish() {
@@ -1005,11 +1030,13 @@ class PlaybackService : MediaLibraryService() {
                     free = FreeMusic.search(query).map { it.toMediaItem() }
                     publish()
                 }
-                val hits = Scanner.scan(stations, query) { hit ->
-                    radioHits.add(hit.station.toEntry(hit.title).toMediaItem())
-                    scope.launch { publish() }
+                if (stations.isNotEmpty()) {
+                    val hits = Scanner.scan(stations, query) { hit ->
+                        radioHits.add(hit.station.toEntry(hit.title).toMediaItem())
+                        scope.launch { publish() }
+                    }
+                    Scanner.lastHits = hits
                 }
-                Scanner.lastHits = hits
             }
             return Futures.immediateFuture(LibraryResult.ofVoid())
         }
@@ -1067,16 +1094,20 @@ class PlaybackService : MediaLibraryService() {
             if (hm != null) {
                 val first = hitMix.start(hm.mediaId.removePrefix("hitmix:").ifBlank { null })
                 updateFavButton()
-                if (first == null) android.widget.Toast.makeText(this@PlaybackService,
-                    "Gerade fängt kein passender Hit an – ich springe hin, sobald einer kommt", android.widget.Toast.LENGTH_LONG).show()
+                // Nie leer zurückgeben (Android Auto zeigt sonst "Auswahl konnte nicht geladen werden"):
+                // bis ein passender Hit anfängt, läuft ein Sender mit Musik, der Mix springt dann selbst um
+                val item = first ?: anyMusicStation()
                 return@future MediaSession.MediaItemsWithStartPosition(
-                    listOfNotNull(first), if (first == null) C.INDEX_UNSET else 0, C.TIME_UNSET
+                    listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, C.TIME_UNSET
                 )
             }
             bedtime = false
             // Etwas anderes gewählt: Hit-Mix beenden
             if (hitMix.isActive) { hitMix.stop(); updateFavButton() }
-            val resolved = mediaItems.mapNotNull { resolve(it) }
+            val resolved = mediaItems.mapNotNull { resolve(it) }.ifEmpty {
+                // Nichts gefunden (z. B. Sprachbefehl): lieber den Hit-Mix als eine Fehlermeldung
+                listOfNotNull(hitMix.start(null) ?: anyMusicStation())
+            }
             // Ein einzelnes freies Lied aus einer Liste: ganze Liste laden, damit "Weiter" geht
             if (resolved.size == 1) {
                 val list = listContext[resolved[0].mediaId]

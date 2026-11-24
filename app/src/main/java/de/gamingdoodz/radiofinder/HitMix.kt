@@ -171,7 +171,9 @@ class HitMix(
         }
 
         poll(force = true)
-        val first = withContext(Dispatchers.Default) { pickNext() }
+        val first = withContext(Dispatchers.Default) {
+            pickNext() ?: pickNext(allowRepeats = true) ?: if (!strict) pickNext(allowRepeats = true, anyMusic = true) else null
+        }
         if (first != null) { switchedAt = System.currentTimeMillis(); confirmed = false }
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
         job = scope.launch { delay(3_000); refreshQueue(); loop() }
