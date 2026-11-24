@@ -62,7 +62,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private var session: MediaLibrarySession? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // Fehler in Hintergrund-Aufgaben (z. B. kein Netz) dürfen die App nie abstürzen lassen
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e -> android.util.Log.w("Hitradar", "Hintergrundfehler", e) })
     private val itemCache = ConcurrentHashMap<String, MediaItem>()
     private val searchResults = ConcurrentHashMap<String, List<MediaItem>>()
     // Für freie Lieder: die ganze Liste merken, damit man in Android Auto weiterspringen kann
@@ -100,11 +102,14 @@ class PlaybackService : MediaLibraryService() {
         if (endlessLoading || p.mediaItemCount - p.currentMediaItemIndex > 3) return
         endlessLoading = true
         scope.launch {
-            Jamendo.highQuality = Settings.highQuality(this@PlaybackService)
-            val more = Jamendo.page(tag, endlessOffset)
-            endlessOffset += 200
-            if (more.isNotEmpty()) p.addMediaItems(more.map { it.toMediaItem() })
-            endlessLoading = false
+            try {
+                Jamendo.highQuality = Settings.highQuality(this@PlaybackService)
+                val more = Jamendo.page(tag, endlessOffset)
+                endlessOffset += 200
+                if (more.isNotEmpty() && endlessTag == tag) p.addMediaItems(more.map { it.toMediaItem() })
+            } finally {
+                endlessLoading = false
+            }
         }
     }
     // Werbung am Senderanfang messen
@@ -640,7 +645,10 @@ class PlaybackService : MediaLibraryService() {
 
     private fun remember(items: List<MediaItem>) {
         items.forEach { itemCache[it.mediaId] = it }
-        val tracks = items.filter { !it.mediaId.startsWith("st:") && !it.mediaId.startsWith("hitmix:") }
+        val tracks = items.filter {
+            it.mediaMetadata.isPlayable == true && !it.mediaId.startsWith("st:") &&
+                !it.mediaId.startsWith("hitmix:") && !it.mediaId.startsWith("news:")
+        }
         if (tracks.size > 1) tracks.forEach { listContext[it.mediaId] = tracks }
         val stations = items.filter { it.mediaId.startsWith("st:") }
         if (stations.size > 1) stations.forEach { listContext[it.mediaId] = stations }
@@ -667,13 +675,15 @@ class PlaybackService : MediaLibraryService() {
         // 1. Läuft das Lied gerade irgendwo? (Server-Stand, sofort)
         Radar.sync()
         val words = Scanner.words(query)
-        LiveIndex.find(query).filter { LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it) }.maxByOrNull { it.since }?.let {
+        withContext(Dispatchers.Default) {
+            LiveIndex.find(query).filter { LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it) }.maxByOrNull { it.since }
+        }?.let {
             return liveTitle(it.station.toEntry(it.title).toMediaItem())
         }
         // 2. Ein Sender mit dem Namen (alle ~50.000 auf dem Server)
         Radar.stations(query)?.firstOrNull()?.let { return it.toMediaItem() }
         val stations = StationRepository.load(applicationContext)
-        stations.firstOrNull { Scanner.matches(it.name, words) }?.let { return it.toEntry().toMediaItem() }
+        withContext(Dispatchers.Default) { stations.firstOrNull { Scanner.matches(it.name, words) } }?.let { return it.toEntry().toMediaItem() }
         // 3. Ohne Server: selbst kurz suchen
         val hit = if (Radar.ok) null else withTimeoutOrNull(8_000) {
             Scanner.scan(stations, query, stopAfterFirst = true).firstOrNull()
@@ -725,7 +735,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** Irgendein Sender, auf dem gerade Musik läuft (Ersatz, damit nie "nicht geladen" kommt). */
-    private suspend fun anyMusicStation(): MediaItem? {
+    private suspend fun anyMusicStation(): MediaItem? = try { anyMusicStationRaw() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+
+    private suspend fun anyMusicStationRaw(): MediaItem? {
         Radar.sync()
         val n = withContext(Dispatchers.Default) { LiveIndex.topMusic().firstOrNull { !Ads.likely(this@PlaybackService, it.station.id, it.station.url) } }
         return n?.let { liveTitle(it.station.toEntry(it.title).toMediaItem()) }
@@ -797,7 +809,8 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     val genre = args.getString("genre")?.takeIf { it.isNotBlank() }
                     scope.launch {
-                        val item = hitMix.start(genre)
+                        val item = try { hitMix.start(genre) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+                            ?: anyMusicStation()
                         val p = session?.player
                         if (item != null && p != null) { p.setMediaItem(item); p.prepare(); p.play() }
                         updateFavButton()
@@ -939,11 +952,13 @@ class PlaybackService : MediaLibraryService() {
                     // Mix aus den meistgespielten Liedern + die davon, die gerade laufen
                     Radar.sync()
                     val charts = Radar.charts().take(50)
-                    val live = charts.mapNotNull { (t, _) ->
-                        val a = t.substringBefore(" - ").substringBefore(" – ").trim()
-                        val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
-                        LiveIndex.findSong(ti, a)
-                    }.distinctBy { it.station.id }
+                    val live = withContext(Dispatchers.Default) {
+                        charts.mapNotNull { (t, _) ->
+                            val a = t.substringBefore(" - ").substringBefore(" – ").trim()
+                            val ti = t.substringAfter(" - ").substringAfter(" – ").trim()
+                            LiveIndex.findSong(ti, a)
+                        }.distinctBy { it.station.id }
+                    }
                     listOf(hitMixItem("radiocharts", "Mix: Meistgespielt", "Hit-Mix")) +
                         withCovers(live.map { it.station.toEntry(it.title) })
                 }
@@ -953,9 +968,11 @@ class PlaybackService : MediaLibraryService() {
                         val stations = StationRepository.load(applicationContext, big = false).take(150)
                         withTimeoutOrNull(20_000) { LiveIndex.refresh(stations) }
                     }
-                    withCovers(charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
-                        .distinctBy { it.station.id }
-                        .map { it.station.toEntry(it.title) })
+                    withCovers(withContext(Dispatchers.Default) {
+                        charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
+                            .distinctBy { it.station.id }
+                            .map { it.station.toEntry(it.title) }
+                    })
                 }
                 HITS_ID -> Scanner.lastHits.map { it.station.toEntry(it.title).toMediaItem() }
                 KIDS_ID -> listOf(hitMixItem("kids", "Kinder-Hit-Mix", "Nur Kinderlieder")) + kidsEntries().map { it.toMediaItem() }
@@ -1011,12 +1028,13 @@ class PlaybackService : MediaLibraryService() {
                 Radar.sync()
                 val words = Scanner.words(query)
                 val radioHits = Collections.synchronizedList(mutableListOf<MediaItem>())
-                // Läuft gerade irgendwo (Server-Stand): sofort da
-                LiveIndex.find(query).filter { LiveIndex.isMusic(it.title) }.sortedByDescending { it.since }.take(15)
-                    .forEach { radioHits.add(it.station.toEntry(it.title).toMediaItem()) }
-                val stations = if (Radar.ok) emptyList() else StationRepository.load(applicationContext)
+                // Läuft gerade irgendwo (Server-Stand): sofort da (Suche über alle Titel im Hintergrund)
+                withContext(Dispatchers.Default) {
+                    LiveIndex.find(query).filter { LiveIndex.isMusic(it.title) }.sortedByDescending { it.since }.take(15)
+                }.forEach { radioHits.add(it.station.toEntry(it.title).toMediaItem()) }
+                val stations = if (Radar.ok) emptyList() else try { StationRepository.load(applicationContext) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
                 val named = (Radar.stations(query)?.take(10)?.map { it.toMediaItem() }
-                    ?: stations.filter { Scanner.matches(it.name, words) }.take(10).map { it.toEntry().toMediaItem() })
+                    ?: withContext(Dispatchers.Default) { stations.filter { Scanner.matches(it.name, words) }.take(10) }.map { it.toEntry().toMediaItem() })
                 var free: List<MediaItem> = emptyList()
 
                 fun publish() {
@@ -1027,7 +1045,7 @@ class PlaybackService : MediaLibraryService() {
                 }
                 publish()
                 launch {
-                    free = FreeMusic.search(query).map { it.toMediaItem() }
+                    free = try { FreeMusic.search(query).map { it.toMediaItem() } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
                     publish()
                 }
                 if (stations.isNotEmpty()) {
@@ -1058,7 +1076,15 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
-            mediaItems.mapNotNull { resolve(it) }.toMutableList()
+            // Nie leer und nie mit Fehler antworten (Android Auto: "Auswahl konnte nicht geladen werden")
+            val out = try {
+                mediaItems.mapNotNull { m ->
+                    if (m.mediaId.startsWith("hitmix:")) {
+                        hitMix.start(m.mediaId.removePrefix("hitmix:").ifBlank { null }).also { updateFavButton() }
+                    } else safeResolve(m)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
+            out.ifEmpty { listOfNotNull(anyMusicStation()) }.toMutableList()
         }
 
         override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
@@ -1077,7 +1103,7 @@ class PlaybackService : MediaLibraryService() {
             Futures.immediateFailedFuture(UnsupportedOperationException("vom Nutzer gestoppt")) else scope.future {
             val last = Recent.all(applicationContext).firstOrNull()
             val item = last?.toMediaItem()?.let { liveTitle(it) }
-                ?: hitMix.start(null)
+                ?: try { hitMix.start(null) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
             val pos = last?.let { Positions.get(this@PlaybackService, it.id) }?.takeIf { it > 0 } ?: C.TIME_UNSET
             MediaSession.MediaItemsWithStartPosition(listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, pos)
         }
@@ -1089,6 +1115,20 @@ class PlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            try {
+                setItems(mediaItems, startIndex, startPositionMs)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {
+                // Irgendetwas schiefgegangen (Netz o. Ä.): lieber Musik als eine Fehlermeldung
+                val item = anyMusicStation()
+                MediaSession.MediaItemsWithStartPosition(listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, C.TIME_UNSET)
+            }
+        }
+
+        private suspend fun setItems(
+            mediaItems: List<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long
+        ): MediaSession.MediaItemsWithStartPosition {
             // Hit-Mix gewählt?
             val hm = mediaItems.firstOrNull { it.mediaId.startsWith("hitmix:") }
             if (hm != null) {
@@ -1097,14 +1137,14 @@ class PlaybackService : MediaLibraryService() {
                 // Nie leer zurückgeben (Android Auto zeigt sonst "Auswahl konnte nicht geladen werden"):
                 // bis ein passender Hit anfängt, läuft ein Sender mit Musik, der Mix springt dann selbst um
                 val item = first ?: anyMusicStation()
-                return@future MediaSession.MediaItemsWithStartPosition(
+                return MediaSession.MediaItemsWithStartPosition(
                     listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, C.TIME_UNSET
                 )
             }
             bedtime = false
             // Etwas anderes gewählt: Hit-Mix beenden
             if (hitMix.isActive) { hitMix.stop(); updateFavButton() }
-            val resolved = mediaItems.mapNotNull { resolve(it) }.ifEmpty {
+            val resolved = mediaItems.mapNotNull { safeResolve(it) }.ifEmpty {
                 // Nichts gefunden (z. B. Sprachbefehl): lieber den Hit-Mix als eine Fehlermeldung
                 listOfNotNull(hitMix.start(null) ?: anyMusicStation())
             }
@@ -1114,7 +1154,7 @@ class PlaybackService : MediaLibraryService() {
                 if (list != null) {
                     val idx = list.indexOfFirst { it.mediaId == resolved[0].mediaId }.coerceAtLeast(0)
                     val saved = Positions.get(this@PlaybackService, resolved[0].mediaId).takeIf { it > 0 } ?: C.TIME_UNSET
-                    return@future MediaSession.MediaItemsWithStartPosition(list.map { liveTitle(it) ?: it }, idx, saved)
+                    return MediaSession.MediaItemsWithStartPosition(list.map { liveTitle(it) ?: it }, idx, saved)
                 }
             }
             if (resolved.size == 1 && resolved[0].mediaId.startsWith("st:")) {
@@ -1130,7 +1170,7 @@ class PlaybackService : MediaLibraryService() {
                 if (others.isNotEmpty()) {
                     val before = others.drop(others.size / 2).reversed()
                     val after = others.take(others.size / 2)
-                    return@future MediaSession.MediaItemsWithStartPosition(before + chosen + after, before.size, C.TIME_UNSET)
+                    return MediaSession.MediaItemsWithStartPosition(before + chosen + after, before.size, C.TIME_UNSET)
                 }
             }
             val index = if (resolved.size == mediaItems.size) startIndex else 0
@@ -1139,7 +1179,11 @@ class PlaybackService : MediaLibraryService() {
             val pos = if (startPositionMs == C.TIME_UNSET || startPositionMs == 0L) {
                 startItem?.let { Positions.get(this@PlaybackService, it.mediaId) }?.takeIf { it > 0 } ?: startPositionMs
             } else startPositionMs
-            MediaSession.MediaItemsWithStartPosition(resolved, index, pos)
+            return MediaSession.MediaItemsWithStartPosition(resolved, index, pos)
         }
     }
+
+    /** Ein Eintrag, der sich gerade nicht auflösen lässt (Netzfehler), wird übersprungen statt alles abzubrechen. */
+    private suspend fun safeResolve(item: MediaItem): MediaItem? =
+        try { resolve(item) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
 }

@@ -172,9 +172,11 @@ class HitMix(
 
         poll(force = true)
         val first = withContext(Dispatchers.Default) {
-            pickNext() ?: pickNext(allowRepeats = true) ?: if (!strict) pickNext(allowRepeats = true, anyMusic = true) else null
-        }
-        if (first != null) { switchedAt = System.currentTimeMillis(); confirmed = false }
+            choose() ?: choose(allowRepeats = true) ?: if (!strict) choose(allowRepeats = true, anyMusic = true) else null
+        }?.let { commit(it) }
+        switchedAt = System.currentTimeMillis(); confirmed = false
+        // Nichts gefunden: solange läuft ein Ersatz-Sender, der Mix springt um, sobald ein passender Hit anfängt
+        waitingForNext = first == null
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
         job = scope.launch { delay(3_000); refreshQueue(); loop() }
         return first?.let { prepareItem(it) }
@@ -223,8 +225,12 @@ class HitMix(
             player()?.let { p -> if (p.mediaItemCount > p.currentMediaItemIndex + 1) p.removeMediaItems(p.currentMediaItemIndex + 1, p.mediaItemCount) }
         } catch (_: Exception) {}
         queued = emptyMap()
+        candidate = null
         currentStationId = null
         currentSongKey = null
+        switchedAt = 0L
+        waitingForNext = false
+        autoSwitches.clear()
         prefs(context).edit().remove("name").remove("now").apply()
     }
 
@@ -234,14 +240,14 @@ class HitMix(
     suspend fun next(): Boolean {
         // Sofort: vorbereiteten Kandidaten nehmen bzw. aus dem vorhandenen Stand wählen (kein Warten aufs Netz)
         val item = withContext(Dispatchers.Default) {
-            takeCandidate() ?: pickNext() ?: pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true)
-        } ?: run {
+            takeCandidate() ?: choose() ?: choose(allowRepeats = true) ?: choose(allowRepeats = true, anyMusic = true)
+        }?.let { commit(it) } ?: run {
             // Gar nichts im Speicher: dann doch kurz nachsehen
             if (!Radar.sync(force = true)) {
                 val priority = (stations.filter { it.id in genreIds } + stations).distinctBy { it.id }.take(40)
                 withTimeoutOrNull(4_000) { LiveIndex.refresh(priority, maxAgeMs = 10_000L) }
             }
-            withContext(Dispatchers.Default) { pickNext(allowRepeats = true) ?: pickNext(allowRepeats = true, anyMusic = true) }
+            withContext(Dispatchers.Default) { choose(allowRepeats = true) ?: choose(allowRepeats = true, anyMusic = true) }?.let { commit(it) }
         }
         // Im Hintergrund frische Daten für den nächsten Sprung
         scope.launch { Radar.sync(force = true) }
@@ -264,6 +270,8 @@ class HitMix(
     /** Titel aus dem Stream des laufenden Senders (kommt genau dann, wenn er sich ändert). */
     suspend fun onStreamTitle(stationId: String, title: String, music: Boolean) {
         if (stationId != currentStationId || job?.isActive != true) return
+        // Pausiert/gestoppt: nie von selbst umschalten (Stopp bleibt Stopp)
+        if (player()?.playWhenReady != true) return
         val now = System.currentTimeMillis()
         lastLocal = now
         val norm = Scanner.normalize(title)
@@ -284,8 +292,11 @@ class HitMix(
             val fresh = !confirmed && sinceSwitch < 25_000   // erster Titel nach dem Umschalten
             if (isPlaylist && !primary.any { it.matches(norm) }) {
                 // Kein Playlist-Lied: fängt woanders gerade eins aus der Playlist an? Dann dorthin.
-                val alt = withContext(Dispatchers.Default) { ranked(limit = 1, onlyPrimary = true).firstOrNull() }
-                if (alt != null) { waitingForNext = false; switchTo(commit(alt)); return }
+                val alt = if (mayAutoSwitch()) withContext(Dispatchers.Default) { ranked(limit = 1, onlyPrimary = true).firstOrNull() } else null
+                if (alt != null && job?.isActive == true && player()?.playWhenReady == true) {
+                    autoSwitches.addLast(System.currentTimeMillis())
+                    waitingForNext = false; switchTo(commit(alt)); return
+                }
             }
             if (fitsTitle(norm, stationId) && norm !in played) {
                 // Neues passendes Lied auf demselben Sender: einfach weiterhören
@@ -319,9 +330,11 @@ class HitMix(
         autoSwitches.addLast(System.currentTimeMillis())
         // Lieber andere Musik als Moderation: notfalls auch ein schon gespieltes oder irgendein Lied (nicht bei Themen-Mixen)
         val next = withContext(Dispatchers.Default) {
-            takeCandidate() ?: pickNext() ?: pickNext(allowRepeats = true) ?: if (!strict) pickNext(allowRepeats = true, anyMusic = true) else null
+            takeCandidate() ?: choose() ?: choose(allowRepeats = true) ?: if (!strict) choose(allowRepeats = true, anyMusic = true) else null
         }
-        if (next != null) { waitingForNext = false; switchTo(next) }
+        // Während der Suche gestoppt oder pausiert: nicht wieder anfangen
+        if (job?.isActive != true || player()?.playWhenReady != true) return
+        if (next != null) { waitingForNext = false; switchTo(commit(next)) }
         else waitingForNext = true
     }
 
@@ -343,8 +356,10 @@ class HitMix(
             if (tick % 7 != 0) continue   // ca. alle 20 Sekunden: Server-Stand + nächsten Kandidaten vorbereiten
             poll(force = false)
             // Liedlängen der frisch angefangenen Lieder holen (damit fast vorbei nicht gewählt wird)
-            LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) && System.currentTimeMillis() - it.since < 150_000 && !Covers.known(it.title) }
-                .sortedByDescending { it.since }.take(12).forEach { n -> scope.launch { Covers.load(n.title) } }
+            withContext(Dispatchers.Default) {
+                LiveIndex.fresh().filter { LiveIndex.isMusic(it.title) && System.currentTimeMillis() - it.since < 150_000 && !Covers.known(it.title) }
+                    .sortedByDescending { it.since }.take(12)
+            }.forEach { n -> scope.launch { Covers.load(n.title) } }
             candidate = withContext(Dispatchers.Default) { choose() }?.let { System.currentTimeMillis() to it }
             refreshQueue()
             // Ohne Titel im Stream (z. B. beim Casten oder Sender ohne Titel): Server-Stand entscheidet
@@ -363,14 +378,14 @@ class HitMix(
     }
 
     /** Vorbereiteten Kandidaten nehmen, wenn er noch stimmt (läuft noch dasselbe Lied, nicht zu alt). */
-    private fun takeCandidate(): MediaItem? {
+    private fun takeCandidate(): Choice? {
         val (at, c) = candidate ?: return null
         candidate = null
         if (System.currentTimeMillis() - at > 60_000L) return null
         val cur = LiveIndex.get(c.now.station.id) ?: return null
         if (cur.normalized != c.now.normalized || c.now.station.id == currentStationId) return null
         if (c.key in played) return null
-        return commit(c)
+        return c
     }
 
     /** Passt dieses Lied zum Mix? (Liste, Genre-Sender, Thema oder bekannter Hit bei offenen Mixen) */
@@ -407,9 +422,6 @@ class HitMix(
      * 3. ein Song von einem Künstler aus der Liste, 4. (nur bei "Weiter") irgendeine Musik.
      */
     class Choice(val now: LiveIndex.Now, val key: String)
-
-    private fun pickNext(allowRepeats: Boolean = false, anyMusic: Boolean = false): MediaItem? =
-        choose(allowRepeats, anyMusic)?.let { commit(it) }
 
     private fun commit(c: Choice): MediaItem {
         val n = c.now
@@ -489,6 +501,8 @@ class HitMix(
 
     private suspend fun refreshQueueNow() {
         val next = withContext(Dispatchers.Default) { ranked(limit = 5) }
+        // Inzwischen gestoppt: nichts mehr einreihen
+        if (job?.isActive != true) return
         val p = player() ?: return
         if (p.mediaItemCount == 0) return
         val idx = p.currentMediaItemIndex
