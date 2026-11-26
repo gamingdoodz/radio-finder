@@ -9,6 +9,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,9 +31,14 @@ jobs:
           git diff --name-only HEAD~1 HEAD | grep -q '^server/ops/run.sh$' && OPS=1
           # Alles, was vom Server kommt, läuft durch den Filter: Passwörter, Tokens und Schlüssel werden zu ***
           set -o pipefail
-          (ssh -i ~/.ssh/k -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@130.61.78.232 "OPS=$OPS bash -s" <<'REMOTE'
+          (ssh -i ~/.ssh/k -o StrictHostKeyChecking=no -o ConnectTimeout=20 -o ServerAliveInterval=60 ubuntu@130.61.78.232 "OPS=$OPS bash -s" <<'REMOTE'
           set -e
-          sudo /usr/local/bin/radar-update
+          # Neustart nur nach Serverabsprache: "update" melden, auf updateErlaubt warten, danach "leicht"
+          R=/root/radio-finder
+          OLD=$(sudo git -C $R rev-parse HEAD)
+          sudo git -C $R pull -q || true
+          sudo install -m 755 $R/server/radar-update.sh /usr/local/bin/radar-update
+          sudo /usr/local/bin/radar-update "$OLD"
           if [ "$OPS" = 1 ]; then
             echo "===== Befehl ausführen ====="
             sudo bash /root/radio-finder/server/ops/run.sh 2>&1 | tail -200 || true

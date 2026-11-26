@@ -33,6 +33,9 @@ CONCURRENCY = int(os.environ.get("CONCURRENCY", "250"))
 #      (Last je Kern ab 1,5 oder freier Speicher unter 10 % = pause, ab 1,0 oder unter 20 % = sparsam, sonst frei)
 # frei = normal | sparsam = nichts Schweres neu anfangen, ein Drittel der Abfragen, keine KI, keine Cover
 # pause = radar und KI fangen nichts Neues an; die App bekommt weiter den letzten Stand
+# Meldung "jetzt": leicht (normal) | schwer (Senderliste laden, bis max. 6 h) | ruhe (bei pause, kaum Bedarf)
+#   | update (nur radar-update/absprache.py: vor Neustart, bis max. 1 h, erst bei lage.json updateErlaubt true,
+#     nie wenn updateDran "spiel"; danach sofort leicht). Ein laufendes "update" wird hier nie überschrieben.
 # Die systemd-Grenzen des Spiels (radar.service.d/60-sparsam.conf) werden hier nie verändert.
 LAGE_FILE = os.environ.get("ABSPRACHE_LAGE", "/run/serverabsprache/lage.json")
 DIENST_FILE = os.environ.get("ABSPRACHE_DIENST", "/var/lib/serverabsprache/dienste/hitradar.json")
@@ -89,9 +92,21 @@ def _ram_mb() -> int:
 def melden(jetzt: str = "leicht", bis_s: int = 0):
     """Anmeldung/Meldung in /var/lib/serverabsprache/dienste/hitradar.json (beim Start, täglich, vor/nach schwerer Arbeit)."""
     now_ms = int(time.time() * 1000)
+    # Ein laufendes Update (eingetragen von radar-update / absprache.py) nie überschreiben
+    if jetzt != "update":
+        try:
+            with open(DIENST_FILE, encoding="utf-8") as h:
+                alt = json.load(h)
+            if alt.get("jetzt") == "update" and int(alt.get("bis") or 0) > now_ms:
+                MELDUNG.update(jetzt="update", bis=int(alt["bis"]), am=time.time())
+                return
+        except Exception:
+            pass
     bis = 0
     if jetzt == "schwer":
         bis = now_ms + min(max(bis_s, 60), 6 * 3600) * 1000     # höchstens 6 Stunden
+    elif jetzt == "update":
+        bis = now_ms + min(max(bis_s, 60), 3600) * 1000         # höchstens 1 Stunde
     info = {"prio": "hitradar", "was": "Radio und KI", "jetzt": jetzt, "bis": bis,
             "cpu": 50, "ramMb": _ram_mb(), "t": now_ms}
     try:
@@ -154,9 +169,21 @@ async def follow_game():
             else:
                 ohne_datei_seit = None
             _setze(modus, quelle)
-            # Einmal am Tag neu melden; abgelaufenes "schwer" zurück auf "leicht"
-            if time.time() - MELDUNG["am"] > 24 * 3600 or (MELDUNG["jetzt"] == "schwer" and MELDUNG["bis"] < time.time() * 1000):
-                melden("leicht")
+            # Bei "pause" braucht Hitradar kaum etwas: "ruhe", dann bekommen die anderen die Leistung
+            soll = "ruhe" if modus == "pause" else "leicht"
+            if MELDUNG["jetzt"] == "update":      # Update vorbei? Dann gilt wieder, was in der Datei steht
+                try:
+                    with open(DIENST_FILE, encoding="utf-8") as h:
+                        alt = json.load(h)
+                    if alt.get("jetzt") != "update":
+                        MELDUNG.update(jetzt=alt.get("jetzt") or "leicht", bis=int(alt.get("bis") or 0))
+                except Exception:
+                    pass
+            jetzt_ms = time.time() * 1000
+            abgelaufen = MELDUNG["jetzt"] in ("schwer", "update") and MELDUNG["bis"] < jetzt_ms
+            if (time.time() - MELDUNG["am"] > 24 * 3600 or abgelaufen
+                    or (MELDUNG["jetzt"] in ("leicht", "ruhe") and MELDUNG["jetzt"] != soll)):
+                melden(soll)
             await asyncio.sleep(30)
 FRESH_SECONDS = 6 * 60
 UA = "RadarServer/1.0"

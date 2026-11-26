@@ -1,7 +1,8 @@
 #!/bin/bash
-# Serverabsprache (neue Vorgabe): Meldung und gelesene Stufe prüfen
-sleep 100
-echo "== Meldung =="; ls -la /var/lib/serverabsprache /var/lib/serverabsprache/dienste 2>&1; head -c 600 /var/lib/serverabsprache/dienste/hitradar.json 2>&1; echo
-echo "== Stufe vom Spiel =="; curl -s -m 5 http://127.0.0.1:8100/api/last | python3 -c 'import sys,json; d=json.load(sys.stdin); print("budget.hitradar:", (d.get("budget") or {}).get("hitradar"))' 2>&1
+# Update-Regel (26.11.): Meldung, Update-Freigabe aus lage.json und Stufe prüfen
+echo "== Meldung =="; head -c 600 /var/lib/serverabsprache/dienste/hitradar.json 2>&1; echo
+echo "== Update-Freigabe =="; python3 /root/radio-finder/server/absprache.py darf 2>&1
+python3 -c 'import json; d=json.load(open("/run/serverabsprache/lage.json")); print("Felder:", sorted(d)); print("updateErlaubt:", d.get("updateErlaubt"), "updateDran:", d.get("updateDran"))' 2>&1
+ls -la /var/lib/hitradar-neustart-offen 2>&1
 echo "== Hitradar =="; curl -s http://localhost:8081/health; echo
-journalctl -u radar --since "-3 min" --no-pager | grep -iE "Serverabsprache|Senderliste|Traceback|Error" | tail -8
+journalctl -u radar --since "-30 min" --no-pager | grep -iE "Serverabsprache|Traceback|Error" | tail -8

@@ -70,6 +70,12 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   - Anmelden beim Start und einmal am Tag in `/var/lib/serverabsprache/dienste/hitradar.json`:
     `{"prio":"hitradar","was":"Radio und KI","jetzt":"leicht","bis":0,"cpu":50,"ramMb":1200,"t":<ms jetzt>}`.
     Vor schwerer Arbeit `"jetzt":"schwer"` mit `"bis"` (höchstens 6 h), danach zurück auf `"leicht"`. `ramMb` ehrlich angeben (wird gemessen).
+  - **Updates/Neustarts** (Regel vom 26.11.): vorher `"jetzt":"update"` mit `"bis"` (höchstens 1 h), erst starten, wenn in `lage.json`
+    `updateErlaubt` true ist; steht bei `updateDran` `"spiel"`, warten (Spiel hat immer Vorrang, immer nur ein Update gleichzeitig).
+    Danach sofort `"leicht"`. Umgesetzt in `server/radar-update.sh` (= `/usr/local/bin/radar-update`, stündlich per cron und vom Workflow
+    „Server aktualisieren“) mit `server/absprache.py`. Wartet höchstens 25 Minuten; sonst bleibt der Neustart vorgemerkt
+    (`/var/lib/hitradar-neustart-offen`) und der nächste Lauf versucht es wieder. Nie `systemctl restart radar` von Hand ohne diese Absprache.
+  - Bei `pause` meldet Hitradar `"ruhe"` (kaum Bedarf, die anderen bekommen die Leistung), sonst `"leicht"`; Senderliste laden = `"schwer"`.
   - Bei Speichermangel darf der Hausmeister des Spiels Hitradar zuerst anhalten und startet es danach wieder.
   - Beim Umzug: auf dem alten Server `hitradar.json` löschen und auf dem neuen neu anmelden.
   - `/health` zeigt `modus`, `modus_quelle`, `meldung`.
@@ -79,6 +85,8 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
 - Android Auto: Hörspiel-Ordner (`show:`) sind nach einem Neustart der App leer, bis man die Kategorie neu öffnet.
 - Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
+- Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
+  Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
@@ -90,3 +98,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: Android Auto: Zwischenspeicher (Suche, Einträge, Listen) mit Obergrenze, alte Suche wird abgebrochen, höchstens 40 Radiotreffer. Nachrichten fallen nie mehr auf den Hit-Mix zurück (sonst Deutschlandfunk live). Notfall-Sender fest eingebaut, damit Auto nie „Auswahl konnte nicht geladen werden“ zeigt (auch ohne Server und ohne Senderliste). Playlists/Hit-Mix mit Fehler: trotzdem Musik.
 - 26.11.: App allgemein: Wächter startet nach Absturz/Neustart wieder (statt hängender Anzeige), kein Absturz beim Schließen mit offenem Fenster, alter Player nach onStop wird nicht mehr benutzt, Wecker wird nach App-Update und Zeit-/Zeitzonenwechsel neu geplant, LiveIndex wirft alte Einträge weg (Speicher).
 - 26.11.: Hit-Mix: gestoppter oder ersetzter Mix schaltet nie mehr von selbst um (Zähler je Start/Stopp), kein doppelter Mix bei schnellem Doppeltippen, Sprungbremse zählt nur echte Sprünge, keine zwei Sprünge gleichzeitig, Playlist-Lieder nur einmal laden, Stopp während des Starts spielt nichts ab.
+- 26.11.: Server-Updates nur nach Absprache: "update" melden, auf updateErlaubt warten (nicht bei updateDran "spiel"), danach "leicht"; bei pause "ruhe" (radar-update.sh, absprache.py, Workflow wartet mit).
