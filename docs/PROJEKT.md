@@ -3,6 +3,14 @@
 Stand: 26.11.2026. Diese Datei ist die gemeinsame Grundlage für alle Chats im Projekt „Hitradar“.
 Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
+## So arbeitet jeder Chat im Projekt
+
+- Selbstständig arbeiten: Repo holen (`add_repo` owner gamingdoodz, repo radio-finder, access push), klonen, diese Datei lesen, loslegen.
+  Nicht nachfragen, wenn es eine vernünftige Lösung gibt; nur bei Kosten, Löschen von Daten oder echten Geschmacksfragen fragen.
+- Jeder Chat bleibt bei seinem Thema (z. B. Android Auto, Hit-Mix, Server, Play-Store). Vor dem Pushen `git pull --rebase`, damit sich parallele Chats nicht überschreiben.
+- Nach jeder Änderung: bauen lassen, bei Fehlern selbst beheben, bei Grün höchstens einmal am Tag hochladen, kurz berichten.
+- Wichtiges unten unter „Verlauf“ eintragen und „Offen“ aktuell halten.
+
 ## Regeln (immer)
 
 - Antworten auf Deutsch, kurz und knackig. Kevin ist Elektriker, hat keinen PC, arbeitet nur mit dem Handy (Galaxy S25 Ultra).
@@ -50,19 +58,28 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - Auf demselben Server läuft Kevins Spiel **Valdrakor** (`/opt/valdrakor`, Docker, Port 8100). **Das Spiel entscheidet, wer wie viel Leistung bekommt.**
 - Das Spiel drosselt Hitradar per systemd (`/etc/systemd/system/radar.service.d/60-sparsam.conf`: 20 % CPU, 6.000 Sender, 50 gleichzeitig)
   und per Lastwächter (`valdrakor-last`). Diese Dateien fasst Hitradar nie an.
-- Serverabsprache: Valdrakor schreibt alle 30 s `/run/serverabsprache/lage.json` (`frei` / `sparsam` / `pause` je Dienst).
-  `radar.py` liest das (Rückfall: `/api/last`, sonst `frei`) und hat sich in `/var/lib/serverabsprache/hitradar.json` angemeldet.
-  `/health` zeigt `modus` und `modus_quelle`.
+- **Serverabsprache** (Vorgabe von Valdrakor, Details: `docs/SERVER-ABSPRACHE.md` im Valdrakor-Repo, umgesetzt in `radar.py`):
+  - Vorrang: Spiel vor Broker vor Hitradar vor Neuem.
+  - Stufe `budget.hitradar.level` (`frei` / `sparsam` / `pause`) aus `/api/last`; ohne Netz aus `/run/serverabsprache/lage.json`, gleiches Feld.
+    Datei fehlt oder älter als 2 Minuten: wie `sparsam`. Nach 15 Minuten ohne Datei selbst messen: Last je Kern ab 1,5 oder freier Speicher
+    unter 10 % = `pause`, ab 1,0 oder unter 20 % = `sparsam`, sonst `frei`.
+  - `frei` = normal; `sparsam` = nichts Schweres neu anfangen; `pause` = radar und llm.service fangen nichts Neues an.
+  - Anmelden beim Start und einmal am Tag in `/var/lib/serverabsprache/dienste/hitradar.json`:
+    `{"prio":"hitradar","was":"Radio und KI","jetzt":"leicht","bis":0,"cpu":50,"ramMb":1200,"t":<ms jetzt>}`.
+    Vor schwerer Arbeit `"jetzt":"schwer"` mit `"bis"` (höchstens 6 h), danach zurück auf `"leicht"`. `ramMb` ehrlich angeben (wird gemessen).
+  - Bei Speichermangel darf der Hausmeister des Spiels Hitradar zuerst anhalten und startet es danach wieder.
+  - Beim Umzug: auf dem alten Server `hitradar.json` löschen und auf dem neuen neu anmelden.
+  - `/health` zeigt `modus`, `modus_quelle`, `meldung`.
 
 ## Offen
 
 - Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
 - Suchergebnisse in Android Auto werden nie geleert (wachsen langsam).
-- `lage.json` gab es am 26.11. noch nicht: prüfen, ob Hitradar den Modus richtig liest, sobald Valdrakor sie schreibt.
+- Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
 - Noch keine 12 Tester für den geschlossenen Test.
 
 ## Verlauf
 
 - 24.11.: Android Auto abgesichert, Hit-Mix wartet richtig, Stopp bleibt Stopp (1.0.126).
 - 24.11.: Weiterspielen nach dem letzten Lied, Tippen beim Start, Wächter, Wecker, Suche ohne Ruckeln (1.0.128).
-- 26.11.: Server richtet sich nach Valdrakor, Senderzahl nach Vorgabe, Serverabsprache, Prüfregel Geheimnisse.
+- 26.11.: Server richtet sich nach Valdrakor, Senderzahl nach Vorgabe, Serverabsprache (budget.hitradar.level, Meldung in dienste/hitradar.json), Prüfregel Geheimnisse, Neuladen der Senderliste nicht mehr alle 30 Minuten.

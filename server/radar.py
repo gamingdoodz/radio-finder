@@ -25,93 +25,98 @@ PORT = int(os.environ.get("PORT", "8080"))
 MAX_STATIONS = int(os.environ.get("MAX_STATIONS", "12000"))
 CONCURRENCY = int(os.environ.get("CONCURRENCY", "250"))
 
-# ---------- Serverabsprache (das Spiel Valdrakor entscheidet, wer wie viel Leistung bekommt) ----------
-# Valdrakor schreibt alle 30 s /run/serverabsprache/lage.json mit "frei", "sparsam" oder "pause" je Dienst.
-#   frei    -> normal (innerhalb der systemd-Grenzen, die das Spiel setzt – die werden hier nie verändert)
-#   sparsam -> nur ein Drittel der Abfragen, seltener nachschauen, keine KI, keine Cover-Suche
-#   pause   -> keine Abfragen, keine KI, keine Cover; die App bekommt weiter den letzten Stand
-# Ist die Datei älter als 2 Minuten oder fehlt sie: Rückfall auf /api/last des Spiels, sonst "frei".
+# ---------- Serverabsprache mit Valdrakor (Details: docs/SERVER-ABSPRACHE.md im Valdrakor-Repo) ----------
+# Vorrang auf dem Server: Spiel vor Broker vor Hitradar vor Neuem. Das Spiel entscheidet.
+# Stufe für Hitradar: budget.hitradar.level = frei | sparsam | pause
+#   1. /api/last des Spiels  2. ohne Netz /run/serverabsprache/lage.json (gleiches Feld)
+#   3. Datei fehlt oder älter als 2 Minuten: sparsam; nach 15 Minuten ohne Datei selbst messen
+#      (Last je Kern ab 1,5 oder freier Speicher unter 10 % = pause, ab 1,0 oder unter 20 % = sparsam, sonst frei)
+# frei = normal | sparsam = nichts Schweres neu anfangen, ein Drittel der Abfragen, keine KI, keine Cover
+# pause = radar und KI fangen nichts Neues an; die App bekommt weiter den letzten Stand
+# Die systemd-Grenzen des Spiels (radar.service.d/60-sparsam.conf) werden hier nie verändert.
 LAGE_FILE = os.environ.get("ABSPRACHE_LAGE", "/run/serverabsprache/lage.json")
-ANMELDE_DIR = os.environ.get("ABSPRACHE_DIR", "/var/lib/serverabsprache")
+DIENST_FILE = os.environ.get("ABSPRACHE_DIENST", "/var/lib/serverabsprache/dienste/hitradar.json")
 GAME_LAST_URL = os.environ.get("GAME_LAST_URL", "http://127.0.0.1:8100/api/last")
-DIENST = "hitradar"
 SPAR = {"low": False, "pause": False, "modus": "frei", "quelle": "start", "stufe": 0, "since": 0}
+MELDUNG = {"jetzt": "leicht", "bis": 0, "am": 0}
 
 
-def _modus_aus_lage(d):
-    """Sucht den Eintrag für Hitradar, egal ob flach ({"hitradar": "sparsam"}) oder verschachtelt."""
-    namen = (DIENST, "radar", "radar.service", "Hitradar")
-    def wert(v):
-        if isinstance(v, str):
-            return v.strip().lower()
-        if isinstance(v, dict):
-            for k in ("modus", "mode", "stufe", "status", "lage"):
-                if isinstance(v.get(k), str):
-                    return v[k].strip().lower()
-        return None
-    if not isinstance(d, dict):
-        return None
-    for n in namen:
-        if n in d and wert(d[n]):
-            return wert(d[n])
-    for k in ("dienste", "services", "lage", "modus"):
-        sub = d.get(k)
-        if isinstance(sub, dict):
-            m = _modus_aus_lage(sub)
-            if m:
-                return m
-        if isinstance(sub, list):
-            for e in sub:
-                if isinstance(e, dict) and str(e.get("name", e.get("dienst", ""))).lower() in namen:
-                    m = wert(e)
-                    if m:
-                        return m
-    return None
-
-
-def anmelden():
-    """Einmal beim Serverabsprache-Verzeichnis anmelden: wer Hitradar ist und was die Stufen bedeuten."""
-    info = {
-        "dienst": DIENST,
-        "name": "Hitradar (Radio-Suche für die Hitradar-App)",
-        "projekt": "github.com/gamingdoodz/radio-finder",
-        "units": ["radar.service", "llm.service"],
-        "ports": {"radar": 8081, "llm": 8090, "caddy": [80, 443, 8080]},
-        "health": "http://127.0.0.1:8081/health",
-        "liest": LAGE_FILE,
-        "stufen": {
-            "frei": "normal, innerhalb der systemd-Grenzen des Spiels",
-            "sparsam": "ein Drittel der Abfragen, seltener nachschauen, keine KI, keine Cover-Suche",
-            "pause": "keine Abfragen, keine KI, keine Cover; App bekommt weiter den letzten Stand",
-        },
-        "rueckfall": "lage.json fehlt oder älter als 120 s -> /api/last, sonst frei",
-        "aendert_nie": ["Drossel-Dateien des Spiels unter /etc/systemd/system/radar.service.d/"],
-        "angemeldet": int(time.time()),
-    }
+def _level(d):
+    """budget.hitradar.level aus der Antwort des Spiels (oder None)."""
     try:
-        os.makedirs(ANMELDE_DIR, exist_ok=True)
-        f = os.path.join(ANMELDE_DIR, DIENST + ".json")
+        v = d["budget"]["hitradar"]["level"]
+        v = str(v).strip().lower()
+        return v if v in ("frei", "sparsam", "pause") else None
+    except Exception:
+        return None
+
+
+def _selbst_messen() -> str:
+    try:
+        last = os.getloadavg()[0] / (os.cpu_count() or 1)
+        mem = {}
+        for line in open("/proc/meminfo"):
+            k, v = line.split(":", 1)
+            mem[k] = int(v.split()[0])
+        frei = mem.get("MemAvailable", 0) / max(1, mem.get("MemTotal", 1))
+    except Exception:
+        return "sparsam"
+    if last >= 1.5 or frei < 0.10:
+        return "pause"
+    if last >= 1.0 or frei < 0.20:
+        return "sparsam"
+    return "frei"
+
+
+def _ram_mb() -> int:
+    """Ehrlich: was radar.py und die eigene KI (llm.service) gerade wirklich belegen, aufgerundet auf 100 MB."""
+    total = 0
+    for unit in ("radar.service", "llm.service"):
         try:
-            with open(f, encoding="utf-8") as h:
-                alt = json.load(h)
-            alt.pop("angemeldet", None)
-            same = alt == {k: v for k, v in info.items() if k != "angemeldet"}
+            total += int(open(f"/sys/fs/cgroup/system.slice/{unit}/memory.current").read().strip())
         except Exception:
-            same = False
-        if not same:
-            with open(f + ".tmp", "w", encoding="utf-8") as h:
-                json.dump(info, h, ensure_ascii=False, indent=1)
-            os.chmod(f + ".tmp", 0o644)
-            os.replace(f + ".tmp", f)
-            print("Serverabsprache: angemeldet", flush=True)
+            pass
+    if total <= 0:
+        try:
+            import resource
+            total = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+        except Exception:
+            total = 1200 * 1024 * 1024
+    mb = total / (1024 * 1024)
+    return int(-(-mb // 100) * 100)
+
+
+def melden(jetzt: str = "leicht", bis_s: int = 0):
+    """Anmeldung/Meldung in /var/lib/serverabsprache/dienste/hitradar.json (beim Start, täglich, vor/nach schwerer Arbeit)."""
+    now_ms = int(time.time() * 1000)
+    bis = 0
+    if jetzt == "schwer":
+        bis = now_ms + min(max(bis_s, 60), 6 * 3600) * 1000     # höchstens 6 Stunden
+    info = {"prio": "hitradar", "was": "Radio und KI", "jetzt": jetzt, "bis": bis,
+            "cpu": 50, "ramMb": _ram_mb(), "t": now_ms}
+    try:
+        os.makedirs(os.path.dirname(DIENST_FILE), exist_ok=True)
+        tmp = DIENST_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as h:
+            json.dump(info, h)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, DIENST_FILE)
+        MELDUNG.update(jetzt=jetzt, bis=bis, am=time.time())
+        print(f"Serverabsprache: gemeldet {jetzt} ({info['ramMb']} MB)", flush=True)
     except Exception as e:
-        print("Serverabsprache: Anmeldung nicht möglich:", e, flush=True)
+        print("Serverabsprache: Meldung nicht möglich:", e, flush=True)
+    # Alte Anmeldung an falscher Stelle (bis 26.11.) entfernen
+    try:
+        os.remove(os.path.join(os.path.dirname(os.path.dirname(DIENST_FILE)), "hitradar.json"))
+    except Exception:
+        pass
+
+
+def darf_schwer() -> bool:
+    return SPAR["modus"] == "frei"
 
 
 def _setze(modus: str, quelle: str):
-    modus = {"normal": "frei", "low": "sparsam", "aus": "pause", "stop": "pause"}.get(modus, modus)
-    if modus not in ("frei", "sparsam", "pause"):
-        modus = "frei"
     if modus != SPAR["modus"]:
         SPAR["since"] = int(time.time())
         print(f"Serverabsprache: Hitradar -> {modus} ({quelle})", flush=True)
@@ -119,31 +124,39 @@ def _setze(modus: str, quelle: str):
 
 
 async def follow_game():
-    anmelden()
-    fails = 0
+    melden("leicht")
+    ohne_datei_seit = None
     async with aiohttp.ClientSession() as s:
         while True:
-            modus = None
+            modus, quelle = None, ""
             try:
-                if time.time() - os.path.getmtime(LAGE_FILE) < 120:
-                    with open(LAGE_FILE, encoding="utf-8") as h:
-                        modus = _modus_aus_lage(json.load(h))
+                async with s.get(GAME_LAST_URL, timeout=aiohttp.ClientTimeout(total=4)) as r:
+                    d = await r.json(content_type=None)
+                SPAR["stufe"] = int(d.get("stufe") or 0)
+                modus, quelle = _level(d), "api/last"
+                if modus is None and d.get("hitradar") in ("low", "normal"):
+                    modus = "sparsam" if d.get("hitradar") == "low" else "frei"   # ältere Spiel-Version
             except Exception:
                 modus = None
-            if modus:
-                _setze(modus, "lage.json")
-                fails = 0
-            else:
+            if modus is None:
                 try:
-                    async with s.get(GAME_LAST_URL, timeout=aiohttp.ClientTimeout(total=4)) as r:
-                        d = await r.json(content_type=None)
-                    fails = 0
-                    SPAR["stufe"] = int(d.get("stufe") or 0)
-                    _setze("sparsam" if d.get("hitradar") == "low" else "frei", "api/last")
+                    if time.time() - os.path.getmtime(LAGE_FILE) < 120:
+                        with open(LAGE_FILE, encoding="utf-8") as h:
+                            modus, quelle = _level(json.load(h)), "lage.json"
                 except Exception:
-                    fails += 1
-                    if fails >= 3:
-                        _setze("frei", "keine Antwort")
+                    modus = None
+            if modus is None:
+                ohne_datei_seit = ohne_datei_seit or time.time()
+                if time.time() - ohne_datei_seit >= 15 * 60:
+                    modus, quelle = _selbst_messen(), "selbst gemessen"
+                else:
+                    modus, quelle = "sparsam", "keine Lage"
+            else:
+                ohne_datei_seit = None
+            _setze(modus, quelle)
+            # Einmal am Tag neu melden; abgelaufenes "schwer" zurück auf "leicht"
+            if time.time() - MELDUNG["am"] > 24 * 3600 or (MELDUNG["jetzt"] == "schwer" and MELDUNG["bis"] < time.time() * 1000):
+                melden("leicht")
             await asyncio.sleep(30)
 FRESH_SECONDS = 6 * 60
 UA = "RadarServer/1.0"
@@ -983,9 +996,20 @@ async def scanner():
         if load_cached_stations():
             ids.update({s["id"]: s for s in stations})
             schedule_all()
-        if await load_stations(session):
-            ids.clear(); ids.update({s["id"]: s for s in stations})
-            schedule_all()
+        # Erst die Vorgabe des Spiels abwarten (höchstens 10 s)
+        for _ in range(20):
+            if SPAR["quelle"] != "start":
+                break
+            await asyncio.sleep(0.5)
+        # Senderliste neu laden ist schwere Arbeit: nur bei "frei" (ohne gespeicherte Liste geht es nicht anders)
+        if not stations or darf_schwer():
+            melden("schwer", 30 * 60)
+            try:
+                if await load_stations(session):
+                    ids.clear(); ids.update({s["id"]: s for s in stations})
+                    schedule_all()
+            finally:
+                melden("leicht")
         while True:
             await asyncio.sleep(60)
             el = time.time() - stats["since"]
@@ -1000,10 +1024,16 @@ async def scanner():
             if int(el) // 60 % 30 == 15:
                 save_similar()
             # Einmal am Tag neu – und öfter, solange die Liste zu klein ist
-            if el > 24 * 3600 or len(stations) < 20000 and int(el) // 60 % 30 == 29:
-                if await load_stations(session):
-                    ids.clear(); ids.update({s["id"]: s for s in stations})
-                    schedule_all()
+            # Einmal am Tag neu – und öfter, solange die Liste deutlich zu klein ist. Nur wenn das Spiel "frei" sagt.
+            klein = len(stations) < 0.8 * min(20000, station_cap())
+            if (el > 24 * 3600 or klein and int(el) // 60 % 30 == 29) and darf_schwer():
+                melden("schwer", 30 * 60)
+                try:
+                    if await load_stations(session):
+                        ids.clear(); ids.update({s["id"]: s for s in stations})
+                        schedule_all()
+                finally:
+                    melden("leicht")
                 stats.update(checked=0, since=time.time())
 
 
@@ -1461,7 +1491,7 @@ async def h_health(_):
     return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()),
                               "checked": stats["checked"], "queue": len(due),
                               "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"],
-                              "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"],
+                              "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"], "meldung": MELDUNG["jetzt"],
                               "spiel_stufe": SPAR["stufe"]})
 
 
