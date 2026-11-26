@@ -68,7 +68,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
     unter 10 % = `pause`, ab 1,0 oder unter 20 % = `sparsam`, sonst `frei`.
   - `frei` = normal; `sparsam` = nichts Schweres neu anfangen; `pause` = radar und llm.service fangen nichts Neues an.
   - Anmelden beim Start und einmal am Tag in `/var/lib/serverabsprache/dienste/hitradar.json`:
-    `{"prio":"hitradar","was":"Radio und KI","jetzt":"leicht","bis":0,"cpu":50,"ramMb":1200,"t":<ms jetzt>}`.
+    `{"prio":"hitradar","was":"Radio und KI","unit":"radar.service","jetzt":"leicht","bis":0,"cpu":50,"ramMb":1200,"t":<ms jetzt>}`.
     Vor schwerer Arbeit `"jetzt":"schwer"` mit `"bis"` (höchstens 6 h), danach zurück auf `"leicht"`. `ramMb` ehrlich angeben (wird gemessen).
   - **Updates/Neustarts** (Regel vom 26.11.): vorher `"jetzt":"update"` mit `"bis"` (höchstens 1 h), erst starten, wenn in `lage.json`
     `updateErlaubt` true ist; steht bei `updateDran` `"spiel"`, warten (Spiel hat immer Vorrang, immer nur ein Update gleichzeitig).
@@ -78,6 +78,9 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   - Hitradar braucht wenig (Wunsch von Kevin, 26.11.): Sender-Abfrage über einen einzigen Verteiler statt hunderter wartender Abfrager,
     KI nur bei Bedarf. `cpu` und `ramMb` in `hitradar.json` werden gemessen (CPU-Mittel in % eines Kerns, RAM ohne Datei-Zwischenspeicher)
     und stündlich neu gemeldet. Nur Hitradars eigene Dienste anfassen, den Server verwaltet das Spiel.
+  - **Hinweise vom Spiel:** `/run/serverabsprache/hinweise/hitradar.json` liest radar.py beim Start und einmal am Tag. Es zeigt sie nur
+    im Protokoll (`journalctl -u radar | grep Hinweis`) und in `/health` (`hinweise`, `hinweise_wichtig`), führt nichts automatisch aus.
+    Alles mit `"prio":"wichtig"` als Aufgabe übernehmen und nach den Projektregeln im Repo umsetzen (Inhalt sieht man in der Ausgabe von `server/ops/run.sh`).
   - Bei `pause` meldet Hitradar `"ruhe"` (kaum Bedarf, die anderen bekommen die Leistung), sonst `"leicht"`; Senderliste laden = `"schwer"`.
   - Bei Speichermangel darf der Hausmeister des Spiels Hitradar zuerst anhalten und startet es danach wieder.
   - Beim Umzug: auf dem alten Server `hitradar.json` löschen und auf dem neuen neu anmelden.
@@ -105,3 +108,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: Prüfregel Commit-Texte: Pushes mit Mitautor- oder Sitzungs-Zeilen werden rot. Ein Commit nachträglich bereinigt (main neu geschrieben, Inhalt gleich): alle Arbeitskopien mit `git pull --rebase` holen.
 - 26.11.: App sparsamer: Werbe-Prüfung (jede Sekunde) und Positions-Speichern laufen nur noch während der Wiedergabe bzw. in den ersten ~3 Minuten nach Senderwechsel; Widget nur bei echter Änderung neu zeichnen; Hit-Mix baut die Liste „Als Nächstes“ nicht mehr alle 20 s neu, wenn sie gleich bleibt (weniger Arbeit für Android Auto); Server-Abgleich übernimmt nur geänderte Sender komplett; Verbindungen zum Server bleiben offen (Keep-Alive, kein neuer Verbindungsaufbau je Abfrage, entlastet auch den Server).
 - 26.11.: Hitradar sparsamer: ein Verteiler statt 250 Abfrager (kaum noch Leerlauf-CPU), KI startet nur bei Bedarf (spart ~1 GB RAM), ehrliche cpu/ramMb stündlich gemeldet.
+- 26.11.: Anmeldung mit "unit":"radar.service"; Hinweise des Spiels (hinweise/hitradar.json) werden täglich gelesen und in /health gezeigt.

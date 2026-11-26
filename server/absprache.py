@@ -42,8 +42,14 @@ def melde(jetzt: str, sek: int = 0):
     bis = 0
     if jetzt in MAX_BIS:
         bis = now_ms + min(max(sek, 60), MAX_BIS[jetzt]) * 1000
-    info = {"prio": "hitradar", "was": "Radio und KI", "jetzt": jetzt, "bis": bis,
-            "cpu": 50, "ramMb": ram_mb(), "t": now_ms}
+    cpu = 50
+    try:
+        with open(DIENST_FILE, encoding="utf-8") as h:
+            cpu = int(json.load(h).get("cpu") or 50)     # gemessener Wert von radar.py
+    except Exception:
+        pass
+    info = {"prio": "hitradar", "was": "Radio und KI", "unit": "radar.service", "jetzt": jetzt, "bis": bis,
+            "cpu": cpu, "ramMb": ram_mb(), "t": now_ms}
     os.makedirs(os.path.dirname(DIENST_FILE), exist_ok=True)
     tmp = DIENST_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as h:

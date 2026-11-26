@@ -142,7 +142,7 @@ def melden(jetzt: str = "leicht", bis_s: int = 0):
         bis = now_ms + min(max(bis_s, 60), 6 * 3600) * 1000     # höchstens 6 Stunden
     elif jetzt == "update":
         bis = now_ms + min(max(bis_s, 60), 3600) * 1000         # höchstens 1 Stunde
-    info = {"prio": "hitradar", "was": "Radio und KI", "jetzt": jetzt, "bis": bis,
+    info = {"prio": "hitradar", "was": "Radio und KI", "unit": "radar.service", "jetzt": jetzt, "bis": bis,
             "cpu": _cpu_pct(), "ramMb": _ram_mb(), "t": now_ms}
     try:
         os.makedirs(os.path.dirname(DIENST_FILE), exist_ok=True)
@@ -160,6 +160,37 @@ def melden(jetzt: str = "leicht", bis_s: int = 0):
         os.remove(os.path.join(os.path.dirname(os.path.dirname(DIENST_FILE)), "hitradar.json"))
     except Exception:
         pass
+
+
+HINWEISE_FILE = os.environ.get("ABSPRACHE_HINWEISE", "/run/serverabsprache/hinweise/hitradar.json")
+HINWEISE = {"am": 0, "liste": [], "wichtig": 0}
+
+
+def hinweise_lesen():
+    """Hinweise des Spiels an Hitradar (einmal am Tag). Nur lesen und im Protokoll und in /health zeigen:
+    nichts davon wird automatisch ausgeführt. Einträge mit "prio":"wichtig" werden als Aufgabe im Repo umgesetzt."""
+    HINWEISE["am"] = time.time()
+    try:
+        with open(HINWEISE_FILE, encoding="utf-8") as h:
+            d = json.load(h)
+    except FileNotFoundError:
+        HINWEISE.update(liste=[], wichtig=0)
+        return
+    except Exception as e:
+        print("Serverabsprache: Hinweise nicht lesbar:", e, flush=True)
+        return
+    if isinstance(d, dict):
+        d = d.get("hinweise") or d.get("liste") or [d]
+    liste = []
+    for x in d if isinstance(d, list) else []:
+        if isinstance(x, dict):
+            liste.append({k: str(v)[:300] for k, v in x.items() if isinstance(v, (str, int, float, bool))})
+        elif isinstance(x, str):
+            liste.append({"text": x[:300]})
+    liste = liste[:20]
+    HINWEISE.update(liste=liste, wichtig=sum(1 for x in liste if str(x.get("prio", "")).lower() == "wichtig"))
+    for x in liste:
+        print("Serverabsprache: Hinweis", json.dumps(x, ensure_ascii=False), flush=True)
 
 
 def darf_schwer() -> bool:
@@ -205,6 +236,8 @@ async def follow_game():
                 ohne_datei_seit = None
             _setze(modus, quelle)
             _cpu_messen()
+            if time.time() - HINWEISE["am"] > 24 * 3600:
+                hinweise_lesen()
             # Bei "pause" braucht Hitradar kaum etwas: "ruhe", dann bekommen die anderen die Leistung
             soll = "ruhe" if modus == "pause" else "leicht"
             if MELDUNG["jetzt"] == "update":      # Update vorbei? Dann gilt wieder, was in der Datei steht
@@ -1577,6 +1610,7 @@ async def h_health(_):
                               "checked": stats["checked"], "queue": len(due),
                               "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"],
                               "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"], "meldung": MELDUNG["jetzt"],
+                              "hinweise": len(HINWEISE["liste"]), "hinweise_wichtig": HINWEISE["wichtig"],
                               "spiel_stufe": SPAR["stufe"]})
 
 

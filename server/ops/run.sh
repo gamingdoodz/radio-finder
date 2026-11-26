@@ -1,5 +1,5 @@
 #!/bin/bash
-# Hitradar sparsamer (26.11.): KI nur bei Bedarf – nur nach Update-Absprache mit dem Spiel
+# Hitradar sparsamer, Hinweise (26.11.): KI nur bei Bedarf – nur nach Update-Absprache mit dem Spiel
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null; then
@@ -13,6 +13,7 @@ if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null; then
 fi
 echo "== Dienste =="; systemctl is-active radar llm llm-proxy.socket 2>&1 | paste -sd' '
 echo "== Meldung =="; head -c 600 /var/lib/serverabsprache/dienste/hitradar.json 2>&1; echo
+echo "== Hinweise vom Spiel =="; head -c 3000 /run/serverabsprache/hinweise/hitradar.json 2>&1; echo
 echo "== Update-Freigabe =="; $AB darf 2>&1
 ls -la /var/lib/hitradar-neustart-offen 2>&1
 echo "== Speicher Hitradar =="; du -sh $R /opt/llama.cpp /opt/models 2>/dev/null
