@@ -3,12 +3,15 @@
 Stand: 26.11.2026. Diese Datei ist die gemeinsame Grundlage für alle Chats im Projekt „Hitradar“.
 Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
-## So arbeitet jeder Chat im Projekt
+## So arbeitet das Projekt (ein Chat, mehrere Threads)
 
-- Selbstständig arbeiten: Repo holen (`add_repo` owner gamingdoodz, repo radio-finder, access push), klonen, diese Datei lesen, loslegen.
-  Nicht nachfragen, wenn es eine vernünftige Lösung gibt; nur bei Kosten, Löschen von Daten oder echten Geschmacksfragen fragen.
-- Jeder Chat bleibt bei seinem Thema (z. B. Android Auto, Hit-Mix, Server, Play-Store). Vor dem Pushen `git pull --rebase`, damit sich parallele Chats nicht überschreiben.
-- Nach jeder Änderung: bauen lassen, bei Fehlern selbst beheben, bei Grün höchstens einmal am Tag hochladen, kurz berichten.
+- Es gibt **einen** Chat. Er ist die Leitung und verteilt die Arbeit selbst auf parallele Threads (Unteragenten),
+  je Thema einer: **Android Auto**, **Hit-Mix**, **App allgemein**, **Server**, **Play-Store/Build**.
+- Jeder Thread arbeitet in einer eigenen Arbeitskopie (git worktree), bleibt bei seinem Thema und meldet der Leitung, was er geändert hat.
+- Die Leitung führt die Änderungen zusammen (`git pull --rebase`, Konflikte selbst lösen), lässt einmal bauen,
+  behebt Fehler, lädt bei Grün höchstens einmal am Tag hoch und berichtet Kevin kurz.
+- Selbstständig arbeiten: nicht nachfragen, wenn es eine vernünftige Lösung gibt; nur bei Kosten, Löschen von Daten oder echten Geschmacksfragen fragen.
+- Repo holen: `add_repo` (owner gamingdoodz, repo radio-finder, access push), klonen, diese Datei lesen.
 - Wichtiges unten unter „Verlauf“ eintragen und „Offen“ aktuell halten.
 
 ## Regeln (immer)
