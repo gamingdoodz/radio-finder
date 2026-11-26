@@ -3,8 +3,8 @@
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null; then
-  $AB melde update 1800
-  if $AB warte 1500; then
+  $AB melde update 1200
+  if $AB warte 900; then
     bash $R/server/llm-dienst.sh 2>&1 | tail -5
   else
     echo "KI-Umstellung: Update nicht erlaubt, später erneut"
