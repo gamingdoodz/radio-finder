@@ -14,7 +14,8 @@ exec 9>/run/radar-update.lock
 flock -n 9 || { echo "radar-update läuft schon"; exit 0; }
 
 OLD=${1:-$(git rev-parse HEAD)}
-git pull -q || true
+# main kann neu geschrieben sein: nicht pullen, sondern genau den Stand von GitHub übernehmen
+git fetch -q origin main && git reset -q --hard origin/main || echo "Holen fehlgeschlagen, alter Stand bleibt"
 if [ "$OLD" != "$(git rev-parse HEAD)" ] && ! git diff --quiet "$OLD" HEAD -- server/ ':!server/ops'; then
   touch "$OFFEN"
   # Neue Fassung von sich selbst übernehmen

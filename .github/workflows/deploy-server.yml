@@ -36,7 +36,7 @@ jobs:
           # Neustart nur nach Serverabsprache: "update" melden, auf updateErlaubt warten, danach "leicht"
           R=/root/radio-finder
           OLD=$(sudo git -C $R rev-parse HEAD)
-          sudo git -C $R pull -q || true
+          sudo git -C $R fetch -q origin main && sudo git -C $R reset -q --hard origin/main || echo "Holen fehlgeschlagen"
           sudo install -m 755 $R/server/radar-update.sh /usr/local/bin/radar-update
           sudo /usr/local/bin/radar-update "$OLD"
           if [ "$OPS" = 1 ]; then
