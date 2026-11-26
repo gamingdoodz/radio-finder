@@ -79,10 +79,11 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
 - Suchergebnisse in Android Auto werden nie geleert (wachsen langsam).
 - Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
-- Noch keine 12 Tester für den geschlossenen Test.
+- Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
 
 - 24.11.: Android Auto abgesichert, Hit-Mix wartet richtig, Stopp bleibt Stopp (1.0.126).
 - 24.11.: Weiterspielen nach dem letzten Lied, Tippen beim Start, Wächter, Wecker, Suche ohne Ruckeln (1.0.128).
 - 26.11.: Server richtet sich nach Valdrakor, Senderzahl nach Vorgabe, Serverabsprache (budget.hitradar.level, Meldung in dienste/hitradar.json), Prüfregel Geheimnisse, Neuladen der Senderliste nicht mehr alle 30 Minuten.
+- 26.11.: Builds geprüft, alle grün. Hochladen macht der tägliche Zeitplan (läuft bei GitHub meist erst abends), daher kein zusätzlicher Upload von Hand am selben Tag. Tester-Ideen in `docs/TESTER.md`.
