@@ -83,7 +83,6 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 ## Offen
 
 - Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
-- Android Auto: Hörspiel-Ordner (`show:`) sind nach einem Neustart der App leer, bis man die Kategorie neu öffnet.
 - Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
 - Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
   Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
@@ -99,3 +98,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: App allgemein: Wächter startet nach Absturz/Neustart wieder (statt hängender Anzeige), kein Absturz beim Schließen mit offenem Fenster, alter Player nach onStop wird nicht mehr benutzt, Wecker wird nach App-Update und Zeit-/Zeitzonenwechsel neu geplant, LiveIndex wirft alte Einträge weg (Speicher).
 - 26.11.: Hit-Mix: gestoppter oder ersetzter Mix schaltet nie mehr von selbst um (Zähler je Start/Stopp), kein doppelter Mix bei schnellem Doppeltippen, Sprungbremse zählt nur echte Sprünge, keine zwei Sprünge gleichzeitig, Playlist-Lieder nur einmal laden, Stopp während des Starts spielt nichts ab.
 - 26.11.: Server-Updates nur nach Absprache: "update" melden, auf updateErlaubt warten (nicht bei updateDran "spiel"), danach "leicht"; bei pause "ruhe" (radar-update.sh, absprache.py, Workflow wartet mit).
+- 26.11.: Android Auto: Hörspiel-Ordner bleiben auch nach einem Neustart der App gefüllt (Shows werden gespeichert).
