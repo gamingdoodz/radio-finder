@@ -648,6 +648,11 @@ async def h_rising(req):
 STATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stations_cache.json")
 
 
+def station_cap() -> int:
+    """MAX_STATIONS meistgehörte weltweit + bis zu 4.200 zusätzliche aus DE/AT/CH."""
+    return MAX_STATIONS + 4200
+
+
 def load_cached_stations() -> bool:
     """Beim Start sofort die zuletzt gespeicherte Senderliste nehmen (kein Warten auf radio-browser)."""
     global stations
@@ -655,6 +660,11 @@ def load_cached_stations() -> bool:
         with open(STATIONS_FILE, encoding="utf-8") as f:
             data = json.load(f)
         if data:
+            # Höchstens so viele Sender wie erlaubt (MAX_STATIONS setzt das Spiel): DE/AT/CH zuerst behalten
+            if len(data) > station_cap():
+                dach = [s for s in data if s.get("cc") in ("DE", "AT", "CH")]
+                rest = [s for s in data if s.get("cc") not in ("DE", "AT", "CH")]
+                data = (dach + rest)[:station_cap()]
             stations = data
             print(f"Senderliste aus Speicher: {len(stations)} Sender", flush=True)
             return True
@@ -704,7 +714,7 @@ async def load_stations(session: aiohttp.ClientSession):
         found = {k: v for k, v in found.items()
                  if k.lower() not in block and not any("." in b and b in v["url"].lower() for b in block)}
     # Nur übernehmen, wenn die neue Liste nicht viel kleiner ist (sonst hat radio-browser gehakt)
-    if found and (not stations or len(found) >= 0.8 * len(stations)):
+    if found and (not stations or len(found) >= 0.8 * min(len(stations), station_cap())):
         stations = list(found.values())
         try:
             with open(STATIONS_FILE + ".tmp", "w", encoding="utf-8") as f:
