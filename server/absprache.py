@@ -11,6 +11,7 @@ Aufruf:
   absprache.py melde <leicht|schwer|ruhe|update> [sekunden]
   absprache.py warte [max_sekunden]   -> Exit 0, sobald das Update erlaubt ist; Exit 1 nach Ablauf
   absprache.py darf                   -> Exit 0, wenn das Update jetzt erlaubt ist
+  absprache.py bereit                 -> Exit 0, wenn das Spiel die Freigabe schon liefert
 """
 import json
 import os
@@ -50,13 +51,36 @@ def melde(jetzt: str, sek: int = 0):
         pass
     info = {"prio": "hitradar", "was": "Radio und KI", "unit": "radar.service", "jetzt": jetzt, "bis": bis,
             "cpu": cpu, "ramMb": ram_mb(), "t": now_ms}
-    os.makedirs(os.path.dirname(DIENST_FILE), exist_ok=True)
+    # Ordner und Rechte gehören dem Spiel: nichts daran ändern, Fehler nur melden
     tmp = DIENST_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as h:
-        json.dump(info, h)
-    os.chmod(tmp, 0o644)
-    os.replace(tmp, DIENST_FILE)
-    print(f"Serverabsprache: gemeldet {jetzt}", flush=True)
+    try:
+        with open(tmp, "w", encoding="utf-8") as h:
+            json.dump(info, h)
+        os.chmod(tmp, 0o644)
+        # Datei gehört dem Benutzer von radar.service, damit radar.py sie später selbst weiterschreiben kann
+        uid = _radar_uid()
+        if uid is not None and os.geteuid() == 0:
+            os.chown(tmp, uid, -1)
+        os.replace(tmp, DIENST_FILE)
+        print(f"Serverabsprache: gemeldet {jetzt}", flush=True)
+    except Exception as e:
+        print(f"Serverabsprache: Meldung {jetzt} nicht möglich: {e}", flush=True)
+
+
+def _radar_uid():
+    try:
+        import subprocess
+        pid = subprocess.run(["systemctl", "show", "-p", "MainPID", "--value", "radar"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        return os.stat(f"/proc/{int(pid)}").st_uid if pid and pid != "0" else None
+    except Exception:
+        return None
+
+
+def bereit() -> bool:
+    """Gibt es die Update-Freigabe des Spiels schon (lage.json oder Felder in /api/last)?"""
+    d, _ = _lage()
+    return d is not None
 
 
 def _feld(d, name):
@@ -138,6 +162,8 @@ if __name__ == "__main__":
         melde(a[1], int(a[2]) if len(a) > 2 else 0)
     elif cmd == "warte":
         sys.exit(0 if warte(int(a[1]) if len(a) > 1 else 25 * 60) else 1)
+    elif cmd == "bereit":
+        sys.exit(0 if bereit() else 1)
     elif cmd == "darf":
         ok, grund = darf()
         print(grund)

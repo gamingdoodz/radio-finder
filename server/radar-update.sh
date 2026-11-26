@@ -23,6 +23,9 @@ if [ "$OLD" != "$(git rev-parse HEAD)" ] && ! git diff --quiet "$OLD" HEAD -- se
 fi
 [ -f "$OFFEN" ] || { echo "Kein Neustart nötig"; exit 0; }
 
+# Liefert das Spiel noch gar keine Freigabe (lage.json kommt erst mit dem nächsten Valdrakor-Update),
+# nicht "update" melden und den Platz nicht blockieren: vorgemerkt lassen, nächster Lauf prüft wieder.
+$AB bereit || { echo "Update-Freigabe vom Spiel gibt es noch nicht, Neustart bleibt vorgemerkt"; exit 0; }
 $AB melde update 1800
 if $AB warte 1500; then
   $AB melde update 600

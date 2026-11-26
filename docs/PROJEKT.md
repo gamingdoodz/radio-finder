@@ -90,6 +90,9 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
 - Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
 - Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
+- `lage.json` und Schreibrecht für Dienste in `dienste/` kommen erst mit dem nächsten Valdrakor-Update (Auskunft vom Spiel, 26.11.).
+  Bis dahin: radar.py kann `hitradar.json` nicht selbst schreiben (Fehler wird nur stündlich protokolliert), Hitradar-Neustart bleibt
+  vorgemerkt und wird ohne Freigabe nicht gemacht. Danach prüfen, ob der Neustart von selbst durchläuft (`/health` zeigt `hinweise`).
 - Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
   Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).

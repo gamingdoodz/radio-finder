@@ -154,7 +154,12 @@ def melden(jetzt: str = "leicht", bis_s: int = 0):
         MELDUNG.update(jetzt=jetzt, bis=bis, am=time.time())
         print(f"Serverabsprache: gemeldet {jetzt} ({info['ramMb']} MB)", flush=True)
     except Exception as e:
-        print("Serverabsprache: Meldung nicht möglich:", e, flush=True)
+        # Ordner gehört dem Spiel (Schreibrecht kommt mit dessen nächstem Update): nichts ändern, nur protokollieren,
+        # höchstens einmal pro Stunde, und nicht alle 30 s neu versuchen
+        if time.time() - MELDUNG.get("fehler_am", 0) > 3600:
+            print("Serverabsprache: Meldung nicht möglich:", e, flush=True)
+            MELDUNG["fehler_am"] = time.time()
+        MELDUNG.update(jetzt=jetzt, bis=bis, am=time.time())
     # Alte Anmeldung an falscher Stelle (bis 26.11.) entfernen
     try:
         os.remove(os.path.join(os.path.dirname(os.path.dirname(DIENST_FILE)), "hitradar.json"))
