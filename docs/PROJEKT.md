@@ -17,7 +17,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 ## Regeln (immer)
 
 - Antworten auf Deutsch, kurz und knackig. Kevin ist Elektriker, hat keinen PC, arbeitet nur mit dem Handy (Galaxy S25 Ultra).
-- Commits immer als `user.name "gamingdoodz"`, `user.email "gamingdoodz@users.noreply.github.com"`.
+- Commits immer als `user.name "gamingdoodz"`, `user.email "gamingdoodz@users.noreply.github.com"`. Keine Mitautor- oder Sitzungs-Zeilen in Commit-Texten (Workflow „Prüfregel Commit-Texte“ wird sonst rot).
 - Nirgends erwähnen, womit die App gebaut wurde (nicht in App, Code oder Commit-Texten). Entwickler ist „gamingdoodz“.
 - Alles muss kostenlos bleiben, keine laufenden Kosten, nichts, was automatisch bezahlt.
 - Keine Geheimnisse ausgeben (Passwörter, Tokens, Schlüssel), auch nicht in Actions-Protokollen. Das Repo ist **öffentlich**.
@@ -99,3 +99,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: Hit-Mix: gestoppter oder ersetzter Mix schaltet nie mehr von selbst um (Zähler je Start/Stopp), kein doppelter Mix bei schnellem Doppeltippen, Sprungbremse zählt nur echte Sprünge, keine zwei Sprünge gleichzeitig, Playlist-Lieder nur einmal laden, Stopp während des Starts spielt nichts ab.
 - 26.11.: Server-Updates nur nach Absprache: "update" melden, auf updateErlaubt warten (nicht bei updateDran "spiel"), danach "leicht"; bei pause "ruhe" (radar-update.sh, absprache.py, Workflow wartet mit).
 - 26.11.: Android Auto: Hörspiel-Ordner bleiben auch nach einem Neustart der App gefüllt (Shows werden gespeichert).
+- 26.11.: Prüfregel Commit-Texte: Pushes mit Mitautor- oder Sitzungs-Zeilen werden rot. Ein Commit nachträglich bereinigt (main neu geschrieben, Inhalt gleich): alle Arbeitskopien mit `git pull --rebase` holen.

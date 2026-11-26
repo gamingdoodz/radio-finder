@@ -1,0 +1,27 @@
+name: Prüfregel Commit-Texte
+
+# Commit-Nachrichten enthalten nur den Entwickler gamingdoodz: keine Mitautor- oder Sitzungs-Zeilen
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Commit-Texte prüfen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            msgs=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits" --paginate --jq '.[] | .sha[0:7] + " " + .commit.message')
+          else
+            msgs=$(jq -r '.commits[]? | .id[0:7] + " " + .message' "$GITHUB_EVENT_PATH")
+          fi
+          bad=$(printf '%s\n' "$msgs" | grep -inE 'co-authored-by|^[^ ]*-session:|[a-z]+-session: https' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Commit-Text enthält verbotene Zeilen (Mitautor/Sitzung):"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          echo "Commit-Texte ok"
