@@ -50,7 +50,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 ## Server
 
 - Oracle Cloud Always Free, Frankfurt, `130.61.78.232` (2 Kerne, ~12 GB RAM, Speicher knapp).
-- `server/radar.py` als `radar.service` (Port 8081) hinter Caddy: `https://130-61-78-232.sslip.io:8080` und 443. Eigene KI: `llm.service` (Port 8090).
+- `server/radar.py` als `radar.service` (Port 8081) hinter Caddy: `https://130-61-78-232.sslip.io:8080` und 443. Eigene KI: `llm.service` nur bei Bedarf (`llm-proxy.socket` auf 8090 startet sie, nach 15 min ohne Anfrage aus; `server/llm-dienst.sh`).
 - Push auf `server/**` startet **„Server aktualisieren“**. Ändert sich `server/ops/run.sh`, wird es auf dem Server ausgeführt
   (Ausgabe: `gh run view <id> --log`). Die Ausgabe läuft durch `.github/scripts/redact.py`.
 - **Prüfregel Geheimnisse** (`.github/scripts/check-secrets-rule.sh`, Workflow „Prüfregel Geheimnisse“): in Server-Skripten und Workflows verboten:
@@ -75,6 +75,9 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
     Danach sofort `"leicht"`. Umgesetzt in `server/radar-update.sh` (= `/usr/local/bin/radar-update`, stündlich per cron und vom Workflow
     „Server aktualisieren“) mit `server/absprache.py`. Wartet höchstens 25 Minuten; sonst bleibt der Neustart vorgemerkt
     (`/var/lib/hitradar-neustart-offen`) und der nächste Lauf versucht es wieder. Nie `systemctl restart radar` von Hand ohne diese Absprache.
+  - Hitradar braucht wenig (Wunsch von Kevin, 26.11.): Sender-Abfrage über einen einzigen Verteiler statt hunderter wartender Abfrager,
+    KI nur bei Bedarf. `cpu` und `ramMb` in `hitradar.json` werden gemessen (CPU-Mittel in % eines Kerns, RAM ohne Datei-Zwischenspeicher)
+    und stündlich neu gemeldet. Nur Hitradars eigene Dienste anfassen, den Server verwaltet das Spiel.
   - Bei `pause` meldet Hitradar `"ruhe"` (kaum Bedarf, die anderen bekommen die Leistung), sonst `"leicht"`; Senderliste laden = `"schwer"`.
   - Bei Speichermangel darf der Hausmeister des Spiels Hitradar zuerst anhalten und startet es danach wieder.
   - Beim Umzug: auf dem alten Server `hitradar.json` löschen und auf dem neuen neu anmelden.
@@ -101,3 +104,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: Android Auto: Hörspiel-Ordner bleiben auch nach einem Neustart der App gefüllt (Shows werden gespeichert).
 - 26.11.: Prüfregel Commit-Texte: Pushes mit Mitautor- oder Sitzungs-Zeilen werden rot. Ein Commit nachträglich bereinigt (main neu geschrieben, Inhalt gleich): alle Arbeitskopien mit `git pull --rebase` holen.
 - 26.11.: App sparsamer: Werbe-Prüfung (jede Sekunde) und Positions-Speichern laufen nur noch während der Wiedergabe bzw. in den ersten ~3 Minuten nach Senderwechsel; Widget nur bei echter Änderung neu zeichnen; Hit-Mix baut die Liste „Als Nächstes“ nicht mehr alle 20 s neu, wenn sie gleich bleibt (weniger Arbeit für Android Auto); Server-Abgleich übernimmt nur geänderte Sender komplett; Verbindungen zum Server bleiben offen (Keep-Alive, kein neuer Verbindungsaufbau je Abfrage, entlastet auch den Server).
+- 26.11.: Hitradar sparsamer: ein Verteiler statt 250 Abfrager (kaum noch Leerlauf-CPU), KI startet nur bei Bedarf (spart ~1 GB RAM), ehrliche cpu/ramMb stündlich gemeldet.

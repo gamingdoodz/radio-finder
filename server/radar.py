@@ -71,12 +71,23 @@ def _selbst_messen() -> str:
     return "frei"
 
 
+UNITS = ("radar.service", "llm.service")
+CPU = {"usec": 0, "t": 0.0, "pct": 0.0}
+
+
+def _cg(unit, name):
+    return open(f"/sys/fs/cgroup/system.slice/{unit}/{name}").read()
+
+
 def _ram_mb() -> int:
-    """Ehrlich: was radar.py und die eigene KI (llm.service) gerade wirklich belegen, aufgerundet auf 100 MB."""
+    """Ehrlich: was radar.py und die eigene KI (llm.service) gerade wirklich belegen (ohne frei gebbaren
+    Datei-Zwischenspeicher), aufgerundet auf 100 MB."""
     total = 0
-    for unit in ("radar.service", "llm.service"):
+    for unit in UNITS:
         try:
-            total += int(open(f"/sys/fs/cgroup/system.slice/{unit}/memory.current").read().strip())
+            cur = int(_cg(unit, "memory.current").strip())
+            stat = dict(l.split() for l in _cg(unit, "memory.stat").splitlines())
+            total += max(0, cur - int(stat.get("inactive_file", 0)))
         except Exception:
             pass
     if total <= 0:
@@ -87,6 +98,30 @@ def _ram_mb() -> int:
             total = 1200 * 1024 * 1024
     mb = total / (1024 * 1024)
     return int(-(-mb // 100) * 100)
+
+
+def _cpu_messen():
+    """Mittlere CPU von radar und KI in Prozent eines Kerns (gleitender Mittelwert, alle 30 s gemessen)."""
+    usec = 0
+    for unit in UNITS:
+        try:
+            for l in _cg(unit, "cpu.stat").splitlines():
+                if l.startswith("usage_usec"):
+                    usec += int(l.split()[1])
+        except Exception:
+            pass
+    t = time.time()
+    if CPU["t"] and usec >= CPU["usec"]:
+        pct = (usec - CPU["usec"]) / 1e4 / max(1.0, t - CPU["t"])
+        CPU["pct"] = pct if CPU["pct"] == 0 else 0.9 * CPU["pct"] + 0.1 * pct
+    CPU.update(usec=usec, t=t)
+
+
+def _cpu_pct() -> int:
+    """Gemessene CPU aufgerundet auf 10 %, mindestens 10; vor der ersten Messung 50."""
+    if not CPU["pct"]:
+        return 50
+    return max(10, int(-(-CPU["pct"] // 10) * 10))
 
 
 def melden(jetzt: str = "leicht", bis_s: int = 0):
@@ -108,7 +143,7 @@ def melden(jetzt: str = "leicht", bis_s: int = 0):
     elif jetzt == "update":
         bis = now_ms + min(max(bis_s, 60), 3600) * 1000         # höchstens 1 Stunde
     info = {"prio": "hitradar", "was": "Radio und KI", "jetzt": jetzt, "bis": bis,
-            "cpu": 50, "ramMb": _ram_mb(), "t": now_ms}
+            "cpu": _cpu_pct(), "ramMb": _ram_mb(), "t": now_ms}
     try:
         os.makedirs(os.path.dirname(DIENST_FILE), exist_ok=True)
         tmp = DIENST_FILE + ".tmp"
@@ -169,6 +204,7 @@ async def follow_game():
             else:
                 ohne_datei_seit = None
             _setze(modus, quelle)
+            _cpu_messen()
             # Bei "pause" braucht Hitradar kaum etwas: "ruhe", dann bekommen die anderen die Leistung
             soll = "ruhe" if modus == "pause" else "leicht"
             if MELDUNG["jetzt"] == "update":      # Update vorbei? Dann gilt wieder, was in der Datei steht
@@ -181,8 +217,9 @@ async def follow_game():
                     pass
             jetzt_ms = time.time() * 1000
             abgelaufen = MELDUNG["jetzt"] in ("schwer", "update") and MELDUNG["bis"] < jetzt_ms
-            if (time.time() - MELDUNG["am"] > 24 * 3600 or abgelaufen
-                    or (MELDUNG["jetzt"] in ("leicht", "ruhe") and MELDUNG["jetzt"] != soll)):
+            ruhig = MELDUNG["jetzt"] in ("leicht", "ruhe")
+            # Stündlich neu melden (gemessene cpu/ramMb), bei Wechsel leicht <-> ruhe, abgelaufenes schwer/update
+            if abgelaufen or (ruhig and (time.time() - MELDUNG["am"] > 3600 or MELDUNG["jetzt"] != soll)):
                 melden(soll)
             await asyncio.sleep(30)
 FRESH_SECONDS = 6 * 60
@@ -978,25 +1015,16 @@ def schedule_all():
         heapq.heappush(due, (t + i * 0.002, st["id"]))
 
 
-async def worker(session, ids, n=0):
+async def worker(session, ids):
+    """Ein einziger Verteiler statt hunderter wartender Abfrager: schläft bis zum nächsten fälligen Sender
+    und startet höchstens CONCURRENCY Abfragen gleichzeitig (sparsam: ein Drittel, pause: keine)."""
     import heapq
-    while True:
-        # Spiel braucht Leistung: nur jeder dritte Abfrager arbeitet weiter
-        if SPAR["pause"] or (SPAR["low"] and n % 3 != 0):
-            await asyncio.sleep(5)
-            continue
-        if not due:
-            await asyncio.sleep(1)
-            continue
-        when, sid = due[0]
-        wait = when - time.time()
-        if wait > 0:
-            await asyncio.sleep(min(wait, 1))
-            continue
-        heapq.heappop(due)
-        st = ids.get(sid)
-        if st is None:
-            continue
+    running = {"n": 0}
+    laufend = set()          # Verweise halten, sonst räumt Python laufende Abfragen weg
+    frei = asyncio.Event()
+    frei.set()
+
+    async def one(st, sid):
         try:
             nxt = await check(session, st)
         except Exception:
@@ -1004,6 +1032,36 @@ async def worker(session, ids, n=0):
         if SPAR["low"]:
             nxt *= 1.5
         heapq.heappush(due, (time.time() + nxt, sid))
+        running["n"] -= 1
+        frei.set()
+
+    while True:
+        if SPAR["pause"]:
+            await asyncio.sleep(5)
+            continue
+        if not due:
+            await asyncio.sleep(1)
+            continue
+        wait = due[0][0] - time.time()
+        if wait > 0:
+            await asyncio.sleep(min(wait, 2))
+            continue
+        grenze = max(1, CONCURRENCY // 3) if SPAR["low"] else CONCURRENCY
+        if running["n"] >= grenze:
+            frei.clear()
+            try:
+                await asyncio.wait_for(frei.wait(), 5)
+            except asyncio.TimeoutError:
+                pass
+            continue
+        _, sid = heapq.heappop(due)
+        st = ids.get(sid)
+        if st is None:
+            continue
+        running["n"] += 1
+        t = asyncio.create_task(one(st, sid))
+        laufend.add(t)
+        t.add_done_callback(laufend.discard)
 
 
 async def scanner():
@@ -1019,7 +1077,7 @@ async def scanner():
         asyncio.create_task(cover_worker())
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
-        workers = [asyncio.create_task(worker(session, ids, i)) for i in range(CONCURRENCY)]
+        workers = [asyncio.create_task(worker(session, ids))]
         if load_cached_stations():
             ids.update({s["id"]: s for s in stations})
             schedule_all()

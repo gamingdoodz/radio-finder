@@ -26,7 +26,10 @@ def ram_mb() -> int:
     total = 0
     for unit in ("radar.service", "llm.service"):
         try:
-            total += int(open(f"/sys/fs/cgroup/system.slice/{unit}/memory.current").read().strip())
+            base = f"/sys/fs/cgroup/system.slice/{unit}/"
+            cur = int(open(base + "memory.current").read().strip())
+            stat = dict(l.split() for l in open(base + "memory.stat").read().splitlines())
+            total += max(0, cur - int(stat.get("inactive_file", 0)))
         except Exception:
             pass
     if total <= 0:

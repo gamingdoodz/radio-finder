@@ -16,20 +16,6 @@ if [ ! -s /opt/models/qwen.gguf ]; then
     https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
   mv /opt/models/qwen.gguf.part /opt/models/qwen.gguf
 fi
-cat > /etc/systemd/system/llm.service <<UNIT
-[Unit]
-Description=Hitradar KI (Wünsch dir was)
-After=network-online.target
-
-[Service]
-ExecStart=/opt/llama.cpp/build/bin/llama-server -m /opt/models/qwen.gguf --host 127.0.0.1 --port 8090 -c 2048 -t 2 --parallel 1
-Restart=always
-Nice=10
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload
-systemctl enable --now llm
-systemctl restart llm
+# Dienst: KI startet nur bei Bedarf (spart Arbeitsspeicher)
+bash "$(dirname "$0")/llm-dienst.sh"
 echo "KI eingerichtet"
