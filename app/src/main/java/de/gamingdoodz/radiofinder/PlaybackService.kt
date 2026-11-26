@@ -65,15 +65,17 @@ class PlaybackService : MediaLibraryService() {
     // Fehler in Hintergrund-Aufgaben (z. B. kein Netz) dürfen die App nie abstürzen lassen
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main +
         kotlinx.coroutines.CoroutineExceptionHandler { _, e -> android.util.Log.w("Hitradar", "Hintergrundfehler", e) })
-    private val itemCache = ConcurrentHashMap<String, MediaItem>()
-    private val searchResults = ConcurrentHashMap<String, List<MediaItem>>()
+    // Zwischenspeicher mit Obergrenze: älteste Einträge fliegen raus (sonst wächst der Speicher bei langer Fahrt)
+    private val itemCache = lru<String, MediaItem>(1500)
+    private val searchResults = lru<String, List<MediaItem>>(5)
+    private var searchJob: kotlinx.coroutines.Job? = null
     // Für freie Lieder: die ganze Liste merken, damit man in Android Auto weiterspringen kann
-    private val listContext = ConcurrentHashMap<String, List<MediaItem>>()
+    private val listContext = lru<String, List<MediaItem>>(1500)
     private val favCommand = SessionCommand("FAV_TOGGLE", Bundle.EMPTY)
     private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
     private val hitMixCommand = SessionCommand(CMD_HITMIX, Bundle.EMPTY)
     private val nextCommand = SessionCommand(CMD_NEXT, Bundle.EMPTY)
-    private val shows = ConcurrentHashMap<String, Entry>()
+    private val shows = lru<String, Entry>(300)
     private val posRunnable = object : Runnable {
         override fun run() {
             savePosition()
@@ -621,6 +623,7 @@ class PlaybackService : MediaLibraryService() {
     /** Lied läuft: dessen Cover zeigen. Werbung/Moderation: wieder das Senderlogo. */
     private fun updateArtwork(item: MediaItem, title: String) {
         val id = item.mediaId
+        if (stationLogos.size > 300) stationLogos.clear()
         if (!stationLogos.containsKey(id)) stationLogos[id] = item.mediaMetadata.artworkUri
         scope.launch {
             val info = if (LiveIndex.isMusic(title)) Covers.load(title) else null
@@ -751,15 +754,29 @@ class PlaybackService : MediaLibraryService() {
     /** Neueste Nachrichtenfolge (Tagesschau in 100 Sekunden bzw. Deutschlandfunk-Nachrichten). Notfalls Deutschlandfunk live. */
     private suspend fun latestNews(key: String): MediaItem? {
         val term = if (key == "dlf") "Deutschlandfunk Nachrichten" else "tagesschau in 100 Sekunden"
-        val ep = withTimeoutOrNull(8_000) {
-            val show = Podcasts.search(term, limit = 3).firstOrNull()
-            show?.let { Podcasts.episodes(it).lastOrNull() }
-        }
-        return ep?.toMediaItem() ?: Radar.stations("Deutschlandfunk")?.firstOrNull()?.toMediaItem()
+        val ep = try {
+            withTimeoutOrNull(8_000) {
+                val show = Podcasts.search(term, limit = 3).firstOrNull()
+                show?.let { Podcasts.episodes(it).lastOrNull() }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        if (ep != null) return ep.toMediaItem()
+        // Folge nicht erreichbar: Deutschlandfunk live (nie den Hit-Mix statt Nachrichten)
+        val live = try { withTimeoutOrNull(5_000) { Radar.stations("Deutschlandfunk")?.firstOrNull() } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+        return live?.toMediaItem() ?: fallbackStation()
     }
 
-    /** Irgendein Sender, auf dem gerade Musik läuft (Ersatz, damit nie "nicht geladen" kommt). */
-    private suspend fun anyMusicStation(): MediaItem? = try { anyMusicStationRaw() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+    /** Irgendein Sender, auf dem gerade Musik läuft (Ersatz, damit nie "nicht geladen" kommt). Nie null. */
+    private suspend fun anyMusicStation(): MediaItem =
+        try { withTimeoutOrNull(10_000) { anyMusicStationRaw() } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+            ?: fallbackStation()
+
+    /** Letzter Ausweg ohne Server und ohne gespeicherte Senderliste: fester Sender. */
+    private fun fallbackStation(): MediaItem = Entry(
+        "st:fallback-dlf", Kind.STATION, "Deutschlandfunk", "Internetradio",
+        "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3", "", "Deutschlandfunk",
+    ).toMediaItem().let { liveTitle(it) ?: it }
 
     private suspend fun anyMusicStationRaw(): MediaItem? {
         Radar.sync()
@@ -836,7 +853,7 @@ class PlaybackService : MediaLibraryService() {
                         val item = try { hitMix.start(genre) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
                             ?: anyMusicStation()
                         val p = session?.player
-                        if (item != null && p != null) { p.setMediaItem(item); p.prepare(); p.play() }
+                        if (p != null) { p.setMediaItem(item); p.prepare(); p.play() }
                         updateFavButton()
                     }
                 }
@@ -1048,7 +1065,9 @@ class PlaybackService : MediaLibraryService() {
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<Void>> {
             searchResults[query] = emptyList()
-            scope.launch {
+            // Neue Suche: die alte (Sender-Scan im Hintergrund) abbrechen
+            searchJob?.cancel()
+            searchJob = scope.launch {
                 Radar.sync()
                 val words = Scanner.words(query)
                 val radioHits = Collections.synchronizedList(mutableListOf<MediaItem>())
@@ -1062,7 +1081,7 @@ class PlaybackService : MediaLibraryService() {
                 var free: List<MediaItem> = emptyList()
 
                 fun publish() {
-                    val all = synchronized(radioHits) { radioHits.toList() } + named + free
+                    val all = (synchronized(radioHits) { radioHits.take(40) } + named + free).distinctBy { it.mediaId }
                     remember(all)
                     searchResults[query] = all
                     session.notifySearchResultChanged(browser, query, all.size, params)
@@ -1074,8 +1093,10 @@ class PlaybackService : MediaLibraryService() {
                 }
                 if (stations.isNotEmpty()) {
                     val hits = Scanner.scan(stations, query) { hit ->
-                        radioHits.add(hit.station.toEntry(hit.title).toMediaItem())
-                        scope.launch { publish() }
+                        if (radioHits.size < 40) {
+                            radioHits.add(hit.station.toEntry(hit.title).toMediaItem())
+                            launch { publish() }
+                        }
                     }
                     Scanner.lastHits = hits
                 }
@@ -1101,14 +1122,15 @@ class PlaybackService : MediaLibraryService() {
             mediaItems: MutableList<MediaItem>
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
             // Nie leer und nie mit Fehler antworten (Android Auto: "Auswahl konnte nicht geladen werden")
-            val out = try {
-                mediaItems.mapNotNull { m ->
+            // Jeder Eintrag einzeln: ein kaputter darf die anderen nicht mitreißen
+            val out = mediaItems.mapNotNull { m ->
+                try {
                     if (m.mediaId.startsWith("hitmix:")) {
-                        hitMix.start(m.mediaId.removePrefix("hitmix:").ifBlank { null }).also { updateFavButton() }
+                        (hitMix.start(m.mediaId.removePrefix("hitmix:").ifBlank { null }) ?: anyMusicStation()).also { updateFavButton() }
                     } else safeResolve(m)
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
-            out.ifEmpty { listOfNotNull(anyMusicStation()) }.toMutableList()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+            }
+            out.ifEmpty { listOf(anyMusicStation()) }.toMutableList()
         }
 
         override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
@@ -1128,8 +1150,9 @@ class PlaybackService : MediaLibraryService() {
             val last = Recent.all(applicationContext).firstOrNull()
             val item = last?.toMediaItem()?.let { liveTitle(it) }
                 ?: try { hitMix.start(null) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+                ?: anyMusicStation()
             val pos = last?.let { Positions.get(this@PlaybackService, it.id) }?.takeIf { it > 0 } ?: C.TIME_UNSET
-            MediaSession.MediaItemsWithStartPosition(listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, pos)
+            MediaSession.MediaItemsWithStartPosition(listOf(item), 0, pos)
         }
 
         override fun onSetMediaItems(
@@ -1143,8 +1166,7 @@ class PlaybackService : MediaLibraryService() {
                 setItems(mediaItems, startIndex, startPositionMs)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {
                 // Irgendetwas schiefgegangen (Netz o. Ä.): lieber Musik als eine Fehlermeldung
-                val item = anyMusicStation()
-                MediaSession.MediaItemsWithStartPosition(listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, C.TIME_UNSET)
+                MediaSession.MediaItemsWithStartPosition(listOf(anyMusicStation()), 0, C.TIME_UNSET)
             }
         }
 
@@ -1156,21 +1178,21 @@ class PlaybackService : MediaLibraryService() {
             // Hit-Mix gewählt?
             val hm = mediaItems.firstOrNull { it.mediaId.startsWith("hitmix:") }
             if (hm != null) {
-                val first = hitMix.start(hm.mediaId.removePrefix("hitmix:").ifBlank { null })
+                // Playlist/Mix lässt sich gerade nicht laden (Netz o. Ä.): trotzdem Musik statt Fehlermeldung
+                val first = try { hitMix.start(hm.mediaId.removePrefix("hitmix:").ifBlank { null }) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
                 updateFavButton()
                 // Nie leer zurückgeben (Android Auto zeigt sonst "Auswahl konnte nicht geladen werden"):
                 // bis ein passender Hit anfängt, läuft ein Sender mit Musik, der Mix springt dann selbst um
-                val item = first ?: anyMusicStation()
-                return MediaSession.MediaItemsWithStartPosition(
-                    listOfNotNull(item), if (item == null) C.INDEX_UNSET else 0, C.TIME_UNSET
-                )
+                return MediaSession.MediaItemsWithStartPosition(listOf(first ?: anyMusicStation()), 0, C.TIME_UNSET)
             }
             bedtime = false
             // Etwas anderes gewählt: Hit-Mix beenden
             if (hitMix.isActive) { hitMix.stop(); updateFavButton() }
             val resolved = mediaItems.mapNotNull { safeResolve(it) }.ifEmpty {
                 // Nichts gefunden (z. B. Sprachbefehl): lieber den Hit-Mix als eine Fehlermeldung
-                listOfNotNull(hitMix.start(null) ?: anyMusicStation())
+                listOf((try { hitMix.start(null) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null })
+                    ?: anyMusicStation())
             }
             // Ein einzelnes freies Lied aus einer Liste: ganze Liste laden, damit "Weiter" geht
             if (resolved.size == 1) {
@@ -1206,6 +1228,11 @@ class PlaybackService : MediaLibraryService() {
             return MediaSession.MediaItemsWithStartPosition(resolved, index, pos)
         }
     }
+
+    /** Map mit Obergrenze (am längsten nicht benutzte Einträge fliegen raus), sicher bei mehreren Threads. */
+    private fun <K, V> lru(max: Int): MutableMap<K, V> = Collections.synchronizedMap(object : LinkedHashMap<K, V>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?) = size > max
+    })
 
     /** Ein Eintrag, der sich gerade nicht auflösen lässt (Netzfehler), wird übersprungen statt alles abzubrechen. */
     private suspend fun safeResolve(item: MediaItem): MediaItem? =
