@@ -850,8 +850,10 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     val genre = args.getString("genre")?.takeIf { it.isNotBlank() }
                     scope.launch {
-                        val item = try { hitMix.start(genre) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
-                            ?: anyMusicStation()
+                        val started = try { hitMix.start(genre) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+                        // Während des Starts gestoppt: nichts abspielen (Stopp bleibt Stopp)
+                        if (started == null && !hitMix.isActive) { updateFavButton(); return@launch }
+                        val item = started ?: anyMusicStation()
                         val p = session?.player
                         if (p != null) { p.setMediaItem(item); p.prepare(); p.play() }
                         updateFavButton()
