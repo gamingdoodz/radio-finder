@@ -1027,10 +1027,9 @@ class PlaybackService : MediaLibraryService() {
                 else -> when {
                     parentId.startsWith("cat:") -> {
                         val cat = Podcasts.all.firstOrNull { it.key == parentId.removePrefix("cat:") }
-                        cat?.let { Podcasts.shows(it) }.orEmpty().map { show ->
-                            shows["show:" + show.id] = show
-                            folderItem("show:" + show.id, show.name)
-                        }
+                        val list = cat?.let { Podcasts.shows(it) }.orEmpty()
+                        rememberShows(list)
+                        list.map { show -> folderItem("show:" + show.id, show.name) }
                     }
                     parentId.startsWith("ftag:") -> {
                         val tag = parentId.removePrefix("ftag:")
@@ -1038,7 +1037,7 @@ class PlaybackService : MediaLibraryService() {
                         Jamendo.many(tag).map { it.toMediaItem() }
                     }
                     parentId.startsWith("show:") ->
-                        shows[parentId]?.let { Podcasts.episodes(it) }.orEmpty().map { it.toMediaItem() }
+                        findShow(parentId)?.let { Podcasts.episodes(it) }.orEmpty().map { it.toMediaItem() }
                     else -> emptyList()
                 }
             } } } catch (e: kotlinx.coroutines.CancellationException) { if (e is kotlinx.coroutines.TimeoutCancellationException) emptyList() else throw e }
@@ -1230,6 +1229,25 @@ class PlaybackService : MediaLibraryService() {
             return MediaSession.MediaItemsWithStartPosition(resolved, index, pos)
         }
     }
+
+    /** Hörspiel-Ordner auch nach einem Neustart der App wiederfinden (Android Auto merkt sich die Ordner). */
+    private fun showPrefs() = getSharedPreferences("aa_shows", MODE_PRIVATE)
+
+    private fun rememberShows(list: List<Entry>) {
+        if (list.isEmpty()) return
+        val p = showPrefs()
+        val e = p.edit()
+        if (p.all.size > 500) e.clear()
+        list.forEach { show ->
+            shows["show:" + show.id] = show
+            e.putString("show:" + show.id, show.toJson().toString())
+        }
+        e.apply()
+    }
+
+    private fun findShow(id: String): Entry? = shows[id] ?: try {
+        showPrefs().getString(id, null)?.let { Entry.fromJson(org.json.JSONObject(it)) }?.also { shows[id] = it }
+    } catch (_: Exception) { null }
 
     /** Map mit Obergrenze (am längsten nicht benutzte Einträge fliegen raus), sicher bei mehreren Threads. */
     private fun <K, V> lru(max: Int): MutableMap<K, V> = Collections.synchronizedMap(object : LinkedHashMap<K, V>(64, 0.75f, true) {
