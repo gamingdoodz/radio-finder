@@ -131,7 +131,16 @@ class WatchService : Service() {
             }
         }
 
-        fun status(context: Context): String = prefs(context).getString("status", "") ?: ""
+        /** Läuft der Dienst wirklich? (Nach einem Absturz oder Neustart des Handys bleibt "status" sonst stehen.) */
+        @Volatile var running = false
+            private set
+
+        fun status(context: Context): String = if (!running) "" else prefs(context).getString("status", "") ?: ""
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        running = true
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -307,6 +316,7 @@ class WatchService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         scope.cancel()
         prefs(this).edit().remove("status").apply()
         super.onDestroy()

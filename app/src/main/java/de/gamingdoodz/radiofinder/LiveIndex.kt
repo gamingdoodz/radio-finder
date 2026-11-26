@@ -29,6 +29,7 @@ object LiveIndex {
     /** Klammern im Titel (Remix, feat. …) – einmal anlegen statt bei jedem Vergleich neu. */
     private val BRACKETS = Regex("\\(.*?\\)|\\[.*?\\]")
     private const val MAX_AGE = 4 * 60_000L
+    private const val PRUNE_AGE = 20 * 60_000L
     /** Lieder mit unbekanntem Anfang gelten als 30 Minuten alt. */
     const val UNKNOWN_AGE = 30 * 60_000L
 
@@ -108,6 +109,8 @@ object LiveIndex {
      */
     fun rebuild() {
         val t = System.currentTimeMillis()
+        // Alte Einträge wegwerfen, sonst wächst die Liste den ganzen Tag (Speicher)
+        map.values.removeAll { t - it.time > PRUNE_AGE }
         val f = map.values.filter { t - it.time < MAX_AGE }
         val pop = f.groupingBy { it.normalized }.eachCount()
         val m = HashMap<String, MutableList<Now>>()

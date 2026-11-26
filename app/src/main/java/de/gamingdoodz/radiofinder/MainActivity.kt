@@ -320,6 +320,8 @@ class MainActivity : ComponentActivity() {
         controllerFuture = future
         future.addListener({
             val c = try { future.get() } catch (_: Exception) { return@addListener }
+            // Inzwischen onStop gewesen (Future schon freigegeben)? Dann diesen Player nicht mehr benutzen
+            if (controllerFuture !== future) return@addListener
             controller = c
             c.addListener(object : Player.Listener {
                 override fun onEvents(player: Player, events: Player.Events) {
@@ -337,7 +339,7 @@ class MainActivity : ComponentActivity() {
         checkUpdate()
         // Wunschliste vorhanden, aber Wächter läuft nicht mehr (z. B. nach Neustart): weitermachen
         val wishes = WatchService.queries(this)
-        if (wishes.isNotEmpty() && WatchService.status(this).isEmpty()) {
+        if (wishes.isNotEmpty() && !WatchService.running) {
             if (WatchService.expired(this)) WatchService.stop(this)
             else try { WatchService.start(this, wishes.first()) } catch (_: Exception) {}
         }
@@ -2156,6 +2158,8 @@ class MainActivity : ComponentActivity() {
 
     /** Eigenes Auswahlfenster, das von unten hereinfährt. */
     private fun sheet(title: String, sub: String, art: String?, name: String, station: Boolean, hint: String?, options: List<Option>) {
+        // App wird gerade geschlossen: kein Fenster mehr öffnen (sonst Absturz "BadTokenException")
+        if (isFinishing || isDestroyed) return
         val v = layoutInflater.inflate(R.layout.dialog_sheet, null)
         val d = android.app.Dialog(this)
         d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
