@@ -24,6 +24,36 @@ from aiohttp import web
 PORT = int(os.environ.get("PORT", "8080"))
 MAX_STATIONS = int(os.environ.get("MAX_STATIONS", "12000"))
 CONCURRENCY = int(os.environ.get("CONCURRENCY", "250"))
+
+# ---------- Absprache mit dem Spiel (Valdrakor) auf demselben Server ----------
+# Das Spiel entscheidet, wer wie viel Leistung bekommt. Es meldet unter /api/last, ob Hitradar
+# zurückstecken soll ("hitradar": "low"). Dann: nur ein Drittel der Abfragen, seltener nachschauen,
+# keine KI-Anfragen und keine Cover-Suche. Antwortet das Spiel nicht, läuft Hitradar normal (innerhalb
+# der Grenzen, die das Spiel per systemd gesetzt hat – die werden hier nie verändert).
+GAME_LAST_URL = os.environ.get("GAME_LAST_URL", "http://127.0.0.1:8100/api/last")
+SPAR = {"low": False, "stufe": 0, "since": 0}
+
+
+async def follow_game():
+    fails = 0
+    async with aiohttp.ClientSession() as s:
+        while True:
+            try:
+                async with s.get(GAME_LAST_URL, timeout=aiohttp.ClientTimeout(total=4)) as r:
+                    d = await r.json(content_type=None)
+                fails = 0
+                low = d.get("hitradar") == "low"
+                if low != SPAR["low"]:
+                    SPAR["since"] = int(time.time())
+                    print("Spiel: Hitradar " + ("spart jetzt" if low else "wieder normal"), flush=True)
+                SPAR["low"] = low
+                SPAR["stufe"] = int(d.get("stufe") or 0)
+            except Exception:
+                fails += 1
+                if fails >= 3:
+                    SPAR["low"] = False
+                    SPAR["stufe"] = 0
+            await asyncio.sleep(30)
 FRESH_SECONDS = 6 * 60
 UA = "RadarServer/1.0"
 RB_SERVERS = ["de1.api.radio-browser.info", "fi1.api.radio-browser.info", "de2.api.radio-browser.info"]
@@ -162,7 +192,7 @@ cover_queue: dict = {}   # norm -> Titel, dessen Länge/Cover noch geholt werden
 async def cover_worker():
     """Holt Liedlängen nach und nach (Deezer erlaubt nur wenige Anfragen pro Sekunde)."""
     while True:
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(5 if SPAR["low"] else 0.4)
         if not cover_queue or "session" not in SHARED:
             continue
         norm, title = next(iter(cover_queue.items()))
@@ -477,6 +507,8 @@ async def ask_llm(session, q: str):
     schema = {"type": "object", "properties": {
         "genre": {"type": "string", "enum": list(GENRES)},
         "artist": {"type": "string", "maxLength": 40}}, "required": ["genre", "artist"]}
+    if SPAR["low"]:
+        raise RuntimeError("Spiel braucht die Leistung")   # Stichwort-Regeln antworten stattdessen
     async with _llm_lock:
         async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 32, "temperature": 0.1,
                                                "json_schema": schema, "cache_prompt": True},
@@ -805,9 +837,13 @@ def schedule_all():
         heapq.heappush(due, (t + i * 0.002, st["id"]))
 
 
-async def worker(session, ids):
+async def worker(session, ids, n=0):
     import heapq
     while True:
+        # Spiel braucht Leistung: nur jeder dritte Abfrager arbeitet weiter
+        if SPAR["low"] and n % 3 != 0:
+            await asyncio.sleep(5)
+            continue
         if not due:
             await asyncio.sleep(1)
             continue
@@ -824,6 +860,8 @@ async def worker(session, ids):
             nxt = await check(session, st)
         except Exception:
             nxt = 600
+        if SPAR["low"]:
+            nxt *= 1.5
         heapq.heappush(due, (time.time() + nxt, sid))
 
 
@@ -840,7 +878,7 @@ async def scanner():
         asyncio.create_task(cover_worker())
         ids: dict = {}
         # Sofort mit der gespeicherten Liste loslegen, die frische Liste kommt danach
-        workers = [asyncio.create_task(worker(session, ids)) for _ in range(CONCURRENCY)]
+        workers = [asyncio.create_task(worker(session, ids, i)) for i in range(CONCURRENCY)]
         if load_cached_stations():
             ids.update({s["id"]: s for s in stations})
             schedule_all()
@@ -1321,7 +1359,8 @@ def gz(resp):
 async def h_health(_):
     return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()),
                               "checked": stats["checked"], "queue": len(due),
-                              "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"]})
+                              "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"],
+                              "spar": SPAR["low"], "spiel_stufe": SPAR["stufe"]})
 
 
 _search_cache: dict = {}  # Suchwörter -> (Zeit, Antwort)
@@ -1448,6 +1487,7 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     print(f"Radar-Server läuft auf Port {PORT}", flush=True)
+    asyncio.create_task(follow_game())
     await scanner()
 
 
