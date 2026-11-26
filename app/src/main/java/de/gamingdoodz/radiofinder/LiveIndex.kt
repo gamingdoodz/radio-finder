@@ -9,8 +9,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object LiveIndex {
     /** time = zuletzt gesehen, since = seit wann dieser Titel auf dem Sender läuft. */
-    class Now(val station: Station, val title: String, val time: Long, val since: Long) {
-        val normalized: String = Scanner.normalize(title)
+    class Now(val station: Station, val title: String, val time: Long, val since: Long, norm: String? = null) {
+        val normalized: String = norm ?: Scanner.normalize(title)
     }
 
     /** Ein Song zum Wiedererkennen im Radio (Titel- und Künstlerwörter). */
@@ -69,6 +69,20 @@ object LiveIndex {
         val since = if (old != null && old.title == title && t - old.time < MAX_AGE) (if (sinceMs > 0) minOf(old.since, sinceMs) else old.since)
         else if (sinceMs in 1..t) sinceMs else if (sinceMs < 0) t - UNKNOWN_AGE else t
         map[s.id] = Now(old?.station ?: s, title, t, since)
+    }
+
+    /**
+     * Server meldet: Titel auf diesem Sender unverändert, zuletzt gesehen zu seenMs.
+     * Nur die Zeit erneuern (ohne Titel neu zu bereinigen und zu zerlegen). Spart bei tausenden Sendern viel Rechenzeit.
+     */
+    fun touchRemote(s: Station, raw: String, sinceMs: Long, seenMs: Long) {
+        val old = map[s.id] ?: return putRemote(s, raw, sinceMs, seenMs)
+        val now = System.currentTimeMillis()
+        val t = if (seenMs in 1..now) seenMs else now
+        if (old.time >= t) return
+        // Lange nichts gehört: wie bisher komplett übernehmen (Liedanfang neu bestimmen)
+        if (t - old.time >= MAX_AGE) return putRemote(s, raw, sinceMs, seenMs)
+        map[s.id] = Now(old.station, old.title, t, old.since, old.normalized)
     }
 
     private val talkWords = Regex("(?i)nachrichten|news|verkehr|wetter|werbung|podcast|interview|magazin|sendung|moderation|gewinnspiel")

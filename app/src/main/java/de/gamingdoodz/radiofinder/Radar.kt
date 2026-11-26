@@ -87,9 +87,12 @@ object Radar {
         val t = o.optLong("t") * 1000L
         if (full) known.clear()
         val rows = o.optJSONArray("rows") ?: return false
+        // Nur geänderte Sender komplett übernehmen, bei den anderen nur die Zeit erneuern
+        val changed = HashSet<String>()
         for (i in 0 until rows.length()) {
             val r = rows.optJSONArray(i) ?: continue
             val id = r.optString(0)
+            changed.add(id)
             if (r.length() >= 7) {
                 if (!Region.allows(if (r.length() >= 8) r.optString(7) else null)) continue
                 val st = Station(id, r.optString(1, "Radio"), r.optString(2), r.optString(3), false)
@@ -105,7 +108,10 @@ object Radar {
         o.optJSONArray("gone")?.let { g -> for (i in 0 until g.length()) known.remove(g.optString(i)) }
         // Unveränderte Einträge sind laut Server weiterhin aktuell
         if (!full) known.values.forEach { if (it.seen < t) it.seen = t }
-        known.values.forEach { LiveIndex.putRemote(it.station, it.title, it.since, it.seen) }
+        known.forEach { (id, it) ->
+            if (full || id in changed) LiveIndex.putRemote(it.station, it.title, it.since, it.seen)
+            else LiveIndex.touchRemote(it.station, it.title, it.since, it.seen)
+        }
         version = o.optLong("v")
         return known.isNotEmpty()
     }

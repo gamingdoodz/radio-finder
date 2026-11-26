@@ -79,8 +79,17 @@ class PlaybackService : MediaLibraryService() {
     private val posRunnable = object : Runnable {
         override fun run() {
             savePosition()
-            sleepHandler.postDelayed(this, 15_000)
+            // Nur solange etwas läuft: pausiert muss das Handy nicht alle 15 s aufwachen
+            if (session?.player?.isPlaying == true) sleepHandler.postDelayed(this, 15_000)
         }
+    }
+
+    /** Wiedergabe läuft (wieder): Position merken und Werbe-Prüfung starten. */
+    private fun startPlayingChecks() {
+        sleepHandler.removeCallbacks(posRunnable)
+        sleepHandler.postDelayed(posRunnable, 15_000)
+        sleepHandler.removeCallbacks(adMuteCheck)
+        sleepHandler.post(adMuteCheck)
     }
 
     /** Wo war man bei der Geschichte? Wird regelmäßig gespeichert. */
@@ -273,7 +282,13 @@ class PlaybackService : MediaLibraryService() {
                 val title = player.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() }
                     ?: m?.title?.toString()?.takeIf { it.isNotBlank() } ?: m?.artist?.toString() ?: "Hitradar"
                 val sub = HitMix.activeName(this@PlaybackService)?.let { "⚡ Hit-Mix · $it" } ?: m?.artist?.toString().orEmpty()
-                RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying, item?.let { Favorites.isFav(this@PlaybackService, it.mediaId) } == true)
+                val fav = item?.let { Favorites.isFav(this@PlaybackService, it.mediaId) } == true
+                // Nur bei echter Änderung (sonst bei jedem Player-Ereignis Speichern + Widget neu zeichnen)
+                val key = "$title|$sub|${player.isPlaying}|$fav"
+                if (key != widgetKey) {
+                    widgetKey = key
+                    RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying, fav)
+                }
                 updateWidgetArt(m?.artworkUri?.toString())
             }
 
@@ -325,7 +340,7 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying) savePosition()
+                if (!isPlaying) savePosition() else startPlayingChecks()
                 if (isPlaying && stationStart == 0L && session?.player?.currentMediaItem?.mediaId?.startsWith("st:") == true) {
                     stationStart = System.currentTimeMillis()
                 }
@@ -344,6 +359,7 @@ class PlaybackService : MediaLibraryService() {
                 NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
                 adMuted = false
                 if (exo?.volume == 0f) exo?.volume = 1f
+                if (exo?.isPlaying == true) { sleepHandler.removeCallbacks(adMuteCheck); sleepHandler.post(adMuteCheck) }
                 // Tempo gilt nur für Hörspiele und Hörbücher
                 if (!isStory(mediaItem?.mediaId)) session?.player?.setPlaybackSpeed(1f)
                 if (mediaItem?.mediaId?.startsWith("jm:") == true) checkEndless() else if (mediaItem != null) endlessTag = null
@@ -387,8 +403,6 @@ class PlaybackService : MediaLibraryService() {
         Settings.prefs(this).registerOnSharedPreferenceChangeListener(settingsListener)
         // Ein alter Hit-Mix von vor einem Neustart läuft nicht mehr
         HitMix.prefs(this).edit().clear().apply()
-        sleepHandler.postDelayed(posRunnable, 15_000)
-        sleepHandler.postDelayed(adMuteCheck, 1_000)
         // Schlaf-Timer nach Neustart des Dienstes wiederherstellen
         val left = Settings.sleepEnd(this) - System.currentTimeMillis()
         if (left > 0) sleepHandler.postDelayed(sleepRunnable, (left - 60_000L).coerceAtLeast(0L)) else Settings.setSleepEnd(this, 0L)
@@ -436,8 +450,10 @@ class PlaybackService : MediaLibraryService() {
     /** Bekannte Vorab-Werbung eines Senders: stumm schalten, bis Musik kommt (höchstens die gelernte Dauer + 10 s). */
     private val adMuteCheck = object : Runnable {
         override fun run() {
-            sleepHandler.postDelayed(this, 1_000)
             val p = exo ?: return
+            // Nur prüfen, solange es etwas bringt: es läuft, und die Werbung am Senderanfang (höchstens ~3 Min.) ist noch möglich.
+            // Startet wieder beim nächsten Sender bzw. beim Weiterspielen.
+            if (p.isPlaying && (adMuted || NowSong.sinceTune() < 195_000L)) sleepHandler.postDelayed(this, 1_000)
             val id = NowSong.stationId ?: return
             if (!Settings.muteAds(this@PlaybackService) || session?.player !== localPlayer || !p.isPlaying) return
             val known = Ads.duration(this@PlaybackService, id)
@@ -496,6 +512,9 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 // Sender geht auf dem Lautsprecher nicht: im Hit-Mix einfach weiter
                 if (hitMix.isActive) scope.launch { hitMix.next() }
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) startPlayingChecks() else savePosition()
             }
         })
         cp.setSessionAvailabilityListener(object : SessionAvailabilityListener {
@@ -587,6 +606,8 @@ class PlaybackService : MediaLibraryService() {
     private var widgetArtUrl: String? = null
 
     /** Bild fürs Widget laden (nur wenn es sich geändert hat). */
+    private var widgetKey = ""
+
     private fun updateWidgetArt(url: String?) {
         if (url == widgetArtUrl) return
         widgetArtUrl = url

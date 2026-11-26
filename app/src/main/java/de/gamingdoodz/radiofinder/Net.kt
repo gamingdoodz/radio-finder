@@ -13,6 +13,9 @@ object Net {
         c.connectTimeout = connectMs
         c.readTimeout = readMs
         c.setRequestProperty("User-Agent", "Hitradar/1.0")
+        // Verbindung nach Erfolg offen lassen (Keep-Alive): die nächste Abfrage braucht keinen neuen
+        // Verbindungsaufbau mit Verschlüsselung. Spart Akku, Daten und Server-Last. Nur bei Fehlern trennen.
+        var ok = false
         try {
             if (c.responseCode != 200) null else {
                 val out = ByteArrayOutputStream()
@@ -25,10 +28,11 @@ object Net {
                         if (out.size() > maxBytes) return null
                     }
                 }
+                ok = true
                 out.toString("UTF-8")
             }
         } finally {
-            c.disconnect()
+            if (!ok) c.disconnect()
         }
     } catch (_: Exception) {
         null

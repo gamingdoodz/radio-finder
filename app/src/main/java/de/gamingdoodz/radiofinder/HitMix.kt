@@ -1,6 +1,7 @@
 package de.gamingdoodz.radiofinder
 
 import android.content.Context
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import kotlinx.coroutines.CoroutineScope
@@ -570,11 +571,22 @@ class HitMix(
         val p = player() ?: return
         if (p.mediaItemCount == 0) return
         val idx = p.currentMediaItemIndex
+        val items = next.map { c ->
+            Covers.dress(c.now.station.toEntry(c.now.title)).toMediaItem().let { m ->
+                val extras = Bundle(m.mediaMetadata.extras ?: Bundle.EMPTY).apply { putString("hm_title", c.now.title) }
+                m.buildUpon().setMediaMetadata(m.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+            }
+        }
+        queued = next.associateBy { "st:" + it.now.station.id }
+        // Gleiche Vorschau wie schon in der Liste (gleiche Sender, Lieder, Bilder): nichts anfassen.
+        // Sonst bauen Android Auto, Benachrichtigung und Widget alle 20 s alles neu auf.
+        fun sig(m: MediaItem) = listOf(m.mediaId, m.mediaMetadata.extras?.getString("hm_title"), m.mediaMetadata.artworkUri?.toString(), m.mediaMetadata.title?.toString())
+        if (idx == 0 && items.isNotEmpty() && p.mediaItemCount == items.size + 1 &&
+            items.indices.all { sig(items[it]) == sig(p.getMediaItemAt(it + 1)) }) return
         if (p.mediaItemCount > idx + 1) p.removeMediaItems(idx + 1, p.mediaItemCount)
         if (idx > 0) p.removeMediaItems(0, idx)
-        queued = next.associateBy { "st:" + it.now.station.id }
         // In der Liste mit Liedtitel und Sender anzeigen
-        if (next.isNotEmpty()) p.addMediaItems(next.map { Covers.dress(it.now.station.toEntry(it.now.title)).toMediaItem() })
+        if (items.isNotEmpty()) p.addMediaItems(items)
     }
 
     private var queued: Map<String, Choice> = emptyMap()
