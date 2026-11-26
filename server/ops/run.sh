@@ -1,10 +1,8 @@
 #!/bin/bash
-# Nur lesen: Absprachen des Spiels (Valdrakor) zur Server-Leistung
+# Nur lesen (keine Geheimnisse ausgeben): Absprache des Spiels zu Hitradar
 V=/opt/valdrakor
-echo "== hitradar-sparsam.yml =="; cat $V/.github/workflows/hitradar-sparsam.yml
-echo "== README (Leistung/Hitradar) =="; grep -niE -B2 -A8 "hitradar|radar|leistung|cpu|ressourc|budget|prior" $V/README.md | head -120
-echo "== RUNNER.md =="; grep -niE -B2 -A6 "hitradar|radar|leistung|cpu|ressourc|prior" $V/ops/RUNNER.md | head -60
-echo "== weitere Absprache-Dateien =="; ls $V/ops; grep -rlIiE "hitradar|radar" $V/ops $V/docs 2>/dev/null
-for f in $(grep -rlIiE "hitradar|radar\.service" $V/ops $V/docs $V/scripts 2>/dev/null | grep -vE "RUNNER.md|RESTORE.md"); do echo "== $f =="; grep -niE -B3 -A10 "hitradar|radar" $f | head -60; done
-echo "== radar drop-ins =="; ls -la /etc/systemd/system/radar.service.d/; head -30 /etc/systemd/system/radar.service.d/*
-echo "== Last-Dienst =="; systemctl cat valdrakor-last --no-pager | head -30
+echo "== hitradar-sparsam.yml =="; grep -viE "key|pass|secret|token" $V/.github/workflows/hitradar-sparsam.yml | head -80
+echo "== README (Hitradar) =="; grep -niE -A4 "hitradar" $V/README.md | grep -viE "key|pass|secret|token" | head -50
+echo "== /api/last =="; curl -s -m 5 http://127.0.0.1:8100/api/last | head -c 600; echo
+echo "== llm.service =="; systemctl show -p CPUWeight -p Nice -p MemoryHigh -p CPUQuotaPerSecUSec llm.service; ls /etc/systemd/system/llm.service.d 2>/dev/null
+echo "== radar jetzt =="; systemctl show -p CPUWeight -p Nice -p CPUQuotaPerSecUSec radar.service
