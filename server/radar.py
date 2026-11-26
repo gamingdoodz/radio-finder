@@ -207,6 +207,7 @@ def _setze(modus: str, quelle: str):
 async def follow_game():
     melden("leicht")
     ohne_datei_seit = None
+    letzte_api = None
     async with aiohttp.ClientSession() as s:
         while True:
             modus, quelle = None, ""
@@ -217,8 +218,13 @@ async def follow_game():
                 modus, quelle = _level(d), "api/last"
                 if modus is None and d.get("hitradar") in ("low", "normal"):
                     modus = "sparsam" if d.get("hitradar") == "low" else "frei"   # ältere Spiel-Version
+                if modus:
+                    letzte_api = (time.time(), modus)
             except Exception:
                 modus = None
+            # Kurzer Aussetzer von /api/last: letzte Antwort gilt noch 2 Minuten (kein Hin und Her)
+            if modus is None and letzte_api and time.time() - letzte_api[0] < 120:
+                modus, quelle = letzte_api[1], "api/last"
             if modus is None:
                 try:
                     if time.time() - os.path.getmtime(LAGE_FILE) < 120:

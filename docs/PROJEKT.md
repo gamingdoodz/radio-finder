@@ -71,7 +71,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
     `{"prio":"hitradar","was":"Radio und KI","unit":"radar.service","jetzt":"leicht","bis":0,"cpu":50,"ramMb":1200,"t":<ms jetzt>}`.
     Vor schwerer Arbeit `"jetzt":"schwer"` mit `"bis"` (höchstens 6 h), danach zurück auf `"leicht"`. `ramMb` ehrlich angeben (wird gemessen).
   - **Updates/Neustarts** (Regel vom 26.11.): vorher `"jetzt":"update"` mit `"bis"` (höchstens 1 h), erst starten, wenn in `lage.json`
-    `updateErlaubt` true ist; steht bei `updateDran` `"spiel"`, warten (Spiel hat immer Vorrang, immer nur ein Update gleichzeitig).
+    `updateErlaubt` true ist (fehlt die Datei, gleiche Felder aus `/api/last`); steht bei `updateDran` `"spiel"`, warten (Spiel hat immer Vorrang, immer nur ein Update gleichzeitig).
     Danach sofort `"leicht"`. Umgesetzt in `server/radar-update.sh` (= `/usr/local/bin/radar-update`, stündlich per cron und vom Workflow
     „Server aktualisieren“) mit `server/absprache.py`. Wartet höchstens 25 Minuten; sonst bleibt der Neustart vorgemerkt
     (`/var/lib/hitradar-neustart-offen`) und der nächste Lauf versucht es wieder. Nie `systemctl restart radar` von Hand ohne diese Absprache.
@@ -108,4 +108,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: Prüfregel Commit-Texte: Pushes mit Mitautor- oder Sitzungs-Zeilen werden rot. Ein Commit nachträglich bereinigt (main neu geschrieben, Inhalt gleich): alle Arbeitskopien mit `git pull --rebase` holen.
 - 26.11.: App sparsamer: Werbe-Prüfung (jede Sekunde) und Positions-Speichern laufen nur noch während der Wiedergabe bzw. in den ersten ~3 Minuten nach Senderwechsel; Widget nur bei echter Änderung neu zeichnen; Hit-Mix baut die Liste „Als Nächstes“ nicht mehr alle 20 s neu, wenn sie gleich bleibt (weniger Arbeit für Android Auto); Server-Abgleich übernimmt nur geänderte Sender komplett; Verbindungen zum Server bleiben offen (Keep-Alive, kein neuer Verbindungsaufbau je Abfrage, entlastet auch den Server).
 - 26.11.: Hitradar sparsamer: ein Verteiler statt 250 Abfrager (kaum noch Leerlauf-CPU), KI startet nur bei Bedarf (spart ~1 GB RAM), ehrliche cpu/ramMb stündlich gemeldet.
-- 26.11.: Anmeldung mit "unit":"radar.service"; Hinweise des Spiels (hinweise/hitradar.json) werden täglich gelesen und in /health gezeigt.
+- 26.11.: Anmeldung mit "unit":"radar.service"; Hinweise des Spiels (hinweise/hitradar.json) werden täglich gelesen und in /health gezeigt. Update-Freigabe auch aus /api/last, falls lage.json fehlt (nach Neustart des Servers fehlte sie). Kurze Aussetzer von /api/last lassen die Stufe nicht mehr hin und her springen.

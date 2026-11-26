@@ -74,16 +74,37 @@ def _feld(d, name):
     return None
 
 
-def darf() -> tuple[bool, str]:
+GAME_LAST_URL = os.environ.get("GAME_LAST_URL", "http://127.0.0.1:8100/api/last")
+
+
+def _lage():
+    """lage.json (frisch, höchstens 2 Minuten alt); fehlt sie, dieselben Felder aus /api/last des Spiels."""
+    grund = "lage.json fehlt"
     try:
-        if time.time() - os.path.getmtime(LAGE_FILE) > 120:
-            return False, "lage.json älter als 2 Minuten"
-        with open(LAGE_FILE, encoding="utf-8") as h:
-            d = json.load(h)
+        if time.time() - os.path.getmtime(LAGE_FILE) <= 120:
+            with open(LAGE_FILE, encoding="utf-8") as h:
+                return json.load(h), ""
+        grund = "lage.json älter als 2 Minuten"
     except FileNotFoundError:
-        return False, "lage.json fehlt"
+        pass
     except Exception:
-        return False, "lage.json nicht lesbar"
+        grund = "lage.json nicht lesbar"
+    try:
+        import urllib.request
+        with urllib.request.urlopen(GAME_LAST_URL, timeout=5) as r:
+            d = json.loads(r.read(1_000_000))
+        if _feld(d, "updateErlaubt") is not None or _feld(d, "updateDran") is not None:
+            return d, ""
+        grund += ", /api/last ohne updateErlaubt"
+    except Exception:
+        grund += ", /api/last nicht erreichbar"
+    return None, grund
+
+
+def darf() -> tuple[bool, str]:
+    d, grund = _lage()
+    if d is None:
+        return False, grund
     dran = str(_feld(d, "updateDran") or "").strip().lower()
     if dran == "spiel":
         return False, "Spiel rollt aus (updateDran spiel)"
