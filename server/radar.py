@@ -25,34 +25,125 @@ PORT = int(os.environ.get("PORT", "8080"))
 MAX_STATIONS = int(os.environ.get("MAX_STATIONS", "12000"))
 CONCURRENCY = int(os.environ.get("CONCURRENCY", "250"))
 
-# ---------- Absprache mit dem Spiel (Valdrakor) auf demselben Server ----------
-# Das Spiel entscheidet, wer wie viel Leistung bekommt. Es meldet unter /api/last, ob Hitradar
-# zurückstecken soll ("hitradar": "low"). Dann: nur ein Drittel der Abfragen, seltener nachschauen,
-# keine KI-Anfragen und keine Cover-Suche. Antwortet das Spiel nicht, läuft Hitradar normal (innerhalb
-# der Grenzen, die das Spiel per systemd gesetzt hat – die werden hier nie verändert).
+# ---------- Serverabsprache (das Spiel Valdrakor entscheidet, wer wie viel Leistung bekommt) ----------
+# Valdrakor schreibt alle 30 s /run/serverabsprache/lage.json mit "frei", "sparsam" oder "pause" je Dienst.
+#   frei    -> normal (innerhalb der systemd-Grenzen, die das Spiel setzt – die werden hier nie verändert)
+#   sparsam -> nur ein Drittel der Abfragen, seltener nachschauen, keine KI, keine Cover-Suche
+#   pause   -> keine Abfragen, keine KI, keine Cover; die App bekommt weiter den letzten Stand
+# Ist die Datei älter als 2 Minuten oder fehlt sie: Rückfall auf /api/last des Spiels, sonst "frei".
+LAGE_FILE = os.environ.get("ABSPRACHE_LAGE", "/run/serverabsprache/lage.json")
+ANMELDE_DIR = os.environ.get("ABSPRACHE_DIR", "/var/lib/serverabsprache")
 GAME_LAST_URL = os.environ.get("GAME_LAST_URL", "http://127.0.0.1:8100/api/last")
-SPAR = {"low": False, "stufe": 0, "since": 0}
+DIENST = "hitradar"
+SPAR = {"low": False, "pause": False, "modus": "frei", "quelle": "start", "stufe": 0, "since": 0}
+
+
+def _modus_aus_lage(d):
+    """Sucht den Eintrag für Hitradar, egal ob flach ({"hitradar": "sparsam"}) oder verschachtelt."""
+    namen = (DIENST, "radar", "radar.service", "Hitradar")
+    def wert(v):
+        if isinstance(v, str):
+            return v.strip().lower()
+        if isinstance(v, dict):
+            for k in ("modus", "mode", "stufe", "status", "lage"):
+                if isinstance(v.get(k), str):
+                    return v[k].strip().lower()
+        return None
+    if not isinstance(d, dict):
+        return None
+    for n in namen:
+        if n in d and wert(d[n]):
+            return wert(d[n])
+    for k in ("dienste", "services", "lage", "modus"):
+        sub = d.get(k)
+        if isinstance(sub, dict):
+            m = _modus_aus_lage(sub)
+            if m:
+                return m
+        if isinstance(sub, list):
+            for e in sub:
+                if isinstance(e, dict) and str(e.get("name", e.get("dienst", ""))).lower() in namen:
+                    m = wert(e)
+                    if m:
+                        return m
+    return None
+
+
+def anmelden():
+    """Einmal beim Serverabsprache-Verzeichnis anmelden: wer Hitradar ist und was die Stufen bedeuten."""
+    info = {
+        "dienst": DIENST,
+        "name": "Hitradar (Radio-Suche für die Hitradar-App)",
+        "projekt": "github.com/gamingdoodz/radio-finder",
+        "units": ["radar.service", "llm.service"],
+        "ports": {"radar": 8081, "llm": 8090, "caddy": [80, 443, 8080]},
+        "health": "http://127.0.0.1:8081/health",
+        "liest": LAGE_FILE,
+        "stufen": {
+            "frei": "normal, innerhalb der systemd-Grenzen des Spiels",
+            "sparsam": "ein Drittel der Abfragen, seltener nachschauen, keine KI, keine Cover-Suche",
+            "pause": "keine Abfragen, keine KI, keine Cover; App bekommt weiter den letzten Stand",
+        },
+        "rueckfall": "lage.json fehlt oder älter als 120 s -> /api/last, sonst frei",
+        "aendert_nie": ["Drossel-Dateien des Spiels unter /etc/systemd/system/radar.service.d/"],
+        "angemeldet": int(time.time()),
+    }
+    try:
+        os.makedirs(ANMELDE_DIR, exist_ok=True)
+        f = os.path.join(ANMELDE_DIR, DIENST + ".json")
+        try:
+            with open(f, encoding="utf-8") as h:
+                alt = json.load(h)
+            alt.pop("angemeldet", None)
+            same = alt == {k: v for k, v in info.items() if k != "angemeldet"}
+        except Exception:
+            same = False
+        if not same:
+            with open(f + ".tmp", "w", encoding="utf-8") as h:
+                json.dump(info, h, ensure_ascii=False, indent=1)
+            os.chmod(f + ".tmp", 0o644)
+            os.replace(f + ".tmp", f)
+            print("Serverabsprache: angemeldet", flush=True)
+    except Exception as e:
+        print("Serverabsprache: Anmeldung nicht möglich:", e, flush=True)
+
+
+def _setze(modus: str, quelle: str):
+    modus = {"normal": "frei", "low": "sparsam", "aus": "pause", "stop": "pause"}.get(modus, modus)
+    if modus not in ("frei", "sparsam", "pause"):
+        modus = "frei"
+    if modus != SPAR["modus"]:
+        SPAR["since"] = int(time.time())
+        print(f"Serverabsprache: Hitradar -> {modus} ({quelle})", flush=True)
+    SPAR.update(modus=modus, quelle=quelle, low=modus != "frei", pause=modus == "pause")
 
 
 async def follow_game():
+    anmelden()
     fails = 0
     async with aiohttp.ClientSession() as s:
         while True:
+            modus = None
             try:
-                async with s.get(GAME_LAST_URL, timeout=aiohttp.ClientTimeout(total=4)) as r:
-                    d = await r.json(content_type=None)
-                fails = 0
-                low = d.get("hitradar") == "low"
-                if low != SPAR["low"]:
-                    SPAR["since"] = int(time.time())
-                    print("Spiel: Hitradar " + ("spart jetzt" if low else "wieder normal"), flush=True)
-                SPAR["low"] = low
-                SPAR["stufe"] = int(d.get("stufe") or 0)
+                if time.time() - os.path.getmtime(LAGE_FILE) < 120:
+                    with open(LAGE_FILE, encoding="utf-8") as h:
+                        modus = _modus_aus_lage(json.load(h))
             except Exception:
-                fails += 1
-                if fails >= 3:
-                    SPAR["low"] = False
-                    SPAR["stufe"] = 0
+                modus = None
+            if modus:
+                _setze(modus, "lage.json")
+                fails = 0
+            else:
+                try:
+                    async with s.get(GAME_LAST_URL, timeout=aiohttp.ClientTimeout(total=4)) as r:
+                        d = await r.json(content_type=None)
+                    fails = 0
+                    SPAR["stufe"] = int(d.get("stufe") or 0)
+                    _setze("sparsam" if d.get("hitradar") == "low" else "frei", "api/last")
+                except Exception:
+                    fails += 1
+                    if fails >= 3:
+                        _setze("frei", "keine Antwort")
             await asyncio.sleep(30)
 FRESH_SECONDS = 6 * 60
 UA = "RadarServer/1.0"
@@ -193,7 +284,7 @@ async def cover_worker():
     """Holt Liedlängen nach und nach (Deezer erlaubt nur wenige Anfragen pro Sekunde)."""
     while True:
         await asyncio.sleep(5 if SPAR["low"] else 0.4)
-        if not cover_queue or "session" not in SHARED:
+        if SPAR["pause"] or not cover_queue or "session" not in SHARED:
             continue
         norm, title = next(iter(cover_queue.items()))
         cover_queue.pop(norm, None)
@@ -851,7 +942,7 @@ async def worker(session, ids, n=0):
     import heapq
     while True:
         # Spiel braucht Leistung: nur jeder dritte Abfrager arbeitet weiter
-        if SPAR["low"] and n % 3 != 0:
+        if SPAR["pause"] or (SPAR["low"] and n % 3 != 0):
             await asyncio.sleep(5)
             continue
         if not due:
@@ -1370,7 +1461,8 @@ async def h_health(_):
     return web.json_response({"ok": True, "stations": len(stations), "live": len(fresh()),
                               "checked": stats["checked"], "queue": len(due),
                               "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"],
-                              "spar": SPAR["low"], "spiel_stufe": SPAR["stufe"]})
+                              "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"],
+                              "spiel_stufe": SPAR["stufe"]})
 
 
 _search_cache: dict = {}  # Suchwörter -> (Zeit, Antwort)
