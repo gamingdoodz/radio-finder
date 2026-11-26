@@ -124,7 +124,7 @@ object Radar {
     suspend fun sync(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         val t = System.currentTimeMillis()
         if (!force && t - lastTry < interval()) return@withContext ok
-        // Nach einem Fehler 5 Minuten Pause, damit die App nicht dauernd wartet
+        // Nach einem Fehler 1 Minute Pause, damit die App nicht dauernd wartet
         if (t - lastFail < 60_000L) return@withContext false
         if (!lock.tryLock()) return@withContext ok
         try {
