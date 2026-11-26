@@ -1,9 +1,8 @@
 #!/bin/bash
-# Senderzahl nach Spiel-Vorgabe
-# Hitradar ordnet sich dem Spiel unter: eigene KI mit kleinerem Rechenanteil. Danach prüfen (keine Geheimnisse ausgeben).
-systemctl set-property llm.service CPUWeight=25 >/dev/null 2>&1 && echo "llm.service: CPUWeight 25"
-sleep 120
-echo "== Hitradar =="; curl -s http://localhost:8081/health; echo
-journalctl -u radar --since "-2 min" --no-pager | grep -iE "Spiel|Traceback|Error" | tail -5
-echo "== Spiel =="; curl -s -m 5 http://127.0.0.1:8100/api/last; echo
-systemctl show -p CPUWeight radar.service llm.service
+# Nur lesen: neue Serverabsprache von Valdrakor (Format von lage.json und Anmeldungen)
+echo "== /run/serverabsprache =="; ls -la /run/serverabsprache 2>&1
+echo "== lage.json =="; head -c 3000 /run/serverabsprache/lage.json 2>&1; echo
+echo "== /var/lib/serverabsprache =="; ls -la /var/lib/serverabsprache 2>&1
+for f in /var/lib/serverabsprache/*; do [ -f "$f" ] && { echo "-- $f"; head -c 1500 "$f"; echo; }; done
+echo "== Beschreibung im Spiel =="; for f in /opt/valdrakor/ops/*absprache* /opt/valdrakor/docs/*absprache* /opt/valdrakor/docs/*ABSPRACHE*; do [ -f "$f" ] && { echo "-- $f"; head -120 "$f"; }; done
+grep -rlI "serverabsprache" /opt/valdrakor/ops /opt/valdrakor/docs /opt/valdrakor/README.md 2>/dev/null | head

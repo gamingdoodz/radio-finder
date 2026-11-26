@@ -14,6 +14,9 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Prüfregel – keine Geheimnisse ausgeben
+        run: bash .github/scripts/check-secrets-rule.sh
+
       - name: Auf dem Server aktualisieren
         env:
           KEY_B64: ${{ secrets.SERVER_KEY }}
@@ -21,11 +24,13 @@ jobs:
           if [ -z "$KEY_B64" ]; then echo "Geheimnis SERVER_KEY fehlt noch – nichts zu tun."; exit 0; fi
           mkdir -p ~/.ssh
           # Schlüssel als eine Zeile (base64) oder als normaler Text
-          if echo "$KEY_B64" | grep -q "BEGIN"; then printf '%s\n' "$KEY_B64" > ~/.ssh/k; else echo "$KEY_B64" | tr -d ' \r\n' | base64 -d > ~/.ssh/k; fi
+          if echo "$KEY_B64" | grep -q "BEGIN"; then printf '%s\n' "$KEY_B64" > ~/.ssh/k; else echo "$KEY_B64" | tr -d ' \r\n' | base64 -d > ~/.ssh/k; fi   # geheimnis-ok: geht nur in die Schlüsseldatei, nie ins Protokoll
           chmod 600 ~/.ssh/k
           OPS=0
           git diff --name-only HEAD~1 HEAD | grep -q '^server/ops/run.sh$' && OPS=1
-          ssh -i ~/.ssh/k -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@130.61.78.232 "OPS=$OPS bash -s" <<'REMOTE'
+          # Alles, was vom Server kommt, läuft durch den Filter: Passwörter, Tokens und Schlüssel werden zu ***
+          set -o pipefail
+          (ssh -i ~/.ssh/k -o StrictHostKeyChecking=no -o ConnectTimeout=20 ubuntu@130.61.78.232 "OPS=$OPS bash -s" <<'REMOTE'
           set -e
           sudo /usr/local/bin/radar-update
           if [ "$OPS" = 1 ]; then
@@ -37,3 +42,4 @@ jobs:
           curl -s http://localhost/health || curl -s http://localhost:8080/health; echo
           sudo journalctl -u radar -n 15 --no-pager || true
           REMOTE
+          ) 2>&1 | python3 .github/scripts/redact.py
