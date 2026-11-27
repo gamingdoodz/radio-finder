@@ -96,7 +96,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   vorgemerkt und wird ohne Freigabe nicht gemacht. Danach prüfen, ob der Neustart von selbst durchläuft (`/health` zeigt `hinweise`).
 - Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
   Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
-- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite) und 8 erledigt; als Nächstes Abhängigkeiten, Liedtexte, Equalizer.
+- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; als Nächstes Liedtexte (LRCLIB), Equalizer, eigene Musik vom Handy.
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
@@ -117,3 +117,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: Architektur-Check: Bauweise passt (Kotlin/Media3 + ein sparsamer Server), Vorschläge in `docs/ARCHITEKTUR-CHECK.md`. „App bauen“ startet nicht mehr bei reinen Doku-Änderungen (`docs/`, `*.md`, `alexa/`). README aktualisiert.
 - 27.11.: Server-Adressen aus `config/servers.json` (App liest täglich, eingebaute als Rückfall). Zwischenspeicher für seltene Server-Antworten auf dem Handy. Kein Signier-Schlüssel mehr im Repo, Release nur mit Upload-Secret.
 - 27.11.: Server: Shoutcast-2-Statusseite (`/statistics?json=1`) vor dem Anzapfen des Streams (weniger Daten/CPU). Wird erst nach Neustart über radar-update.sh aktiv.
+- 27.11.: Media3 1.8.0 (Bau grün).

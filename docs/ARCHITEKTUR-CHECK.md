@@ -199,6 +199,7 @@ Hintergrund, Android Auto (Listen, Suche, Sprache), Casten, Schlaf-Timer, Wecker
 - **Empfehlung 9 umgesetzt (Server):** Hat ein Radioserver keine Icecast-Statusseite, fragt `radar.py` die
   Shoutcast-2-Statusseite (`/statistics?json=1`). Ein kleiner Abruf für alle Streams des Servers statt Audio anzuzapfen.
   Aktiv erst nach dem nächsten Neustart über `radar-update.sh` (Serverabsprache).
+- **Empfehlung 10 (Teil) umgesetzt:** Media3 von 1.5.1 auf 1.8.0, Bau grün. Kotlin/AGP bleiben vorerst.
 
 Alles andere sind Vorschläge. Große Umbauten (Code aufteilen, Room, eigene Dateien, Push-Wächter, Server-Änderungen) nur nach Freigabe
 und Stück für Stück, damit Android Auto und Hit-Mix stabil bleiben. Server-Änderungen nur über die Serverabsprache.
