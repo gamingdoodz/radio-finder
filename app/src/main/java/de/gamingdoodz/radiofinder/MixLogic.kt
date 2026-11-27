@@ -185,6 +185,38 @@ object MixLogic {
         return artist == name || (core.length >= 3 && artist == core)
     }
 
+    /** Markenname eines Senders ohne Leerzeichen ("RADIO BOB! Classic Rock" -> "radiobob", "Sunshine Live - Techno" -> "sunshinelive"). */
+    fun stationBrands(stationName: String): List<String> {
+        val full = normalize(stationName).replace(" ", "")
+        val head = normalize(stationName.substringBefore(" - ").substringBefore(" – ").substringBefore("!").substringBefore("|").substringBefore("(")).replace(" ", "")
+        return listOf(full, head).filter { it.length >= 4 }.distinct()
+    }
+
+    private val radioWord = Regex("radio\\b|fm\\b|\\blive\\b|antenne|\\bsender\\b")
+    private val programWords = setOf("rock", "classic", "classics", "metal", "power", "stoner", "emo", "punk", "techno", "house", "trance",
+        "party", "lounge", "festival", "festivalsommer", "simulcast", "chillout", "chill", "unplugged", "songs", "hits", "mix", "woodstock",
+        "kuschelrock", "christmas", "weihnachten", "mittelalter", "drum", "n", "and", "bass", "nu", "disco", "soft", "hard", "alternative",
+        "gute", "nacht", "musik", "music", "live", "deep", "sleep", "meditation", "late", "night", "jingle", "70er", "80er", "90er", "2000er",
+        "60er", "50er", "70s", "80s", "90s", "oldies", "schlager", "pop", "dance", "charts", "top", "40", "100", "best", "of", "the", "die", "der",
+        "das", "und", "radio", "fm", "stream", "kids", "kinder", "test", "a", "b", "rwi", "1", "2", "3", "lounge", "edm", "club", "summer", "sommer")
+
+    /**
+     * Sendername statt Lied, z. B. "RADIO BOB - Classic Rock", "SUNSHINE LIVE - Techno", "Rockland Radio - Neuwied":
+     * Künstler-Teil ist ein Sendername (oder klingt wie einer) und der Rest ist nur Programm/Ort.
+     * "Queen - Bohemian Rhapsody" bleibt ein Lied, auch wenn es einen Sender "Queen" gibt.
+     */
+    fun isProgramTitle(title: String, brands: Set<String>): Boolean {
+        if (!title.contains(" - ") && !title.contains(" – ")) return false
+        val artistRaw = normalize(title.substringBefore(" - ").substringBefore(" – "))
+        val song = normalize(title.substringAfter(" - ").substringAfter(" – "))
+        if (artistRaw.isEmpty() || song.isEmpty()) return false
+        val artist = artistRaw.replace(" ", "")
+        val radioish = radioWord.containsMatchIn(artistRaw)
+        val brand = artist.length >= 4 && (artist in brands || brands.any { it.startsWith(artist) && it.length - artist.length <= 25 })
+        val programSong = song.split(" ").all { it in programWords || it.all(Char::isDigit) }
+        return (programSong && (radioish || brand)) || (brand && radioish)
+    }
+
     private val stationNoise = setOf("radio", "fm", "live", "stream", "webradio", "online", "de", "the", "das", "der", "die")
 
     // ---------------- Liedtitel oder Ansage? ----------------

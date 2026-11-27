@@ -655,7 +655,7 @@ class PlaybackService : MediaLibraryService() {
         // Sendername als Künstler ("ROCK ANTENNE - Wir rocken"): Jingle, kein neues Lied (sonst schaltet der Mix mitten im Lied um)
         val stationName = LiveIndex.get(stationId)?.station?.name
             ?: exo?.currentMediaItem?.takeIf { it.mediaId == "st:$stationId" }?.mediaMetadata?.extras?.getString("name")
-        val music = LiveIndex.isMusic(clean) && !Ads.isAd(clean) && !MixLogic.isStationJingle(clean, stationName)
+        val music = LiveIndex.isMusic(clean) && !Ads.isAd(clean) && !MixLogic.isStationJingle(clean, stationName) && !MixLogic.isProgramTitle(clean, LiveIndex.brands)
         // Werbeblock mitten im Programm, vom Sender im Titel gemeldet: stumm, bis wieder Musik kommt
         if (Ads.isAd(clean) && stationId == NowSong.stationId) {
             if (adTitleSince == 0L) {

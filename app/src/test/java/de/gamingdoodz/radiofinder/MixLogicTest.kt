@@ -182,6 +182,19 @@ class MixLogicTest {
         for ((n, k) in names) assertEquals(n, k, MixLogic.genreKeyFor(n))
     }
 
+    @Test fun sendernameStattLied() {
+        // Echte Titel vom Server (27.11.): das sind Sender/Programme, keine Lieder
+        val names = listOf("RADIO BOB! Classic Rock", "Sunshine Live - Techno Live", "Rockland Radio - Linz / Remagen", "FluxFM - FluxLounge",
+            "TOGGO Radio Party", "Radio Teddy - Gute Nacht Musik", "Radio21 Leer vf", "Best Of Rock.FM Soft Rock", "Queen FM", "Radiohead Radio")
+        val brands = names.flatMap { MixLogic.stationBrands(it) }.toSet()
+        for (t in listOf("RADIO BOB - Classic Rock", "SUNSHINE LIVE - Techno", "sunshine live - Drum n Bass", "Rockland Radio - Neuwied",
+            "RADIO BOB - 80er Rock RWI Test B", "TOGGO Radio - Party", "Radio TEDDY - Gute Nacht Musik", "RADIO 21 - Leer", "RADIO BOB - Mittelalter Rock"))
+            assertTrue(t, MixLogic.isProgramTitle(t, brands))
+        for (t in listOf("Queen - Bohemian Rhapsody", "Radiohead - Creep", "Live - Lightning Crashes", "Soundgarden - Black Rain [Radio Edit]",
+            "Bon Jovi - Runaway", "Kate Bush - Running up that hill", "The Rolling Stones - Paint It Black"))
+            assertFalse(t, MixLogic.isProgramTitle(t, brands))
+    }
+
     @Test fun senderRichtung() {
         // Weiter nach einem Rocksender: Richtung erkennen, damit kein Popsender folgt
         assertTrue(MixLogic.mainGenre("rock,classic rock", "ROCK ANTENNE") in setOf("rock", "rockclassics"))

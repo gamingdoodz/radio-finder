@@ -57,8 +57,18 @@ object LiveIndex {
      * Titel gesehen (eigene Abfrage, Stream). Liedanfang: wie bisher, wenn es dasselbe Lied ist; ein beobachteter
      * Wechsel = ungefähr zwischen den beiden Abfragen; zum ersten Mal gesehen = unbekannt (es läuft vielleicht schon lange).
      */
+    /** Markennamen aller bekannten Sender (zum Erkennen von "RADIO BOB - Classic Rock" als Sendername statt Lied). */
+    val brands: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Sendername/Programm statt Lied: " - " ersetzen, damit es nirgends als Lied zählt (Mix, Suche, Charts). */
+    private fun clean(s: Station, raw: String): String {
+        if (brands.size < 5000) MixLogic.stationBrands(s.name).forEach { brands.add(it) }
+        val t = Text.clean(raw)
+        return if (MixLogic.isProgramTitle(t, brands) || MixLogic.isStationJingle(t, s.name)) t.replace(" - ", " · ").replace(" – ", " · ") else t
+    }
+
     fun put(s: Station, raw: String, startMs: Long = 0L, sinceMs: Long = 0L) {
-        val title = Text.clean(raw)
+        val title = clean(s, raw)
         val t = System.currentTimeMillis()
         val old = map[s.id]?.takeIf { t - it.time < MAX_AGE }
         val norm = Scanner.normalize(title)
@@ -77,7 +87,7 @@ object LiveIndex {
 
     /** Vom Server: since = seit wann der Titel dort läuft. */
     fun putRemote(s: Station, raw: String, sinceMs: Long, seenMs: Long = 0L) {
-        val title = Text.clean(raw)
+        val title = clean(s, raw)
         val now = System.currentTimeMillis()
         // Zeitpunkt, an dem der Server den Titel zuletzt gesehen hat (nicht wann wir ihn geholt haben)
         val t = if (seenMs in 1..now) seenMs else now
@@ -95,7 +105,12 @@ object LiveIndex {
                 sinceMs < -1L -> if (oldKnown) old.since else minOf(old.since, firstSeen - UNKNOWN_AGE)
                 else -> old.since
             }
-        } else if (sinceMs in 1..t) sinceMs else firstSeen - UNKNOWN_AGE
+        } else if (sinceMs in 1..t) sinceMs
+        // Server kennt den Anfang nicht, wir sehen aber den Wechsel: altes Lied zuletzt vor kurzem gesehen, jetzt ein neues.
+        // Dann fing es dazwischen an (wie beim eigenen Abfragen); nur bei kurzer Lücke, sonst bleibt es "unbekannt"
+        else if (old != null && old.title != title && !MixLogic.sameSong(old.normalized, Scanner.normalize(title)) &&
+            firstSeen - old.time in 0..150_000L) old.time + (firstSeen - old.time) / 2
+        else firstSeen - UNKNOWN_AGE
         map[s.id] = Now(old?.station ?: s, title, t, since)
     }
 
