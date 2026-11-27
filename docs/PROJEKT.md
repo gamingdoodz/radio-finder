@@ -93,11 +93,10 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
 - Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
 - Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
-- `lage.json` und Schreibrecht für Dienste in `dienste/` kommen erst mit dem nächsten Valdrakor-Update (Auskunft vom Spiel, 26.11.).
-  Bis dahin: radar.py kann `hitradar.json` nicht selbst schreiben (Fehler wird nur stündlich protokolliert), Hitradar-Neustart bleibt
-  vorgemerkt und wird ohne Freigabe nicht gemacht. Danach prüfen, ob der Neustart von selbst durchläuft (`/health` zeigt `hinweise`).
-- Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
-  Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
+- Server wartet auf das nächste Valdrakor-Update: `lage.json` fehlt, `/api/last` hat noch kein `updateErlaubt` (Stand 27.11. 8 Uhr).
+  radar läuft seit 27.11. 7:43 schon mit dem neuen Stand (vom Spiel neu gestartet; Verteiler, Shoutcast, rechtssicher, Hinweise),
+  radar läuft als root und schreibt `hitradar.json` selbst. Noch offen bis zur Freigabe: KI nur bei Bedarf (`llm-dienst.sh`, macht `ops/run.sh`).
+  Danach prüfen, ob `updateErlaubt`/`updateDran` so ankommen, wie `absprache.py` sie liest.
 - Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; als Nächstes Equalizer, eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
@@ -121,3 +120,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: Server: Shoutcast-2-Statusseite (`/statistics?json=1`) vor dem Anzapfen des Streams (weniger Daten/CPU). Wird erst nach Neustart über radar-update.sh aktiv.
 - 27.11.: Media3 1.8.0 (Bau grün).
 - 27.11.: Rechtssicher: Server-Mix (/mix) und Weiterleitung (/relay) abgeschaltet, Alexa spielt Sender direkt (nur https), Casten nur https-Sender, Archiv nur CC/gemeinfrei (ohne Great 78), Lizenzliste ergänzt.
+- 27.11.: radar-update erkennt, wenn radar schon anders neu gestartet wurde (kein unnötiger Neustart). Play-Upload vom 26.11. abends erfolgreich.

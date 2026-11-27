@@ -22,6 +22,11 @@ if [ "$OLD" != "$(git rev-parse HEAD)" ] && ! git diff --quiet "$OLD" HEAD -- se
   install -m 755 server/radar-update.sh /usr/local/bin/radar-update
 fi
 [ -f "$OFFEN" ] || { echo "Kein Neustart nötig"; exit 0; }
+# radar wurde inzwischen anders neu gestartet (z. B. vom Spiel) und läuft schon mit dem neuen Stand? Dann nichts tun.
+START=$(date -d "$(systemctl show -p ActiveEnterTimestamp --value radar)" +%s 2>/dev/null || echo 0)
+if [ "$START" -gt "$(stat -c %Y "$OFFEN")" ]; then
+  rm -f "$OFFEN"; echo "radar läuft schon mit dem neuen Stand, kein Neustart nötig"; exit 0
+fi
 
 # Liefert das Spiel noch gar keine Freigabe (lage.json kommt erst mit dem nächsten Valdrakor-Update),
 # nicht "update" melden und den Platz nicht blockieren: vorgemerkt lassen, nächster Lauf prüft wieder.
