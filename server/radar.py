@@ -304,6 +304,9 @@ def put(st: dict, title: str):
         since, exact = t, False
     norm = normalize(title)
     now[st["id"]] = {"title": title, "norm": norm, "since": since, "time": t, "exact": exact}
+    # Für die Kernliste: wann hier zuletzt Musik lief (Sender bleiben auch während Nachrichten drin)
+    if is_song(title) and not TALK.search(title):
+        song_seen[st["id"]] = t
     # Liedlänge im Hintergrund holen (für die genaue Prüfung am Liedende)
     if since != (old or {}).get("since") and is_song(title) and (norm not in covers or (covers[norm] and "dur" not in covers[norm])) and len(cover_queue) < 5000:
         cover_queue[norm] = title
@@ -1082,6 +1085,57 @@ async def check(session, st):
     return min(3600, 120 * 2 ** min(f, 5))
 
 
+# ---------------- Kernliste: lieber wenige Sender oft als alle selten ----------------
+# Das Spiel gibt vor, wie viele Abfragen gleichzeitig laufen dürfen. Damit schafft der Server nur wenige
+# Abfragen pro Sekunde. Werden alle ~10.000 Sender reihum gefragt, kommt jeder nur alle ~30 Minuten dran:
+# kein Liedanfang ist bekannt und der Hit-Mix findet nichts. Darum: Sender, die gerade Musik mit Titel
+# senden (DE/AT/CH zuerst, dann die beliebtesten), kommen alle ~80 s dran, der Rest nur selten.
+# Gleiche Last (gleich viele gleichzeitige Abfragen), aber brauchbare Daten.
+CORE = {"ids": set(), "rest": 0, "rate": 0.0, "at": 0.0}
+song_seen: dict = {}     # Sender -> wann zuletzt ein Lied lief
+_core_count = {"n": 0, "t": time.time(), "c": 0}
+
+
+def update_core():
+    t = time.time()
+    el = t - _core_count["t"]
+    if el < 120:
+        return
+    rate = (_core_count["n"] - _core_count["c"]) / el
+    _core_count.update(t=t, c=_core_count["n"])
+    rate = max(1.0, rate)
+    CORE["rate"] = round(rate, 1)
+    # 70 % der Abfragen für die Kernliste (alle ~80 s je Sender), 30 % für alle anderen
+    size = int(min(3000, max(150, rate * 0.7 * 80)))
+    pos = {st["id"]: i for i, st in enumerate(stations)}
+    ccs = {st["id"]: st.get("cc") for st in stations}
+    cand = []
+    for sid, seen in list(song_seen.items()):
+        if t - seen > 3 * 3600:
+            song_seen.pop(sid, None)
+            continue
+        if sid not in pos:
+            continue
+        cand.append((0 if ccs.get(sid) in ("DE", "AT", "CH") else 1, pos[sid], sid))
+    cand.sort()
+    CORE["ids"] = {sid for _, _, sid in cand[:size]}
+    rest = max(1, len(stations) - len(CORE["ids"]))
+    CORE["rest"] = int(min(7200, max(600, rest / max(0.3, rate * 0.3))))
+    first = not CORE["at"]
+    CORE["at"] = t
+    if first and CORE["ids"]:
+        # Beim ersten Mal die Warteschlange neu ordnen: Kernliste gleich dran, der Rest verteilt über die Wartezeit
+        import heapq
+        items = []
+        for _, sid in due:
+            if sid in CORE["ids"]:
+                items.append((t + len(items) * 0.01, sid))
+            else:
+                items.append((t + (hash(sid) % CORE["rest"]), sid))
+        due[:] = items
+        heapq.heapify(due)
+
+
 def schedule_all():
     import heapq
     due.clear()
@@ -1104,6 +1158,10 @@ async def worker(session, ids):
             nxt = await check(session, st)
         except Exception:
             nxt = 600
+        _core_count["n"] += 1
+        # Nicht in der Kernliste: nur selten nachsehen (findet neue Musik-Sender für die Kernliste)
+        if CORE["ids"] and sid not in CORE["ids"]:
+            nxt = max(nxt, CORE["rest"])
         if SPAR["low"]:
             nxt *= 1.5
         heapq.heappush(due, (time.time() + nxt, sid))
@@ -1176,6 +1234,7 @@ async def scanner():
             last_round.update(seconds=int(el), at=int(time.time()))
             print(f"{len(stations)} Sender, {stats['checked']} Abfragen, live: {len(fresh())}", flush=True)
             update_traffic()
+            update_core()
             if int(el) // 60 % 10 == 0:
                 save_charts()
                 save_ads()
@@ -1652,7 +1711,8 @@ async def h_health(_):
                               "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"],
                               "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"], "meldung": MELDUNG["jetzt"],
                               "hinweise": len(HINWEISE["liste"]), "hinweise_wichtig": HINWEISE["wichtig"],
-                              "spiel_stufe": SPAR["stufe"]})
+                              "spiel_stufe": SPAR["stufe"], "kern": len(CORE["ids"]), "abfragen_s": CORE["rate"],
+                              "anfang_bekannt": sum(1 for _, n in fresh() if n.get("exact"))})
 
 
 _search_cache: dict = {}  # Suchwörter -> (Zeit, Antwort)

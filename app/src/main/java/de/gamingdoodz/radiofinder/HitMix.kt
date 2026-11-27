@@ -6,6 +6,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -103,13 +106,20 @@ class HitMix(
 
         // Playlist-Lieder nur einmal holen (vorher zweimal: kam beim zweiten Mal nichts, galt das ganze Genre als Playlist)
         val special = playlist == "rising" || playlist == "radiocharts" || playlist == "community"
+        // Lieblingssender-Mix: nur die eigenen Favoriten-Sender
+        val favStations = if (favMix) Favorites.all(context).filter { it.kind == Kind.STATION }
+            .map { Station(it.id.removePrefix("st:"), it.name, it.url, it.artwork, false) } else emptyList()
+        // Alles gleichzeitig laden statt nacheinander (Lieder, Genre-Sender, Server-Abgleich): Start dauert so
+        // nur so lange wie die langsamste Abfrage, nicht so lange wie alle zusammen
+        val (listSongs, hits, genreStations) = coroutineScope {
+        val syncJob = async { Radar.sync() }
+        val stationsJob = async { if (favMix) favStations else genreStationsFor(genre) }
         val listSongs: List<Entry> = when {
             special -> emptyList()
             playlist != null -> Deezer.playlistByName(playlist)
             myList != null -> Playlists.get(context, myList)
             else -> emptyList()
         }
-        if (stale()) return null
 
         val hits = when {
             genreKey == "mine" -> mySongs()
@@ -148,6 +158,9 @@ class HitMix(
             genre?.deezerGenre != null && genre.deezerGenre != 0 -> Deezer.genreChart(genre.deezerGenre, 50) + Deezer.topGermany(50)
             else -> Deezer.topGermany(100)
         }
+        syncJob.await()
+        Triple(listSongs, hits, stationsJob.await())
+        }
         if (stale()) return null
         val newSongs = hits.distinctBy { it.id }.map { LiveIndex.Song(it) }.filter { it.key.isNotBlank() }
         val newIsPlaylist = playlist != null || myList != null
@@ -156,20 +169,8 @@ class HitMix(
             newSongs.filter { it.entry.id in own }.ifEmpty { newSongs }
         } else newSongs
 
-        // Passende Sender zum Genre (bei Weihnachten auch deutsche Weihnachtssender)
-        // Lieblingssender-Mix: nur die eigenen Favoriten-Sender
-        val favStations = if (favMix) Favorites.all(context).filter { it.kind == Kind.STATION }
-            .map { Station(it.id.removePrefix("st:"), it.name, it.url, it.artwork, false) } else emptyList()
-        val genreStations = if (favMix) favStations else when (genre?.key) {
-            null, "charts" -> emptyList()
-            "kids" -> StationRepository.kids(context)
-            "xmas" -> StationRepository.byTag("christmas") + StationRepository.byTag("weihnachten") + StationRepository.byTag("weihnachtsmusik")
-            else -> StationRepository.byTag(genre.radioTag)
-        }
-
-        // Mit Server: alle ~30.000 laufenden Sender kommen infrage (kein Laden langer Senderlisten nötig).
+        // Mit Server: alle laufenden Sender kommen infrage (kein Laden langer Senderlisten nötig).
         // Ohne Server: eine Auswahl, die die App selbst abfragen kann.
-        Radar.sync()
         val newStations = when {
             favMix -> favStations
             Radar.ok -> genreStations
@@ -204,7 +205,9 @@ class HitMix(
 
         poll(force = true)
         val found = withContext(Dispatchers.Default) {
-            choose() ?: choose(allowRepeats = true) ?: if (!strict) choose(allowRepeats = true, anyMusic = true) else null
+            // Auch bei Themen-Mixen (Weihnachten, Kinder) Lieder mit unbekanntem Anfang nehmen, statt gar nichts zu spielen.
+            // Zufallsmusik gibt es bei ihnen trotzdem nicht (fromAny ist bei strict aus).
+            choose() ?: choose(allowRepeats = true) ?: choose(allowRepeats = true, anyMusic = true)
         }
         if (stale()) return null
         val first = found?.let { commit(it) }
@@ -214,6 +217,16 @@ class HitMix(
         if (first == null) prefs(context).edit().putString("now", "Gerade läuft kein passender Hit – ich warte auf den nächsten").apply()
         job = scope.launch { delay(3_000); if (gen == myGen) refreshQueue(); loop(myGen) }
         return first?.let { prepareItem(it) }
+    }
+
+    /** Passende Sender zum Genre (bei Weihnachten auch deutsche Weihnachtssender, alle Listen gleichzeitig). */
+    private suspend fun genreStationsFor(genre: Genre?): List<Station> = when (genre?.key) {
+        null, "charts" -> emptyList()
+        "kids" -> StationRepository.kids(context)
+        "xmas" -> coroutineScope {
+            listOf("christmas", "weihnachten", "weihnachtsmusik").map { async { StationRepository.byTag(it) } }.awaitAll().flatten()
+        }
+        else -> StationRepository.byTag(genre.radioTag)
     }
 
     /** Hits eines Genres (für Playlists als Ersatz hinten angehängt). */
@@ -394,7 +407,7 @@ class HitMix(
         val g = gen
         // Lieber andere Musik als Moderation: notfalls auch ein schon gespieltes oder irgendein Lied (nicht bei Themen-Mixen)
         val done = autoSwitch(force) {
-            takeCandidate() ?: choose() ?: choose(allowRepeats = true) ?: if (!strict) choose(allowRepeats = true, anyMusic = true) else null
+            takeCandidate() ?: choose() ?: choose(allowRepeats = true) ?: choose(allowRepeats = true, anyMusic = true)
         }
         if (!done && g == gen) waitingForNext = true
     }

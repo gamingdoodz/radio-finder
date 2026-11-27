@@ -98,15 +98,21 @@ object StationRepository {
     }
 
     private val tagCache = HashMap<String, List<Station>>()
+    private val emptyTags = HashMap<String, Long>()
 
     /** Sender zu einem Genre (erst deutsche, dann weltweit). */
     suspend fun byTag(tag: String): List<Station> {
-        synchronized(tagCache) { tagCache[tag]?.let { return it } }
+        synchronized(tagCache) {
+            tagCache[tag]?.let { return it }
+            emptyTags[tag]?.let { if (System.currentTimeMillis() - it < 30 * 60_000L) return emptyList() }
+        }
         val t = java.net.URLEncoder.encode(tag, "UTF-8")
         val list = withContext(Dispatchers.IO) {
             Radar.listBlocking("tag:$tag") ?: fetchAll(listOf("tag=$t&countrycode=DE&limit=30", "tag=$t&limit=30"))
         }
         if (list.isNotEmpty()) synchronized(tagCache) { tagCache[tag] = list }
+        // Leeres Ergebnis auch merken (30 Min.): sonst fragt jeder Mix-Start erneut zweimal radio-browser
+        else synchronized(tagCache) { emptyTags[tag] = System.currentTimeMillis() }
         return list
     }
 
