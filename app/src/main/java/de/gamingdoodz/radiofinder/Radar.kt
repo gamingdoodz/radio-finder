@@ -183,11 +183,12 @@ object Radar {
                 val st = Station(id, r.optString(1, "Radio"), r.optString(2), r.optString(3), false)
                 // since = -1: Liedanfang unbekannt (Server hat das Lied erst mittendrin gesehen)
                 val exact = r.length() < 9 || r.optInt(8, 1) == 1
-                known[id] = Live(st, r.optString(4), if (exact) r.optLong(5) * 1000L else -1L, r.optLong(6) * 1000L)
+                // Anfang unbekannt: als negative Zahl, wann der Server das Lied zuerst gesehen hat ("läuft mindestens seit")
+                known[id] = Live(st, r.optString(4), if (exact) r.optLong(5) * 1000L else -(r.optLong(5) * 1000L).coerceAtLeast(2L), r.optLong(6) * 1000L)
             } else if (r.length() >= 4) {
                 val k = known[id] ?: continue
                 val exact = r.length() < 5 || r.optInt(4, 1) == 1
-                k.title = r.optString(1); k.since = if (exact) r.optLong(2) * 1000L else -1L; k.seen = r.optLong(3) * 1000L
+                k.title = r.optString(1); k.since = if (exact) r.optLong(2) * 1000L else -(r.optLong(2) * 1000L).coerceAtLeast(2L); k.seen = r.optLong(3) * 1000L
             }
         }
         o.optJSONArray("gone")?.let { g -> for (i in 0 until g.length()) known.remove(g.optString(i)) }

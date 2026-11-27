@@ -570,7 +570,7 @@ class PlaybackService : MediaLibraryService() {
                 return if (c == t) m else m.buildUpon().setTitle(c).build()
             }
             // Radio: Laufleiste wie bei einem normalen Lied (Start und Länge bekannt)
-            private fun song() = currentMediaItem?.mediaId?.startsWith("st:") == true && NowSong.known()
+            private fun song() = currentMediaItem?.mediaId?.startsWith("st:") == true && NowSong.known() && !NowSong.overrun()
             override fun getDuration() = if (song()) NowSong.durMs else super.getDuration()
             override fun getContentDuration() = if (song()) NowSong.durMs else super.getContentDuration()
             override fun getCurrentPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getCurrentPosition()
@@ -642,6 +642,18 @@ class PlaybackService : MediaLibraryService() {
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
                 // Zurück zu einem Sender, auf dem wir das Lied schon gehört haben: echte Liedzeit statt 0
                 if (first && NowSong.startMs == 0L) NowSong.recall(stationId, clean)
+                // laut.fm: Sender meldet sekundengenau Anfang und Ende des Liedes
+                if (NowSong.startMs == 0L || !NowSong.startLocal) {
+                    val url = exo?.currentMediaItem?.takeIf { it.mediaId == "st:$stationId" }?.localConfiguration?.uri?.toString().orEmpty()
+                    if (LautFm.stationName(url) != null) scope.launch {
+                        val song = try { LautFm.current(url) } catch (_: Exception) { null } ?: return@launch
+                        if (NowSong.stationId == stationId && NowSong.title == clean &&
+                            MixLogic.sameSong(Scanner.normalize(song.title), Scanner.normalize(clean))) {
+                            NowSong.startMs = song.startMs; NowSong.startLocal = true
+                            if (song.durMs > 0) NowSong.durMs = song.durMs
+                        }
+                    }
+                }
             }
             NowSong.localAt = now
             LiveIndex.titleFromStream(stationId, clean)

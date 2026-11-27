@@ -49,7 +49,9 @@ object Playlists {
             6, 7, 8 -> { add(Def("Sommerhits", "Die Hits des Sommers", "Sommerhits")); add(Def("Grillparty", "Für laue Abende", "Grillparty")); add(Def("Roadtrip", "Fenster runter, laut drehen", "Roadtrip")) }
             9 -> { add(Def("Oktoberfest Hits", "O'zapft is!", "Oktoberfest Hits")); add(Def("Spätsommer", "Die letzten warmen Tage", "Sommerhits")) }
             10 -> { if (day <= 6) add(Def("Oktoberfest Hits", "O'zapft is!", "Oktoberfest Hits")); add(Def("Herbst-Chill", "Gemütlich in den Herbst", "Herbst Chill")); if (day >= 20) add(Def("Halloween Party", "Gruselig gut", "Halloween Party")) }
-            else -> { add(Def("Herbst-Chill", "Gemütlich in den Herbst", "Herbst Chill")); add(Def("Kuschelsongs", "Für graue Tage", "Kuschelsongs")); if (day >= 20) add(Def("Bald ist Weihnachten", "Die ersten Weihnachtslieder", "Weihnachtshits")) }
+            // November: erst Herbst, ab dem 20. schon Weihnachten statt Herbst
+            else -> if (day >= 20) { add(Def("Bald ist Weihnachten", "Die ersten Weihnachtslieder", "Weihnachtshits")); add(Def("Winter-Kuschelsongs", "Für lange Abende", "Winter Chill")); add(Def("Kuschelsongs", "Für graue Tage", "Kuschelsongs")) }
+                else { add(Def("Herbst-Chill", "Gemütlich in den Herbst", "Herbst Chill")); add(Def("Kuschelsongs", "Für graue Tage", "Kuschelsongs")) }
         }
     }
 

@@ -67,6 +67,14 @@ object Podcasts {
                 if (o.optString("collectionExplicitness") == "explicit") return@mapNotNull null
                 val nameCheck = o.optString("collectionName") + " " + o.optString("artistName")
                 if (Regex("(?i)\\bsex|erotik|erotisch|porn|18\\+|nsfw").containsMatchIn(nameCheck)) return@mapNotNull null
+                // Kinder-Bereich: nur Shows aus "Kinder und Familie" oder mit Kinder im Namen (sonst kamen z. B. Comedy-Podcasts mit)
+                if (kidsOnly) {
+                    val g = o.optJSONArray("genres")
+                    val genres = (0 until (g?.length() ?: 0)).joinToString(" ") { g?.optString(it).orEmpty() } + " " + o.optString("primaryGenreName")
+                    val kidsGenre = Regex("(?i)kinder|kids|famil|children").containsMatchIn(genres)
+                    val kidsName = Regex("(?i)kinder|kids|kind\\b|märchen|maerchen|gute.?nacht|hörspiel für|ohrenbär|kakadu|sandmann|maus").containsMatchIn(o.optString("collectionName"))
+                    if (!kidsGenre && !kidsName) return@mapNotNull null
+                }
                 val name = o.optString("collectionName").ifBlank { o.optString("trackName") }
                 Entry(
                     id = "pd:" + o.optLong("collectionId"),

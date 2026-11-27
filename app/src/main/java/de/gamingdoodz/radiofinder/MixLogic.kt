@@ -232,4 +232,12 @@ object MixLogic {
         val rms = kotlin.math.sqrt(sum / samples.size)
         return if (rms <= 1e-5) -90f else (20 * kotlin.math.log10(rms)).toFloat()
     }
+
+    // ---------------- Gleicher Sender, andere Qualität ----------------
+
+    private val quality = Regex("^(flac|meta|aac|aacplus|aac\\+|mp3|ogg|opus|hq|lq|hd|hifi|lossless|\\d+k|\\d+kbps|kbps|kbit|kbit/s|stream|mobile)$")
+
+    /** "Radio Paradise Mellow Mix FLAC+meta" und "… 128k AAC" sind derselbe Sender: Name ohne Qualitätsangaben. */
+    fun stationBaseName(name: String): String =
+        normalize(name).split(" ").filter { it.isNotEmpty() && !quality.matches(it) }.joinToString(" ").ifEmpty { normalize(name) }
 }

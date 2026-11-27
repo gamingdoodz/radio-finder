@@ -203,4 +203,13 @@ class MixLogicTest {
         assertEquals(-6.02f, MixLogic.rmsDb(loud), 0.05f)
         assertEquals(-90f, MixLogic.rmsDb(FloatArray(100)), 0.01f)
     }
+
+    @Test fun gleicherSenderAndereQualitaet() {
+        assertEquals(MixLogic.stationBaseName("Radio Paradise Mellow Mix FLAC+meta"), MixLogic.stationBaseName("Radio Paradise Mellow Mix 128k AAC"))
+        assertEquals("merry christmas radio", MixLogic.stationBaseName("Merry Christmas Radio (AAC)"))
+        assertFalse(MixLogic.stationBaseName("Radio Paradise Main Mix") == MixLogic.stationBaseName("Radio Paradise Mellow Mix"))
+        assertEquals("1live", MixLogic.stationBaseName("1LIVE"))
+        assertEquals("wdr 2", MixLogic.stationBaseName("WDR 2"))
+        assertFalse(MixLogic.stationBaseName("WDR 2") == MixLogic.stationBaseName("WDR 4"))
+    }
 }

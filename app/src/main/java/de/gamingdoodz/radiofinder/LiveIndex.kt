@@ -35,6 +35,10 @@ object LiveIndex {
     const val UNKNOWN_AGE = 30 * 60_000L
 
     fun sinceKnown(n: Now, t: Long = System.currentTimeMillis()) = t - n.since < UNKNOWN_AGE - 60_000L
+
+    /** Anfang unbekannt: so lange läuft das Lied mindestens (seit wir/der Server es zuerst gesehen haben). */
+    fun minRunning(n: Now, t: Long = System.currentTimeMillis()): Long =
+        if (sinceKnown(n, t)) t - n.since else (t - (n.since + UNKNOWN_AGE)).coerceAtLeast(0L)
     private val map = ConcurrentHashMap<String, Now>()
     private val refreshLock = Mutex()
     @Volatile var lastRefresh = 0L
@@ -66,9 +70,12 @@ object LiveIndex {
         val t = if (seenMs in 1..now) seenMs else now
         val old = map[s.id]
         if (old != null && old.time > t) return
-        // sinceMs = -1: Anfang unbekannt -> als "läuft schon lange" behandeln (wird nicht als frisches Lied gewählt)
-        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) (if (sinceMs > 0) minOf(old.since, sinceMs) else old.since)
-        else if (sinceMs in 1..t) sinceMs else if (sinceMs < 0) t - UNKNOWN_AGE else t
+        // sinceMs < 0: Anfang unbekannt -> als "läuft schon lange" behandeln (wird nicht als frisches Lied gewählt).
+        // Kleiner als -1: der Server hat das Lied zu -sinceMs zuerst gesehen (= läuft mindestens seitdem)
+        val firstSeen = if (sinceMs < -1L && -sinceMs <= t) -sinceMs else t
+        val since = if (old != null && old.title == title && t - old.time < MAX_AGE)
+            (if (sinceMs > 0) minOf(old.since, sinceMs) else if (sinceMs < -1L) minOf(old.since, firstSeen - UNKNOWN_AGE) else old.since)
+        else if (sinceMs in 1..t) sinceMs else if (sinceMs < 0) firstSeen - UNKNOWN_AGE else t
         map[s.id] = Now(old?.station ?: s, title, t, since)
     }
 

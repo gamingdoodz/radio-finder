@@ -378,16 +378,23 @@ class MainActivity : ComponentActivity() {
     private fun startLiveRefresh() {
         liveJob?.cancel()
         liveJob = lifecycleScope.launch {
+            var emptyTries = 0
             while (isActive) {
                 val list = if (popular.isEmpty()) {
                     try { StationRepository.load(applicationContext, big = false) } catch (_: Exception) { emptyList() }
                 } else popular
                 val wifi = Net.isUnmetered(applicationContext)
                 val n = if (wifi) 400 else if (Settings.saver(applicationContext)) 60 else 150
-                if (System.currentTimeMillis() - LiveIndex.lastRefresh > 150_000) {
-                    LiveIndex.refresh(list.take(n))
+                val empty = LiveIndex.fresh().isEmpty()
+                if (empty || System.currentTimeMillis() - LiveIndex.lastRefresh > 150_000) {
+                    // Noch nichts da (Server-Abgleich beim Start fehlgeschlagen o. Ä.): sofort neu holen
+                    if (empty) try { Radar.sync(force = true) } catch (_: Exception) {}
+                    try { LiveIndex.refresh(list.take(n)) } catch (_: Exception) {}
+                    LiveIndex.rebuild()
                     render()
                 }
+                // "Jetzt im Radio" darf nicht bei "Schaue nach…" hängen bleiben: bis zu 6 Versuche alle 20 s
+                if (LiveIndex.fresh().isEmpty() && emptyTries < 6) { emptyTries++; delay(20_000); continue }
                 if (!wifi) break
                 delay(180_000)
             }
@@ -1101,7 +1108,8 @@ class MainActivity : ComponentActivity() {
             val live = dedupe(chartsLive + liveEntries(popular.take(80)) + liveOthers).take(25)
             loadCovers(live)
             rows.add(Row.Header("Jetzt im Radio", if (chartsLive.isNotEmpty()) "${chartsLive.size} Chart-Hits laufen gerade" else null))
-            if (live.isEmpty()) rows.add(Row.Empty("Schaue nach, was gerade läuft…")) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
+            if (live.isEmpty()) rows.add(if (!Net.online(this)) Row.Empty("Ohne Internet gerade nicht verfügbar.")
+                else Row.More("Schaue nach, was gerade läuft… (tippen zum Neuladen)") { startLiveRefresh() }) else rows.add(Row.Carousel(live.map { Covers.dress(it) }, live = true))
         }
 
         // Playlists für dich: angesagt, zur Jahreszeit/Uhrzeit, neu diese Woche
@@ -1128,7 +1136,8 @@ class MainActivity : ComponentActivity() {
         if (Settings.homeOn(this, "community")) {
             val list = playlistSongs["community"].orEmpty()
             if (list.isEmpty()) loadCommunityOnce()
-            else {
+            // Mit nur 1–3 Liedern sieht der Bereich leer aus: erst zeigen, wenn genug zusammengekommen ist
+            else if (list.size >= 5) {
                 rows.add(Row.Header("Beliebt bei Hitradar-Hörern", "Was andere gerade gern hören", "ALLE") {
                     openPage(Page.PlaylistPage("Beliebt bei Hitradar-Hörern", "community", false))
                 })
@@ -1668,7 +1677,7 @@ class MainActivity : ComponentActivity() {
         val norm = Settings.normalize(this)
         val mine = Services.all.filter { it.key in Services.mine(this) }
         settingsGroup("Wiedergabe", listOf(
-            Row.Setting(R.drawable.ic_radio, "Sender aus", "Gegen fremdsprachige Werbung", value = Region.label(this)) { regionSheet() },
+            Row.Setting(R.drawable.ic_radio, "Sender aus welchen Ländern", "Z. B. nur deutschsprachige Sender", value = Region.label(this)) { regionSheet() },
             Row.Setting(R.drawable.ic_eq, "Audioqualität", if (q == 3) "Gerade: " + (if (Settings.highQuality(this)) "Hoch (WLAN)" else "Normal (mobil)") else "Für freie Musik",
                 value = listOf("Sparend", "Normal", "Hoch", "Auto")[q.coerceIn(0, 3)]) { qualitySheet() },
             Row.Setting(R.drawable.ic_eq, "Klang", "Equalizer: Bass, klare Stimmen, Auto", value = Klang.label(this)) { klangSheet() },
@@ -1800,7 +1809,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun regionSheet() {
-        sheet("Sender aus", "Für Suche und Hit-Mix", null, "", false, null,
+        sheet("Sender aus welchen Ländern", "Gilt für Suche und Hit-Mix", null, "", false, null,
             Region.options.map { (key, ns) ->
                 val (n, sub) = ns
                 Option(if (key == Settings.region(this)) R.drawable.ic_play else R.drawable.ic_radio, n, sub) {
@@ -2581,7 +2590,8 @@ class MainActivity : ComponentActivity() {
         val miniP = findViewById<ProgressBar>(R.id.miniProgress)
         if (!isStation && dur > 0) { miniP.max = dur.toInt(); miniP.progress = pos.toInt() }
         // Radio-Lied mit bekanntem Anfang und Länge: Laufleiste wie bei einem normalen Lied
-        val songKnown = isStation && NowSong.known() && NowSong.stationId == item.mediaId.removePrefix("st:")
+        // Länge überschritten (Sender schickt keinen neuen Titel, andere Fassung): keine volle Leiste mit -0:00
+        val songKnown = isStation && NowSong.known() && !NowSong.overrun() && NowSong.stationId == item.mediaId.removePrefix("st:")
         if (songKnown && adInfo(c, item.mediaId, c.mediaMetadata.title?.toString()) == null) {
             miniP.visibility = View.VISIBLE
             miniP.max = NowSong.durMs.toInt()
@@ -2609,7 +2619,15 @@ class MainActivity : ComponentActivity() {
                 NowSong.startMs > 0 -> { seek.visibility = View.INVISIBLE
                      posText.text = "Lied läuft seit ${fmt(e)}"; durText.text = "LIVE" }
                 // Liedanfang unbekannt: keine Zeit zeigen (vorher "Läuft seit 0:05" = seit dem Einschalten, sah aus wie die Liedzeit)
-                else -> { seek.visibility = View.INVISIBLE; posText.text = ""; durText.text = "LIVE" }
+                else -> {
+                    seek.visibility = View.INVISIBLE; durText.text = "LIVE"
+                    // Anfang nicht genau bekannt: ehrlich "mindestens" (seit das Lied zuerst gesehen wurde)
+                    val sid = NowSong.stationId
+                    val nt = NowSong.title
+                    val n = sid?.let { LiveIndex.get(it) }?.takeIf { nt != null && Scanner.normalize(nt) == it.normalized }
+                    val min = n?.let { LiveIndex.minRunning(it) } ?: 0L
+                    posText.text = if (min >= 20_000L) "Lied läuft seit mind. ${fmt(min)}" else ""
+                }
             }
         } else {
             seek.isEnabled = true
