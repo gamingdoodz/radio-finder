@@ -1,5 +1,5 @@
 #!/bin/bash
-# Hitradar sparsamer, Hinweise, Schreibrechte prüfen (26.11.): KI nur bei Bedarf – nur nach Update-Absprache mit dem Spiel
+# Morgen-Check 27.11.: Freigabe, Meldung, Hinweise, KI-Umstellung
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null && $AB bereit; then
