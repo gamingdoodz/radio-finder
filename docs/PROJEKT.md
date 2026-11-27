@@ -134,4 +134,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: Wecker: kommt nach 40 s kein Radio (kein Netz, Sender kaputt), klingelt der Weckton des Handys (höchstens 4 Min., aus beim Stoppen oder sobald Radio spielt).
 - 27.11.: Server `/list?t=tag:…`: ganzes Wort im Tag, DACH zuerst, mit Tags in der Antwort (App sortiert selbst aus). Aktiv nach dem nächsten Neustart über radar-update.sh.
 - 27.11.: Wie große Musik-Apps: Funkloch/Tunnel/Netzwechsel überspringt keine Lieder mehr, Radio und Lieder verbinden von selbst neu (wachsende Pause bis 20 s, sofort wenn Netz zurück, höchstens 20 Min.); Hit-Mix springt ohne Netz nicht von Sender zu Sender. Radio länger als 30 s pausiert: beim Weiterspielen wieder live (kein alter Puffer, Liedzeit passt). Nach Werbung/Ansage-Stummschaltung und Mix-Wechsel geht die Lautstärke zurück auf den Wecker-Pegel statt sofort auf voll.
-
+- 27.11.: 1.0.169 (Stand wie 1.0.168) als zweiter Upload des Tages in den internen + geschlossenen Play-Test hochgeladen (Kevin hat freigegeben).
