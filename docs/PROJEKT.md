@@ -99,10 +99,10 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   Danach prüfen, ob `updateErlaubt`/`updateDran` so ankommen, wie `absprache.py` sie liest.
 - Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; Equalizer („Klang“) erledigt; als Nächstes eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
 - Suche/Mix nach Richtung am Handy prüfen (z. B. „Rock“ eingeben, Rock-Mix 30 Min. laufen lassen), Wecker ohne Netz testen.
-- Server: Liedanfang („exact“). 27.11. 19:00 vom Spiel neu gestartet, Kernliste live (kern 669, 11,9 Abfragen/s, Modus frei),
-  aber nach 12 Minuten erst 4 Sender mit bekanntem Anfang: neue Kern-Sender blieben bis zu 2 h in der Warteschlange, und wenn beim
-  ersten Aufbau noch keine Kandidaten da waren, wurde nie umsortiert. Behoben (neue Kern-Sender kommen sofort dran), wartet auf den
-  nächsten Neustart durch das Spiel bzw. `updateErlaubt`. Danach `/health` → `anfang_bekannt` prüfen (Ziel: mehrere Hundert).
+- Server: Liedanfang („exact“). Kernliste seit 27.11. 19:00 live, um 21:20 aber nur noch 1,6 Abfragen/s, kern 150, anfang_bekannt 69.
+  Ursache: die Kernliste richtete sich nach den gemessenen Abfragen; die messen aber nur, was fällig war → Kernliste schrumpfte immer weiter.
+  Behoben (b6c13c2 + Leistungs-Schätzung: nur bei Stau zählt die Messung, sonst langsam mehr zutrauen; `/health` → `leistung_s`).
+  Wartet auf den nächsten Neustart durch das Spiel. Danach `/health` → `anfang_bekannt` (Ziel: mehrere Hundert), `kern`, `abfragen_s`.
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf

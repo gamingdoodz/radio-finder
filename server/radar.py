@@ -1108,8 +1108,13 @@ def update_core():
     _core_count.update(t=t, c=_core_count["n"])
     rate = max(1.0, rate)
     CORE["rate"] = round(rate, 1)
+    # Gemessen wird, wie viele Abfragen fällig waren, nicht wie viele gehen würden. Nur wenn sich Arbeit staut,
+    # ist das die echte Leistung; sonst vorsichtig mehr zutrauen (sonst schrumpft die Kernliste immer weiter).
+    stau = bool(due) and due[0][0] < t - 10
+    cap = rate if stau else min(200.0, max(rate, CORE.get("cap", 0) * 1.25, 5.0))
+    CORE["cap"] = round(cap, 1)
     # 70 % der Abfragen für die Kernliste (alle ~80 s je Sender), 30 % für alle anderen
-    size = int(min(3000, max(150, rate * 0.7 * 80)))
+    size = int(min(3000, max(150, cap * 0.7 * 80)))
     pos = {st["id"]: i for i, st in enumerate(stations)}
     ccs = {st["id"]: st.get("cc") for st in stations}
     cand = []
@@ -1124,7 +1129,7 @@ def update_core():
     alt = CORE["ids"]
     CORE["ids"] = {sid for _, _, sid in cand[:size]}
     rest = max(1, len(stations) - len(CORE["ids"]))
-    CORE["rest"] = int(min(7200, max(600, rest / max(0.3, rate * 0.3))))
+    CORE["rest"] = int(min(7200, max(600, rest / max(0.3, cap * 0.3))))
     CORE["at"] = t
     neu = CORE["ids"] - alt
     if not neu:
@@ -1728,7 +1733,7 @@ async def h_health(_):
                               "traffic_gb": round(traffic["bytes"] / 1e9, 1), "relay": relay_ok(), "relays": relays["n"],
                               "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"], "meldung": MELDUNG["jetzt"],
                               "hinweise": len(HINWEISE["liste"]), "hinweise_wichtig": HINWEISE["wichtig"],
-                              "spiel_stufe": SPAR["stufe"], "kern": len(CORE["ids"]), "abfragen_s": CORE["rate"],
+                              "spiel_stufe": SPAR["stufe"], "kern": len(CORE["ids"]), "abfragen_s": CORE["rate"], "leistung_s": CORE.get("cap", 0),
                               "anfang_bekannt": sum(1 for _, n in fresh() if n.get("exact"))})
 
 
