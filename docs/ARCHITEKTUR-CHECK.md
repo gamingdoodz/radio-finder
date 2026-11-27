@@ -259,3 +259,19 @@ Verbraucherzentrale oder einem Anwalt für Urheberrecht (Erstberatung oft günst
   nur, wenn man es selbst einstellt. **Umgesetzt 27.11.:** Standard ist jetzt DACH, Weltweit lässt sich in den Einstellungen wählen (von Kevin bestätigt).
 - **Name „Hitradar“** vor einer größeren Veröffentlichung einmal im Markenregister (DPMA, kostenlos online) prüfen.
 - **Impressum/Kontakt**: Für Apps im Play Store ist eine Kontaktadresse Pflicht; bei Beschwerden schnell reagieren (Sender sperren, Eintrag löschen).
+
+---
+
+## 12. Freie KI-Modelle in der App? (27.11.)
+
+Nur, wo es wirklich etwas bringt, Lizenz frei nutzbar, kaum Akku und keine Serverlast.
+
+| Idee | Modell (Lizenz) | Sinnvoll? |
+|---|---|---|
+| Werbung/Moderation am Klang erkennen (statt nur am Titel), für „Werbung stumm“ und Lied-Ende im Hit-Mix | YAMNet (Apache 2.0, ~4 MB, TensorFlow Lite) | 🟡 Einziger echter Gewinn. Läuft auf dem Handy, nur in den ersten Minuten nach dem Umschalten. Kostet etwas Akku, muss am echten Gerät getestet werden. Später als Versuch, abschaltbar. |
+| „Wünsch dir was“ auf dem Handy statt auf dem Server | Qwen2.5-0.5B (Apache 2.0) | ❌ ~400 MB Download, langsam auf vielen Handys. Regeln + Server-KI nur bei Bedarf reichen. |
+| Android-eigene KI (Gemini Nano über ML Kit) | Google-Bedingungen | 🟡 Kostenlos, aber nur auf wenigen neuen Handys. Höchstens als Zusatz, nicht nötig. |
+| Empfehlungen („Mehr wie dieses“) | – | ❌ Kein Modell nötig: die Server-Statistik, welche Lieder Sender hintereinander spielen, ist besser und kostet fast nichts. |
+| Spracheingabe | Android-Spracherkennung | ✅ schon da (Android Auto/Google). |
+
+Fazit: Ein großes Sprachmodell bringt in der App nichts. Einziger Kandidat ist die kleine Klang-Erkennung (YAMNet) – erst, wenn Grundfunktionen im Auto getestet sind.
