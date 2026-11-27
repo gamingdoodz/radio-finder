@@ -1,5 +1,5 @@
 #!/bin/bash
-# Check 27.11. abends (2): Liedanfang nach Neustart
+# Check 27.11. 21 Uhr: Liedanfang, Neustart
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null && $AB bereit; then
@@ -21,5 +21,5 @@ echo "== Update-Freigabe =="; $AB darf 2>&1; ls -la /run/serverabsprache 2>&1
 curl -s -m 5 http://127.0.0.1:8100/api/last | python3 -c 'import sys,json; d=json.load(sys.stdin); print("api/last Felder:", sorted(d)); print({k: d.get(k) for k in ("updateErlaubt","updateDran","stufe")})' 2>&1
 ls -la /var/lib/hitradar-neustart-offen 2>&1
 echo "== Speicher Hitradar =="; du -sh $R /opt/llama.cpp /opt/models 2>/dev/null
-echo "== Hitradar =="; curl -s http://localhost:8081/health; echo
+echo "radar seit: $(systemctl show -p ActiveEnterTimestamp --value radar)"; echo "== Hitradar =="; curl -s http://localhost:8081/health; echo
 journalctl -u radar --since "-30 min" --no-pager | grep -iE "Serverabsprache|Traceback|Error" | tail -8
