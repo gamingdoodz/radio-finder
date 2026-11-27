@@ -38,7 +38,7 @@ val live = HashMap<String, Live>()
 var version = 0L
 var serverT = 0L
 
-var changes = 0; var exactChanges = 0; var estimated = 0
+var changes = 0; var exactChanges = 0; var estimated = 0; var reAdded = 0; var added = 0; var gone = 0
 
 fun sync(): Got {
     val g = get("$SERVER/sync?from=$version")
@@ -50,6 +50,7 @@ fun sync(): Got {
     for (i in 0 until rows.length()) {
         val r = rows.getJSONArray(i)
         val id = r.getString(0)
+        if (r.length() >= 7 && o.optInt("full") != 1) live[id]?.let { old -> if (Text.clean(r.optString(4)) != old.title) { changes++; reAdded++ } } ?: run { added++ }
         if (r.length() >= 7) live[id] = Live(r.optString(1), r.optString(2), Text.clean(r.optString(4)), r.optLong(5) * 1000, r.optLong(6) * 1000,
             r.length() < 9 || r.optInt(8, 1) == 1)
         else if (r.length() >= 4) live[id]?.let {
@@ -61,7 +62,8 @@ fun sync(): Got {
             if (!it.exact && changed && it.seen - oldSeen in 0..150_000L) { it.since = oldSeen + (it.seen - oldSeen) / 2; it.exact = true; estimated++ }
         }
     }
-    o.optJSONArray("gone")?.let { for (i in 0 until it.length()) live.remove(it.getString(i)) }
+    // Wie die App: weg gemeldete Sender nicht sofort vergessen (kommen oft mit neuem Lied zurück)
+    o.optJSONArray("gone")?.let { gone += it.length() }
     return g
 }
 
@@ -166,6 +168,7 @@ fun main() {
         Thread.sleep(60_000)
         val g = sync(); diffSizes.add(g.bytes); diffMs.add(g.ms)
     }
+    say("- Abgleich: $gone Sender als weg gemeldet, $added neu, $reAdded mit neuem Lied zurück (als ganze Zeile statt als Änderung)")
     say("- Titelwechsel im Abgleich: $changes, davon mit genauem Anfang vom Server: $exactChanges, von der App geschätzt (Lücke ≤ 150 s): $estimated")
     say("- Lieder: $joins, Wiederholungen: $repeats, gleicher Sender direkt danach: $sameStation, Minuten ohne passendes frisches Lied: $waits")
     if (ages.isNotEmpty()) say("- Eingestiegen nach Liedbeginn: Mittel ${ages.average().toInt()} s, max ${ages.max()} s")
