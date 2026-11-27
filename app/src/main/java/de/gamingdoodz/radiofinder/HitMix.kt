@@ -484,12 +484,41 @@ class HitMix(
         if (endTimer?.isActive == true) return
         if (NowSong.stationId != currentStationId || !NowSong.known() || !NowSong.startLocal) return
         val left = NowSong.durMs - NowSong.elapsed()
-        if (left !in 0L..4_500L) return
+        if (left !in 0L..9_000L) return
         val title = NowSong.title
         endTimer = scope.launch {
+            // Vorladen, nur kurz vor dem Wechsel: nächsten Sender jetzt aussuchen und die Verbindung aufbauen
+            // (Name auflösen, Verschlüsselung, ein paar KB). Beim Umschalten ist der Sender dann schneller da.
+            val next = withContext(Dispatchers.Default) { choose() }
+            if (gen != myGen) return@launch
+            if (next != null) { candidate = System.currentTimeMillis() to next; warmUp(next.now.station.url) }
             delay((left - 1_200L).coerceAtLeast(0L))
             if (gen == myGen && NowSong.title == title && NowSong.stationId == currentStationId && player()?.playWhenReady == true) switchNow()
         }
+    }
+
+    /** Verbindung zum nächsten Sender schon mal aufbauen und gleich wieder schließen (höchstens 8 KB). */
+    private fun warmUp(url: String) {
+        if (Cast.active || url.isBlank()) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 4_000; c.readTimeout = 4_000
+                c.setRequestProperty("User-Agent", "Hitradar/1.0")
+                try { c.inputStream.use { it.read(ByteArray(8 * 1024)) } } finally { c.disconnect() }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // ---------- Wie schnell ein Sender nach dem Umschalten spielt (auf dem Handy gemerkt) ----------
+    private val speedPrefs by lazy { context.applicationContext.getSharedPreferences("hitmix_speed", Context.MODE_PRIVATE) }
+
+    private fun startDelay(stationId: String): Long = speedPrefs.getLong(stationId, 0L)
+
+    private fun rememberStart(stationId: String, ms: Long) {
+        val old = speedPrefs.getLong(stationId, 0L)
+        val v = if (old == 0L) ms else (old * 2 + ms) / 3
+        speedPrefs.edit().putLong(stationId, v.coerceIn(1L, 30_000L)).apply()
     }
 
     /** Lied ist fast vorbei (weniger als 1,5 Min. übrig): gar nicht erst hinschalten. */
@@ -648,7 +677,9 @@ class HitMix(
                 val knownArtist = if (artistWords.any { w -> w.all { n.normalized.contains(it) } }) 90_000L else 0L
                 // Frisch angefangen zählt; fast vorbei (über 3 Min.) und Sender mit Vorab-Werbung rutschen nach hinten
                 val age = t - n.since
-                age + (if (age > 180_000L) 300_000L else 0L) +
+                // Sender, die beim Umschalten lange brauchen (Lücke), nach hinten
+                val slow = startDelay(n.station.id).let { d -> if (d > 6_000L) 240_000L else if (d > 3_000L) d * 15 else 0L }
+                age + slow + (if (age > 180_000L) 300_000L else 0L) +
                     (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist
             }.distinctBy { it.second }.take(limit).map { Choice(it.first, it.second) }
     }
@@ -720,10 +751,13 @@ class HitMix(
         fadeJob?.cancel()
         if (Cast.active) return   // beim Casten ist die Lautstärke die des Lautsprechers: nicht anfassen
         try { p.volume = 0f } catch (_: Exception) { return }
+        val sid = currentStationId
         fadeJob = scope.launch {
             try {
                 val start = System.currentTimeMillis()
                 while (!p.isPlaying && System.currentTimeMillis() - start < 10_000L) delay(100)
+                // Merken, wie lange der Sender gebraucht hat (langsame kommen künftig seltener dran)
+                if (sid != null) rememberStart(sid, if (p.isPlaying) System.currentTimeMillis() - start else 10_000L)
                 delay(250)
                 for (i in 1..10) {
                     if (muted()) return@launch   // Werbung/Ansage: die Stummschaltung übernimmt

@@ -273,6 +273,13 @@ class PlaybackService : MediaLibraryService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
+            // Radio: nach 1 s Puffer losspielen (statt 2,5 s) = kürzere Lücke beim Umschalten.
+            // Höchstens 20 s vorladen (statt 50 s): beim Umschalten wird weniger umsonst geladen, spart Daten.
+            .setLoadControl(
+                androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(15_000, 20_000, 1_000, 3_000)
+                    .build()
+            )
             .build()
         exo = player
         Jamendo.highQuality = Settings.highQuality(this)
