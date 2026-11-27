@@ -281,7 +281,13 @@ class MainActivity : ComponentActivity() {
             showFull(false)
         }
         findViewById<View>(R.id.fullFav).setOnClickListener {
-            controller?.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let { Favorites.toggle(this, it) }
+            // Radio mit Lied: das Herz merkt sich das Lied (wie bei Spotify); den Sender merkt man im •••-Menü
+            val song = radioSong()
+            if (song != null) {
+                val on = Favorites.toggle(this, songEntry(song))
+                showHint(if (on) "♥ Lied bei Lieblingsliedern gemerkt" else "Lied aus den Lieblingsliedern entfernt")
+                updatePlayer()
+            } else controller?.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let { Favorites.toggle(this, it) }
         }
         findViewById<View>(R.id.fullSleep).setOnClickListener { sleepDialog() }
         findViewById<View>(R.id.fullCast).setOnClickListener { castDialog() }
@@ -1190,11 +1196,20 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Lied aus dem Radio ("Künstler - Titel") als Eintrag mit Cover (Antippen: im Radio hören oder Wächter). */
+    /** Lied, das gerade im Radio läuft (null bei Werbung, Moderation oder freier Musik). */
+    private fun radioSong(): String? {
+        val c = controller ?: return null
+        val item = c.currentMediaItem ?: return null
+        if (!item.mediaId.startsWith("st:")) return null
+        return c.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() && isMusic(it) && !Ads.isAd(it) }
+    }
+
     private fun songEntry(radioTitle: String): Entry {
         val artist = radioTitle.substringBefore(" - ").substringBefore(" – ").trim()
         val title = radioTitle.substringAfter(" - ").substringAfter(" – ").trim()
         val c = Covers.get(radioTitle)
-        return Entry("hd:" + radioTitle.hashCode().toString(16), Kind.TRACK, c?.title ?: title, c?.artist ?: artist,
+        // Kennung aus dem bereinigten Titel: dasselbe Lied in anderer Schreibweise ist dasselbe Lieblingslied
+        return Entry("hd:" + MixLogic.songKey(radioTitle).hashCode().toString(16), Kind.TRACK, c?.title ?: title, c?.artist ?: artist,
             "", c?.artwork.orEmpty(), c?.title ?: title, preview = true)
     }
 
@@ -1770,9 +1785,9 @@ class MainActivity : ComponentActivity() {
         if (stations.size >= 2 && HitMix.activeName(this) == null) rows.add(button(R.drawable.ic_bolt, "Lieblingssender-Mix starten") {
             startHitMix("favs", "– Lieblingssender")
         })
-        if (stations.isEmpty()) rows.add(Row.Empty("Tipp bei einem Sender auf ♥ oder halte ihn gedrückt.")) else rows.add(Row.Carousel(stations))
+        if (stations.isEmpty()) rows.add(Row.Empty("Sender gedrückt halten oder im Player über ••• merken.")) else rows.add(Row.Carousel(stations))
         rows.add(Row.Header("Lieblingslieder"))
-        if (tracks.isEmpty()) rows.add(Row.Empty("Noch keine.")) else tracks.forEach { rows.add(Row.Item(it, tracks)) }
+        if (tracks.isEmpty()) rows.add(Row.Empty("Läuft ein Lied, das dir gefällt: im Player auf ♥ tippen.")) else tracks.forEach { rows.add(Row.Item(it, tracks)) }
         // Zuletzt gehört: Sender mit dem Lied, das dort JETZT läuft (nicht dem von damals)
         val recent = Recent.all(this).map { e ->
             if (e.kind != Kind.STATION) e
@@ -2348,6 +2363,12 @@ class MainActivity : ComponentActivity() {
             if (artist.isNotBlank() && artist != song)
                 opts.add(Option(R.drawable.ic_close, "$artist nicht mehr spielen", "Keine Lieder von $artist im Mix") { dislike(song, true) })
         }
+        // Sender merken (das Herz im Player merkt sich bei Radio das Lied)
+        controller?.currentMediaItem?.takeIf { it.mediaId.startsWith("st:") }?.let { Entry.fromMediaItem(it) }?.let { st ->
+            val fav = Favorites.isFav(this, st.id)
+            opts.add(Option(R.drawable.ic_heart, if (fav) "${st.name} aus Lieblingssendern" else "${st.name} als Lieblingssender",
+                null) { Favorites.toggle(this, st); showHint(if (fav) "Sender entfernt" else "♥ Sender gemerkt"); updatePlayer() })
+        }
         if (mixOn) opts.add(Option(R.drawable.ic_stop, "Mix beenden", null) { stopHitMix(); mixEndedHint(); updatePlayer() })
         if (Dislikes.count(this) > 0)
             opts.add(Option(R.drawable.ic_heart_outline, "Gesperrte Lieder wieder erlauben", "${Dislikes.count(this)} gesperrt") { Dislikes.clear(this); showHint("Alles wieder erlaubt") })
@@ -2638,7 +2659,7 @@ class MainActivity : ComponentActivity() {
         }
         val playing = c.isPlaying || (c.playbackState == Player.STATE_BUFFERING && c.playWhenReady)
         val playIcon = if (playing) R.drawable.ic_pause else R.drawable.ic_play
-        val isFav = Favorites.isFav(this, item.mediaId)
+        val isFav = radioSong()?.let { Favorites.isFav(this, songEntry(it).id) } ?: Favorites.isFav(this, item.mediaId)
         // Radio: Cover des Liedes, das gerade läuft (sonst Senderlogo)
         val songCover = if (isStation && live != null && isMusic(live)) Covers.get(live)?.artwork else null
         if (isStation && live != null && isMusic(live) && !Covers.known(live)) loadCoverTitles(listOf(live))
