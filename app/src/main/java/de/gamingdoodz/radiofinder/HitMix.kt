@@ -28,6 +28,8 @@ class HitMix(
     private val prepareItem: (MediaItem) -> MediaItem,
     /** Ist der Player gerade wegen Werbung/Ansage stumm? Dann blendet der Mix nicht selbst ein. */
     private val muted: () -> Boolean = { false },
+    /** Ziel-Lautstärke beim Einblenden (beim Wecker anfangs leise). */
+    private val targetVolume: () -> Float = { 1f },
 ) {
     companion object {
         fun prefs(context: Context) = context.applicationContext.getSharedPreferences("hitmix", Context.MODE_PRIVATE)
@@ -463,7 +465,8 @@ class HitMix(
             // Gestoppt (Stopp gedrückt, Liste leer): Mix beenden – nicht von selbst wieder anfangen
             if (switchedAt > 0 && (p.mediaItemCount == 0 || (p.playbackState == Player.STATE_IDLE && p.playerError == null))) { stop(); return }
             if (!p.playWhenReady) continue
-            val broken = p.playerError != null
+            // Kaputter Sender: weiter. Ohne Netz (Funkloch) nicht – der Player verbindet von selbst neu, sobald Netz da ist
+            val broken = p.playerError != null && Net.online(context)
             // Länge bekannt und überschritten, Titel aber unverändert: Lied ist vorbei (Moderator redet o. Ä.)
             // Klang-Erkennung hört noch Musik: Lied ist länger als gedacht (andere Fassung), nicht abwürgen (höchstens 1 Min.)
             val overrun = NowSong.stationId == currentStationId && NowSong.overrun() &&
@@ -801,11 +804,12 @@ class HitMix(
                 delay(250)
                 for (i in 1..10) {
                     if (muted()) return@launch   // Werbung/Ansage: die Stummschaltung übernimmt
-                    p.volume = i / 10f
+                    p.volume = targetVolume() * i / 10f
                     delay(60)
                 }
             } finally {
-                if (!muted() && p.volume < 1f) try { p.volume = 1f } catch (_: Exception) {}
+                val target = targetVolume()
+                if (!muted() && p.volume < target) try { p.volume = target } catch (_: Exception) {}
             }
         }
     }

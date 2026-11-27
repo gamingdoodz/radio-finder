@@ -105,7 +105,7 @@ class PlaybackService : MediaLibraryService() {
         Positions.save(this, id, p.currentPosition, p.duration.coerceAtLeast(0))
     }
 
-    private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }, { adMuted }) }
+    private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }, { adMuted }, { baseVolume }) }
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bedtime = false
     private var endlessTag: String? = null
@@ -190,11 +190,18 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** Wecker: in einer Minute von leise auf normal. */
+    /**
+     * Lautstärke, auf die nach einer Stummschaltung (Werbung, Ansage) oder einem Senderwechsel zurückgegangen wird.
+     * Beim Wecker steigt sie langsam (vorher sprang sie nach jeder Werbung/jedem Mix-Wechsel sofort auf voll).
+     */
+    @Volatile private var baseVolume = 1f
+
     private val fadeInRunnable = object : Runnable {
         override fun run() {
             val p = session?.player ?: return
-            if (p.volume < 1f) {
-                p.volume = (p.volume + 0.06f).coerceAtMost(1f)
+            if (baseVolume < 1f) {
+                baseVolume = (baseVolume + 0.06f).coerceAtMost(1f)
+                if (!adMuted) p.volume = baseVolume
                 sleepHandler.postDelayed(this, 4_000)
             }
         }
@@ -236,8 +243,60 @@ class PlaybackService : MediaLibraryService() {
         alarmTone = null
     }
 
+    // ---------- Funkloch: von selbst wieder verbinden ----------
+    private var reconnectTry = 0
+    private var reconnectSince = 0L
+    private var netCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
+    private fun isNetworkError(e: androidx.media3.common.PlaybackException): Boolean =
+        !Net.online(this) || e.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            e.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            e.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
+
+    private val reconnectRunnable = Runnable { tryReconnect() }
+
+    /** Neu verbinden mit wachsender Pause (2, 4, 6 … höchstens 20 s), höchstens 20 Minuten lang. */
+    private fun scheduleReconnect() {
+        if (reconnectSince == 0L) reconnectSince = System.currentTimeMillis()
+        sleepHandler.removeCallbacks(reconnectRunnable)
+        if (System.currentTimeMillis() - reconnectSince > 20 * 60_000L) { reconnectSince = 0L; reconnectTry = 0; return }
+        reconnectTry++
+        sleepHandler.postDelayed(reconnectRunnable, (2_000L * reconnectTry).coerceAtMost(20_000L))
+    }
+
+    private fun tryReconnect() {
+        val p = exo ?: return
+        // Inzwischen gestoppt/pausiert oder läuft wieder: nichts tun (Stopp bleibt Stopp)
+        if (!p.playWhenReady || p.playerError == null || session?.player !== p) { reconnectSince = 0L; reconnectTry = 0; return }
+        if (!Net.online(this)) { scheduleReconnect(); return }
+        p.prepare(); p.play()
+    }
+
+    /** Netz ist wieder da: sofort neu verbinden statt auf den nächsten Versuch zu warten. */
+    private fun watchNetwork() {
+        if (netCallback != null) return
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                sleepHandler.post {
+                    val p = exo ?: return@post
+                    if (p.playWhenReady && p.playerError != null && reconnectSince > 0L) {
+                        reconnectTry = 0
+                        sleepHandler.removeCallbacks(reconnectRunnable)
+                        sleepHandler.postDelayed(reconnectRunnable, 1_000)   // kurz warten, bis die Verbindung wirklich steht
+                    }
+                }
+            }
+        }
+        try { cm.registerDefaultNetworkCallback(cb); netCallback = cb } catch (_: Exception) {}
+    }
+
+    // ---------- Live-Radio nach langer Pause: wieder live statt alter Puffer ----------
+    private var pausedAt = 0L
+
     private fun startSleepTimer(min: Int) {
         sleepHandler.removeCallbacks(sleepRunnable)
+        baseVolume = 1f
         session?.player?.volume = 1f
         if (min > 0) {
             // Ausblenden beginnt eine Minute vor Schluss
@@ -318,6 +377,7 @@ class PlaybackService : MediaLibraryService() {
             )
             .build()
         exo = player
+        watchNetwork()
         Jamendo.highQuality = Settings.highQuality(this)
         setupNormalizer(player.audioSessionId)
         setupKlang(player.audioSessionId)
@@ -325,7 +385,7 @@ class PlaybackService : MediaLibraryService() {
             private var retries = 0
 
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) retries = 0
+                if (state == Player.STATE_READY) { retries = 0; reconnectTry = 0; reconnectSince = 0L }
                 // Liste mit freien Liedern zu Ende: wie ein normaler Player mit passender Musik weitermachen
                 if (state == Player.STATE_ENDED && !bedtime) autoContinue()
                 // Einschlaf-Modus: nach der Geschichte leise Schlaflieder
@@ -367,6 +427,9 @@ class PlaybackService : MediaLibraryService() {
             /** Fehler abfangen: Lied überspringen bzw. Sender kurz neu verbinden. */
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 val p = session?.player ?: return
+                // Funkloch/Tunnel/Netzwechsel: nicht überspringen (sonst rauscht die ganze Liste durch), sondern an
+                // derselben Stelle weitermachen, sobald wieder Netz da ist – wie bei großen Musik-Apps
+                if (isNetworkError(error) && p === exo) { scheduleReconnect(); return }
                 if (p.hasNextMediaItem()) {
                     p.seekToNextMediaItem(); p.prepare(); p.play()
                 } else if (retries < 2 && p.currentMediaItem?.mediaId?.startsWith("st:") == true) {
@@ -409,6 +472,18 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 // Wecker von Hand gestoppt: Ersatz-Ton auch aus
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) stopAlarmTone()
+                if (!playWhenReady) pausedAt = System.currentTimeMillis()
+                else {
+                    // Radio länger als 30 s pausiert: neu verbinden, damit man live hört (nicht den alten Puffer)
+                    // und die Liedzeit wieder zum Gehörten passt
+                    val p = exo
+                    val longPause = pausedAt > 0L && System.currentTimeMillis() - pausedAt > 30_000L
+                    pausedAt = 0L
+                    if (longPause && p != null && session?.player === p && p.currentMediaItem?.mediaId?.startsWith("st:") == true &&
+                        p.playbackState != Player.STATE_IDLE) {
+                        sleepHandler.post { try { p.seekToDefaultPosition(); p.prepare() } catch (_: Exception) {} }
+                    }
+                }
                 if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
                     Settings.prefs(this@PlaybackService).edit().putLong("user_stopped", if (playWhenReady) 0L else System.currentTimeMillis()).apply()
             }
@@ -434,7 +509,7 @@ class PlaybackService : MediaLibraryService() {
                 NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
                 adMuted = false; soundMuted = false; adTitleSince = 0L
                 SoundSense.reset()
-                if (exo?.volume == 0f) exo?.volume = 1f
+                if (exo?.volume == 0f) exo?.volume = baseVolume
                 if (exo?.isPlaying == true) { sleepHandler.removeCallbacks(adMuteCheck); sleepHandler.post(adMuteCheck) }
                 // Tempo gilt nur für Hörspiele und Hörbücher
                 if (!isStory(mediaItem?.mediaId)) session?.player?.setPlaybackSpeed(1f)
@@ -566,7 +641,7 @@ class PlaybackService : MediaLibraryService() {
             val talkMute = mixOn && hitMix.muteForTalk()
             if (!on) {
                 if (talkMute && !adMuted) { adMuted = true; p.volume = 0f }
-                else if (!talkMute && adMuted) { adMuted = false; p.volume = 1f }
+                else if (!talkMute && adMuted) { adMuted = false; p.volume = baseVolume }
                 return
             }
             val known = Ads.duration(this@PlaybackService, id)
@@ -582,7 +657,7 @@ class PlaybackService : MediaLibraryService() {
             // ohne Titel bis zu 10 s länger, falls der Spot länger dauert
             val shouldMute = talkMute || !music && (adTitle || soundMuted || known > 0 && (since < known || (NowSong.title == null && since < known + 10_000)))
             if (shouldMute && !adMuted) { adMuted = true; p.volume = 0f }
-            else if (!shouldMute && adMuted) { adMuted = false; p.volume = 1f }
+            else if (!shouldMute && adMuted) { adMuted = false; p.volume = baseVolume }
         }
     }
 
@@ -690,6 +765,9 @@ class PlaybackService : MediaLibraryService() {
         Settings.prefs(this).unregisterOnSharedPreferenceChangeListener(settingsListener)
         sleepHandler.removeCallbacks(fadeInRunnable)
         stopAlarmTone()
+        sleepHandler.removeCallbacks(reconnectRunnable)
+        netCallback?.let { cb -> try { getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } catch (_: Exception) {} }
+        netCallback = null
         try { dynamics?.release() } catch (_: Exception) {}
         try { equalizer?.release() } catch (_: Exception) {}
         SoundSense.release()
@@ -1051,6 +1129,7 @@ class PlaybackService : MediaLibraryService() {
                 startSleepTimer(args.getInt("min", 45))
             }
             if (customCommand.customAction == CMD_FADEIN) {
+                baseVolume = 0.15f
                 session.player.volume = 0.15f
                 sleepHandler.removeCallbacks(fadeInRunnable)
                 sleepHandler.postDelayed(fadeInRunnable, 4_000)
