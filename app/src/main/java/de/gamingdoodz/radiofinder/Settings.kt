@@ -53,7 +53,7 @@ object Settings {
     fun setMuteAds(context: Context, on: Boolean) = prefs(context).edit().putBoolean("mute_ads", on).apply()
 
     /** Aus welchen Ländern Sender genommen werden (gegen fremdsprachige Werbung). */
-    fun region(context: Context) = prefs(context).getString("region", "all") ?: "all"
+    fun region(context: Context) = prefs(context).getString("region", "dach") ?: "dach"
     fun setRegion(context: Context, r: String) = prefs(context).edit().putString("region", r).apply()
 
     fun quality(context: Context) = prefs(context).getInt("quality", 3)

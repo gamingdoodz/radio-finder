@@ -256,6 +256,6 @@ Verbraucherzentrale oder einem Anwalt für Urheberrecht (Erstberatung oft günst
 - **Ausländische Sender**: Gegen TuneIn haben Plattenfirmen in Großbritannien gewonnen, weil TuneIn Sender verlinkt hat,
   die nur für ihr eigenes Land lizenziert waren. Danach hat TuneIn solche Sender auch in Deutschland gesperrt.
   Hitradar zeigt standardmäßig weltweit ~50.000 Sender. Sicherer: Standard auf deutschsprachige Sender (DACH) und Weltweit
-  nur, wenn man es selbst einstellt. Diese Entscheidung trifft Kevin.
+  nur, wenn man es selbst einstellt. **Umgesetzt 27.11.:** Standard ist jetzt DACH, Weltweit lässt sich in den Einstellungen wählen (Kevin kann es zurückdrehen).
 - **Name „Hitradar“** vor einer größeren Veröffentlichung einmal im Markenregister (DPMA, kostenlos online) prüfen.
 - **Impressum/Kontakt**: Für Apps im Play Store ist eine Kontaktadresse Pflicht; bei Beschwerden schnell reagieren (Sender sperren, Eintrag löschen).

@@ -10,17 +10,17 @@ object Region {
         "SK", "HU", "SI", "HR", "RO", "BG", "GR", "EE", "LV", "LT", "IS", "MT", "CY", "RS", "BA", "ME", "MK", "AL")
 
     val options = listOf(
-        "dach" to ("Deutschland, Österreich, Schweiz" to "Nur deutschsprachige Sender"),
+        "dach" to ("Deutschland, Österreich, Schweiz" to "Nur deutschsprachige Sender (Standard)"),
         "dach_en" to ("Deutschsprachig + Englisch" to "Dazu Sender aus UK, USA, Irland, Kanada, Australien"),
         "eu" to ("Europa" to "Alle europäischen Sender"),
-        "all" to ("Weltweit" to "Alle ~50.000 Sender (Standard)"),
+        "all" to ("Weltweit" to "Alle ~50.000 Sender"),
     )
 
-    @Volatile private var current = "all"
+    @Volatile private var current = "dach"
 
     fun load(c: Context) { current = Settings.region(c) }
 
-    fun label(c: Context) = when (Settings.region(c)) { "dach" -> "DACH"; "eu" -> "Europa"; "dach_en" -> "DACH + EN"; else -> "Weltweit" }
+    fun label(c: Context) = when (Settings.region(c)) { "dach" -> "DACH"; "eu" -> "Europa"; "dach_en" -> "DACH + EN"; "all" -> "Weltweit"; else -> "DACH" }
 
     /** cc = Länderkürzel vom Server; null = unbekannt (alter Server), dann erlauben. */
     fun allows(cc: String?): Boolean {
