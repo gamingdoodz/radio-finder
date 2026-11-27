@@ -196,6 +196,9 @@ Hintergrund, Android Auto (Listen, Suche, Sprache), Casten, Schlaf-Timer, Wecker
 - **Empfehlung 8 umgesetzt:** `radiofinder.keystore` aus dem Repo entfernt. Release wird nur noch mit dem geheimen
   Upload-Schlüssel signiert, ohne ihn bricht „App bauen“ mit klarer Meldung ab. Der alte Schlüssel steht weiter in der
   Git-Geschichte und gilt als öffentlich, wird aber nicht mehr benutzt.
+- **Empfehlung 9 umgesetzt (Server):** Hat ein Radioserver keine Icecast-Statusseite, fragt `radar.py` die
+  Shoutcast-2-Statusseite (`/statistics?json=1`). Ein kleiner Abruf für alle Streams des Servers statt Audio anzuzapfen.
+  Aktiv erst nach dem nächsten Neustart über `radar-update.sh` (Serverabsprache).
 
 Alles andere sind Vorschläge. Große Umbauten (Code aufteilen, Room, eigene Dateien, Push-Wächter, Server-Änderungen) nur nach Freigabe
 und Stück für Stück, damit Android Auto und Hit-Mix stabil bleiben. Server-Änderungen nur über die Serverabsprache.

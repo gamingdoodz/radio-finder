@@ -975,6 +975,34 @@ async def icecast_titles(session, key: str):
         return None
 
 
+async def shoutcast_titles(session, key: str):
+    """Shoutcast-2-Statusseite: ein Abruf für alle Streams des Servers, ohne Audio zu laden.
+    Pfad -> Titel; gibt es nur einen Stream, gilt er für jede Adresse dieses Servers ("*")."""
+    try:
+        async with session.get(f"{key}/statistics?json=1", timeout=aiohttp.ClientTimeout(total=4)) as r:
+            if r.status != 200:
+                return None
+            data = json.loads(await r.content.read(500_000))
+        streams = data.get("streams") if isinstance(data, dict) else None
+        if not isinstance(streams, list) or not streams:
+            return None
+        out = {}
+        for o in streams:
+            if not isinstance(o, dict):
+                continue
+            title = (o.get("songtitle") or "").strip()
+            if not title or title == "-":
+                continue
+            path = (o.get("streampath") or "").strip()
+            if path:
+                out[path if path.startswith("/") else "/" + path] = title
+        if len(streams) == 1 and isinstance(streams[0], dict) and (streams[0].get("songtitle") or "").strip():
+            out["*"] = streams[0]["songtitle"].strip()
+        return out or None
+    except Exception:
+        return None
+
+
 async def icy_title(session, u: str):
     try:
         async with session.get(u, headers={"Icy-MetaData": "1"},
@@ -1016,6 +1044,9 @@ async def status_for(session, key):
         return hit[1]
     titles = await icecast_titles(session, key)
     if titles is None:
+        # Kein Icecast: vielleicht Shoutcast 2 (spart das Anzapfen des Streams)
+        titles = await shoutcast_titles(session, key)
+    if titles is None:
         no_status.add(key)
     status_cache[key] = (time.time(), titles)
     return titles
@@ -1027,7 +1058,7 @@ async def check(session, st):
     t = None
     if titles:
         path = urlparse(st["url"]).path or "/"
-        t = titles.get(path) or titles.get(path.rstrip("/"))
+        t = titles.get(path) or titles.get(path.rstrip("/")) or titles.get("*")
     if t is None:
         t = await icy_title(session, st["url"])
     stats["checked"] += 1
