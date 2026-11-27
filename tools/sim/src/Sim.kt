@@ -38,6 +38,8 @@ val live = HashMap<String, Live>()
 var version = 0L
 var serverT = 0L
 
+var changes = 0; var exactChanges = 0; var estimated = 0
+
 fun sync(): Got {
     val g = get("$SERVER/sync?from=$version")
     val text = g.text ?: return g
@@ -50,8 +52,14 @@ fun sync(): Got {
         val id = r.getString(0)
         if (r.length() >= 7) live[id] = Live(r.optString(1), r.optString(2), Text.clean(r.optString(4)), r.optLong(5) * 1000, r.optLong(6) * 1000,
             r.length() < 9 || r.optInt(8, 1) == 1)
-        else if (r.length() >= 4) live[id]?.let { it.title = Text.clean(r.optString(1)); it.since = r.optLong(2) * 1000; it.seen = r.optLong(3) * 1000
-            it.exact = r.length() < 5 || r.optInt(4, 1) == 1 }
+        else if (r.length() >= 4) live[id]?.let {
+            val newTitle = Text.clean(r.optString(1)); val oldSeen = it.seen; val changed = newTitle != it.title
+            it.title = newTitle; it.since = r.optLong(2) * 1000; it.seen = r.optLong(3) * 1000
+            it.exact = r.length() < 5 || r.optInt(4, 1) == 1
+            changes++; if (it.exact) exactChanges++
+            // Wie die App: Wechsel zwischen zwei Abgleichen gesehen, Lücke kurz -> Mitte als Anfang
+            if (!it.exact && changed && it.seen - oldSeen in 0..150_000L) { it.since = oldSeen + (it.seen - oldSeen) / 2; it.exact = true; estimated++ }
+        }
     }
     o.optJSONArray("gone")?.let { for (i in 0 until it.length()) live.remove(it.getString(i)) }
     return g
@@ -64,6 +72,7 @@ fun main() {
     for (p in listOf("/health", "/charts", "/popular", "/search?q=helene", "/stations?q=antenne", "/list?t=popular", "/list?t=tag%3Arock")) {
         val g = get(SERVER + p)
         say("- `$p`: ${if (g.text == null) "FEHLER" else "${g.bytes / 1024} KB in ${g.ms} ms"}")
+        if (p == "/health") say("  - Inhalt: `${g.text?.take(700)?.replace("`", "'")}`")
     }
     val first = sync()
     say("- `/sync` erstes Mal (alles): ${first.bytes / 1024} KB in ${first.ms} ms, ${live.size} Sender")
@@ -157,6 +166,7 @@ fun main() {
         Thread.sleep(60_000)
         val g = sync(); diffSizes.add(g.bytes); diffMs.add(g.ms)
     }
+    say("- Titelwechsel im Abgleich: $changes, davon mit genauem Anfang vom Server: $exactChanges, von der App geschätzt (Lücke ≤ 150 s): $estimated")
     say("- Lieder: $joins, Wiederholungen: $repeats, gleicher Sender direkt danach: $sameStation, Minuten ohne passendes frisches Lied: $waits")
     if (ages.isNotEmpty()) say("- Eingestiegen nach Liedbeginn: Mittel ${ages.average().toInt()} s, max ${ages.max()} s")
     if (diffSizes.isNotEmpty()) say("- `/sync` Änderungen je Minute: Mittel ${diffSizes.average().toInt() / 1024} KB, ${diffMs.average().toInt()} ms (≈ ${diffSizes.sum() / 1024 * 60 / MINUTES / 1024} MB pro Stunde bei 1/min)")
