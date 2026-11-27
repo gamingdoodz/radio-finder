@@ -99,7 +99,11 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   Danach prüfen, ob `updateErlaubt`/`updateDran` so ankommen, wie `absprache.py` sie liest.
 - Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; Equalizer („Klang“) erledigt; als Nächstes eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
 - Suche/Mix nach Richtung am Handy prüfen (z. B. „Rock“ eingeben, Rock-Mix 30 Min. laufen lassen), Wecker ohne Netz testen.
-- Server (27.11. 15:39, Prüfung mit echten Daten): von 697 Sendern kennt der Server bei 0 den genauen Liedanfang („exact“), `/sync` braucht ~4,8 s. Vermutlich gedrosselt (Spar-Modus vom Spiel). Folge: der Mix verlässt sich auf das eigene Abfragen am Handy. Im Server-Thread prüfen.
+- Server (27.11. 15:39, Prüfung mit echten Daten): von 697 Sendern kennt der Server bei 0 den genauen Liedanfang („exact“), `/sync` braucht ~4,8 s.
+  Ursache: „exact“ gibt es nur, wenn ein Sender höchstens 2 Minuten nach der letzten Abfrage wieder drankommt. Bei ~5 Abfragen/s
+  (Spar-Modus, Grenzen des Spiels: 50 gleichzeitig, 20 % CPU) kommt jeder der 10.200 Sender nur etwa alle 30 Minuten dran. Die Lösung
+  (Kernliste der Musik-Sender, 1d4275d; dazu im Spar-Modus halb statt ein Drittel gleichzeitig und kürzere Zeitlimits) ist fertig, aber
+  noch nicht live: der Neustart wartet auf die Freigabe vom Spiel (`updateErlaubt` fehlt noch). Danach `/health` → `anfang_bekannt`, `abfragen_s` prüfen.
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf

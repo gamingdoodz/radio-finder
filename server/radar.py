@@ -1012,7 +1012,7 @@ async def shoutcast_titles(session, key: str):
 async def icy_title(session, u: str):
     try:
         async with session.get(u, headers={"Icy-MetaData": "1"},
-                               timeout=aiohttp.ClientTimeout(total=8, sock_read=4)) as r:
+                               timeout=aiohttp.ClientTimeout(total=5, sock_connect=3, sock_read=3)) as r:
             metaint = int(r.headers.get("icy-metaint", "0") or 0)
             if r.status != 200 or not (0 < metaint <= 128_000):
                 return None
@@ -1182,7 +1182,8 @@ async def worker(session, ids):
         if wait > 0:
             await asyncio.sleep(min(wait, 2))
             continue
-        grenze = max(1, CONCURRENCY // 3) if SPAR["low"] else CONCURRENCY
+        # sparsam: halb so viele gleichzeitig (warten auf Sender kostet kaum CPU, die Grenzen des Spiels gelten ohnehin)
+        grenze = max(1, CONCURRENCY // 2) if SPAR["low"] else CONCURRENCY
         if running["n"] >= grenze:
             frei.clear()
             try:
