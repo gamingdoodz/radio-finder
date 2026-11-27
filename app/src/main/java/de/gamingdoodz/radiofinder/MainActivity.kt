@@ -720,7 +720,7 @@ class MainActivity : ComponentActivity() {
 
     private fun watchRow(): Row? {
         val q = WatchService.activeQuery(this) ?: return null
-        return Row.Action("Wächter: „$q“", WatchService.status(this) + " · Tippen zum Verwalten", dark = true) {
+        return Row.Action("Wunschlied: „$q“", WatchService.status(this) + " · Tippen zum Verwalten", dark = true) {
             watchSheet()
         }
     }
@@ -926,7 +926,7 @@ class MainActivity : ComponentActivity() {
         val btn = findViewById<TextView>(R.id.watchBtn)
         val n = WatchService.queries(this).size
         btn.visibility = if (n > 0 && !kids()) View.VISIBLE else View.GONE
-        btn.text = if (n > 1) "$n" else "Wächter"
+        btn.text = if (n > 1) "$n" else "Wunsch"
         btn.setOnClickListener { watchSheet() }
     }
 
@@ -941,7 +941,7 @@ class MainActivity : ComponentActivity() {
     private fun watchSheet() {
         val wishes = WatchService.queries(this)
         val options = wishes.map { q -> Option(R.drawable.ic_close, q, "Tippen zum Entfernen") { WatchService.remove(this, q) } } +
-            Option(R.drawable.ic_stop, "Wächter beenden", "Alle Wunschlieder entfernen") { WatchService.stop(this) }
+            Option(R.drawable.ic_stop, "Nicht mehr warten", "Alle Wunschlieder entfernen") { WatchService.stop(this) }
         sheet("Wunschliste", WatchService.status(this), null, "", false,
             "Das erste Lied, das irgendwo läuft, wird sofort abgespielt.", options)
     }
@@ -1227,14 +1227,14 @@ class MainActivity : ComponentActivity() {
             val liveNow = songs.count { liveText(it) != null }
             rows.add(Row.Empty("Der Radio-Mix spielt die Lieder komplett, sobald sie irgendwo im Radio anfangen" +
                 (if (liveNow > 0) " – gerade laufen $liveNow davon (● LIVE)." else ".") +
-                " Andere Lieder: antippen für Vorschau, Wächter oder deine Musik-App."))
+                " Andere Lieder: antippen für Vorschau oder deine Musik-App."))
         } else rows.add(Row.Empty("Noch leer. Halte bei einem Lied den Finger drauf → „Zur Playlist hinzufügen“."))
         if (p.own) rows.add(Row.More("Playlist löschen") {
             android.app.AlertDialog.Builder(this).setTitle("„${p.name}“ löschen?")
                 .setPositiveButton("Löschen") { _, _ -> Playlists.delete(this, p.name); page = null; render(); updateBack() }
                 .setNegativeButton("Abbrechen", null).show()
         })
-        rows.add(Row.Header("Lieder", "${songs.size} Lieder · Tippen: im Radio hören, Vorschau oder Wächter"))
+        rows.add(Row.Header("Lieder", "${songs.size} Lieder · Tippen zum Hören"))
         songs.forEach { e -> rows.add(Row.Item(e, songs, liveText(e))) }
     }
 
@@ -1328,14 +1328,14 @@ class MainActivity : ComponentActivity() {
             return Row.Top(e, "SENDER", "Jetzt einschalten") { play(e, stationHits) }
         }
         songHits.firstOrNull { Scanner.normalize(it.title) == nq }?.let { e ->
-            return Row.Top(e, "SONG", "${e.subtitle} · im Radio suchen, Vorschau oder Wächter") { onEntryTap(e, songHits) }
+            return Row.Top(e, "SONG", "${e.subtitle}") { onEntryTap(e, songHits) }
         }
         artistMix?.let { a ->
             val e = Entry("ar:${a.id}", Kind.TRACK, a.name, "Künstler", "", a.picture, a.name)
             return Row.Top(e, "KÜNSTLER", "${a.name}-Mix: nur ${a.name} aus dem Radio") { startHitMix("artist:${a.id}:${a.name}", "– ${a.name}") }
         }
         songHits.firstOrNull()?.let { e ->
-            return Row.Top(e, "SONG", "${e.subtitle} · im Radio suchen, Vorschau oder Wächter") { onEntryTap(e, songHits) }
+            return Row.Top(e, "SONG", "${e.subtitle}") { onEntryTap(e, songHits) }
         }
         return null
     }
@@ -1374,9 +1374,9 @@ class MainActivity : ComponentActivity() {
         if (asGenre != null) {
             // Musikrichtung statt Lied: der Wächter sucht genaue Titel, hier passt der Hit-Mix (Knopf steht oben)
         } else if (WatchService.activeQuery(this) == null) {
-            rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
+            rows.add(button(R.drawable.ic_bell, "Abspielen, sobald es im Radio läuft") {
                 WatchService.start(this, query)
-                showHint("Wächter läuft – du kannst die App schließen", long = true)
+                showHint("Ich spiele es, sobald es läuft – du kannst die App schließen", long = true)
             })
         }
 
@@ -1402,7 +1402,7 @@ class MainActivity : ComponentActivity() {
         }
         }
         if (showSongs) {
-        rows.add(Row.Header(if (asGenre != null) "Top-Songs ${asGenre.name}" else "Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
+        rows.add(Row.Header(if (asGenre != null) "Top-Songs ${asGenre.name}" else "Songs", "Tippen zum Hören"))
         when {
             songLoading -> rows.add(Row.Empty("Suche…"))
             songHits.isEmpty() -> rows.add(Row.Empty("Keine Songs gefunden."))
@@ -1443,7 +1443,7 @@ class MainActivity : ComponentActivity() {
         }
         val songs = genreSongs[g.key].orEmpty()
         if (songs.isNotEmpty()) {
-            rows.add(Row.Header("Top-Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
+            rows.add(Row.Header("Top-Songs", "Tippen zum Hören"))
             addSongs(songs, ranked = true)
         }
         val free = genreFree[g.key].orEmpty()
@@ -1523,7 +1523,7 @@ class MainActivity : ComponentActivity() {
                 WatchService.startMany(this, topDe.map { e ->
                     e.title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), "").trim() + " — " + e.subtitle.split(Regex("[,&]| feat| x ")).first().trim()
                 })
-                showHint("100 Hits auf der Wunschliste – der Wächter sucht", long = true)
+                showHint("100 Hits als Wunschlieder – ich spiele eins, sobald es läuft", long = true)
                 render()
             })
         }
@@ -1602,7 +1602,7 @@ class MainActivity : ComponentActivity() {
         }
         val heard = Heard.all(this).take(50)
         if (heard.isNotEmpty()) {
-            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen für Radio, Wächter & mehr", "LEEREN") {
+            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen zum Hören", "LEEREN") {
                 Heard.clear(this); render()
             })
             loadCoverTitles(heard.take(15).map { it.title })
@@ -1657,7 +1657,7 @@ class MainActivity : ComponentActivity() {
                 toggle = Settings.muteAds(this), chevron = false) { Settings.setMuteAds(this, !Settings.muteAds(this)); render() },
             Row.Setting(R.drawable.ic_eq, "Werbung am Klang erkennen", "Hört kurz nach dem Umschalten, ob Musik oder Sprache läuft (nur auf dem Handy)",
                 toggle = Settings.soundSense(this), chevron = false) { Settings.setSoundSense(this, !Settings.soundSense(this)); render() },
-            Row.Setting(R.drawable.ic_bell, "Wächter schaltet sofort um", "Aus: laufendes Lied bleibt, du bekommst „Jetzt hören“",
+            Row.Setting(R.drawable.ic_bell, "Wunschlied sofort spielen", "Aus: laufendes Lied bleibt, du bekommst „Jetzt hören“",
                 toggle = Settings.watchAuto(this), chevron = false) { Settings.setWatchAuto(this, !Settings.watchAuto(this)); render() },
             Row.Setting(R.drawable.ic_note, "Meine Musik-Apps", "Zum Öffnen von Liedern",
                 value = when (mine.size) {
@@ -1779,7 +1779,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun regionSheet() {
-        sheet("Sender aus", "Für Suche, Hit-Mix und Wächter", null, "", false, null,
+        sheet("Sender aus", "Für Suche und Hit-Mix", null, "", false, null,
             Region.options.map { (key, ns) ->
                 val (n, sub) = ns
                 Option(if (key == Settings.region(this)) R.drawable.ic_play else R.drawable.ic_radio, n, sub) {
@@ -2176,9 +2176,9 @@ class MainActivity : ComponentActivity() {
                     Favorites.toggle(this, e); render()
                 } else null,
                 song?.let {
-                    Option(R.drawable.ic_bell, "Wächter für dieses Lied", "Spielt es, sobald es wieder im Radio läuft") {
+                    Option(R.drawable.ic_bell, "Abspielen, sobald es läuft", "Spielt das Lied, sobald ein Sender es bringt") {
                         WatchService.start(this, it)
-                        showHint("Wächter läuft")
+                        showHint("Gemerkt – ich spiele es, sobald es läuft")
                         render()
                     }
                 },
@@ -2209,7 +2209,7 @@ class MainActivity : ComponentActivity() {
                     "Songs mit ● LIVE laufen genau jetzt. Antippen, und es geht los."),
             Triple(R.drawable.ic_search, "Lied suchen",
                 "Unter „Musik“ einen Song oder Künstler eingeben. Du siehst sofort, auf welchem Sender er läuft." to
-                    "Läuft er gerade nirgends? Tippe auf „Wächter starten“ 🔔 – sobald er im Radio kommt, spielt Hitradar ihn ab."),
+                    "Läuft er gerade nirgends? Tippe auf „Abspielen, sobald es läuft“ 🔔 – sobald er im Radio kommt, spielt Hitradar ihn ab."),
             Triple(R.drawable.ic_bolt, "Hit-Mix",
                 "Nur Hits, wenig Gerede: Der Hit-Mix springt automatisch zum nächsten Sender, auf dem gerade ein Hit anfängt." to
                     "Mit ⏭ springst du jederzeit zum nächsten Hit."),
@@ -2273,9 +2273,9 @@ class MainActivity : ComponentActivity() {
             clean, e.subtitle, e.artwork, e.name, false,
             hint,
             listOfNotNull(
-                Option(R.drawable.ic_bell, "Wächter starten", "Spielt das Lied komplett ab, sobald es im Radio kommt") {
+                Option(R.drawable.ic_bell, "Abspielen, sobald es läuft", "Spielt das Lied komplett, sobald ein Sender es bringt") {
                     WatchService.start(this, "$clean — $firstArtist")
-                    showHint("Wächter läuft – du kannst die App schließen", long = true)
+                    showHint("Ich spiele es, sobald es läuft – du kannst die App schließen", long = true)
                     render()
                 },
                 if (e.url.isNotBlank()) Option(R.drawable.ic_play, "Vorschau anhören", "30 Sekunden") { play(e, emptyList()) } else null,
@@ -2557,7 +2557,8 @@ class MainActivity : ComponentActivity() {
                 }
                 NowSong.startMs > 0 -> { seek.visibility = View.INVISIBLE
                      posText.text = "Lied läuft seit ${fmt(e)}"; durText.text = "LIVE" }
-                else -> { seek.visibility = View.INVISIBLE; posText.text = "Läuft seit ${fmt(NowSong.sinceTune())}"; durText.text = "LIVE" }
+                // Liedanfang unbekannt: keine Zeit zeigen (vorher "Läuft seit 0:05" = seit dem Einschalten, sah aus wie die Liedzeit)
+                else -> { seek.visibility = View.INVISIBLE; posText.text = ""; durText.text = "LIVE" }
             }
         } else {
             seek.isEnabled = true

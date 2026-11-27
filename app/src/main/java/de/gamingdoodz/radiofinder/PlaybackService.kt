@@ -606,6 +606,8 @@ class PlaybackService : MediaLibraryService() {
                 else now
                 NowSong.startLocal = !first
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
+                // Zurück zu einem Sender, auf dem wir das Lied schon gehört haben: echte Liedzeit statt 0
+                if (first && NowSong.startMs == 0L) NowSong.recall(stationId, clean)
             }
             NowSong.localAt = now
             LiveIndex.titleFromStream(stationId, clean)

@@ -234,7 +234,7 @@ class WatchService : Service() {
             }
         }
         if (queries(this).isNotEmpty()) {
-            notifyHit("Wächter beendet", "Deine Wunschlieder liefen in der letzten Stunde nicht.")
+            notifyHit("Wunschlieder: nichts gefunden", "Deine Wunschlieder liefen in der letzten Stunde nicht.")
             saveQueries(this, emptyList())
         }
         finish()
@@ -347,7 +347,7 @@ class WatchService : Service() {
 
     private fun runningNotification(status: String, searching: Boolean): Notification {
         val wishes = queries(this)
-        val title = if (wishes.size <= 1) "🔔 Wächter: „${wishes.firstOrNull() ?: ""}“" else "🔔 Wächter · ${wishes.size} Wunschlieder"
+        val title = if (wishes.size <= 1) "🔔 Wartet auf „${wishes.firstOrNull() ?: ""}“" else "🔔 Wartet auf ${wishes.size} Wunschlieder"
         val style = NotificationCompat.InboxStyle().setBigContentTitle(title).setSummaryText(status)
         wishes.take(6).forEach { style.addLine("♪  $it") }
         val b = NotificationCompat.Builder(this, CHANNEL_RUN)
@@ -387,7 +387,7 @@ class WatchService : Service() {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_RUN, "Wächter läuft", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_RUN, "Wartet auf Wunschlied", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CHANNEL_HIT, "Lied gefunden", NotificationManager.IMPORTANCE_HIGH))
     }
 }
