@@ -352,7 +352,7 @@ class HitMix(
         lastLocal = now
         val norm = Scanner.normalize(title)
         val sinceSwitch = now - switchedAt
-        if (music && (switchedTitle == null || norm == switchedTitle)) {
+        if (music && (switchedTitle == null || sameSong(norm, switchedTitle))) {
             // Läuft wie erwartet
             switchedTitle = norm; confirmed = true; waitingForNext = false
             return
@@ -383,8 +383,11 @@ class HitMix(
             switchNow()
             return
         }
-        // Keine Musik mehr (Moderation, Jingle, Werbung): direkt weiter.
+        // Keine Musik mehr laut Titel (Moderation, Jingle, Werbung): weiter.
         // Kurz nach dem Umschalten nicht – da kommt oft erst der Sendername oder Vorab-Werbung.
+        // Viele Sender schicken mitten im Lied ihren Slogan oder "Jetzt auf Radio X" als Titel: hört die
+        // Klang-Erkennung noch Musik, ist das Lied nicht vorbei (die Ansage-Erkennung übernimmt, wenn Sprache kommt).
+        if (stillMusic()) return
         if (confirmed || sinceSwitch > 25_000) switchNow()
     }
 
@@ -442,8 +445,10 @@ class HitMix(
             if (!p.playWhenReady) continue
             val broken = p.playerError != null
             // Länge bekannt und überschritten, Titel aber unverändert: Lied ist vorbei (Moderator redet o. Ä.)
+            // Klang-Erkennung hört noch Musik: Lied ist länger als gedacht (andere Fassung), nicht abwürgen (höchstens 1 Min.)
             val overrun = NowSong.stationId == currentStationId && NowSong.overrun() &&
-                NowSong.title?.let { Scanner.normalize(it) } == switchedTitle
+                NowSong.title?.let { sameSong(Scanner.normalize(it), switchedTitle) } == true &&
+                (!stillMusic() || NowSong.elapsed() > NowSong.durMs + 60_000L)
             if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(force = broken); continue }
             // Klang-Erkennung hört Moderation/Werbung zwischen den Liedern (ist schon stumm): gleich zum nächsten Hit
             if (muteForTalk() && SoundSense.talkFor(4_000)) { switchNow(); continue }
@@ -466,9 +471,10 @@ class HitMix(
             val local = !Cast.active && System.currentTimeMillis() - lastLocal < 10 * 60_000L
             if (local) continue
             val now = currentStationId?.let { LiveIndex.get(it) } ?: continue
-            val stillHit = (switchedTitle == null || now.normalized == switchedTitle) && LiveIndex.isMusic(now.title)
+            val stillHit = (switchedTitle == null || sameSong(now.normalized, switchedTitle)) && LiveIndex.isMusic(now.title)
             val tooLong = NowSong.durMs == 0L && System.currentTimeMillis() - songStartedAt > 9 * 60_000L
-            if (!stillHit || tooLong) {
+            // Server-Stand ist bis zu ~1,5 Min. alt: hört die Klang-Erkennung noch Musik, nicht umschalten
+            if ((!stillHit || tooLong) && !stillMusic()) {
                 if (LiveIndex.isMusic(now.title) && fitsTitle(now.normalized, now.station.id) && now.normalized !in played) {
                     switchedTitle = now.normalized; songStartedAt = now.since
                     addPlayed(now.normalized)
@@ -493,6 +499,10 @@ class HitMix(
             if (gen != myGen) return@launch
             if (next != null) { candidate = System.currentTimeMillis() to next; warmUp(next.now.station.url) }
             delay((left - 1_200L).coerceAtLeast(0L))
+            // Liedlänge stimmt nicht immer (Radio-Fassung, Titel kam früher): solange noch Musik zu hören ist, warten
+            // (höchstens 20 s), dann umschalten, sobald die Musik aufhört
+            var waited = 0L
+            while (stillMusic() && waited < 20_000L && gen == myGen && NowSong.title == title) { delay(500); waited += 500 }
             if (gen == myGen && NowSong.title == title && NowSong.stationId == currentStationId && player()?.playWhenReady == true) switchNow()
         }
     }
@@ -519,6 +529,20 @@ class HitMix(
         val old = speedPrefs.getLong(stationId, 0L)
         val v = if (old == 0L) ms else (old * 2 + ms) / 3
         speedPrefs.edit().putLong(stationId, v.coerceIn(1L, 30_000L)).apply()
+    }
+
+    /** Hört die Klang-Erkennung gerade sicher Musik? (nur wenn sie läuft) */
+    private fun stillMusic() = SoundSense.active && SoundSense.musicFor(3_000)
+
+    /** Dasselbe Lied, nur anders geschrieben ("(Radio Edit)", feat., Reihenfolge)? Dann kein neues Lied. */
+    private fun sameSong(a: String, b: String?): Boolean {
+        if (b == null) return false
+        if (a == b) return true
+        val wa = a.split(" ").filter { it.length >= 2 }.toSet()
+        val wb = b.split(" ").filter { it.length >= 2 }.toSet()
+        if (wa.isEmpty() || wb.isEmpty()) return false
+        val common = wa.intersect(wb).size
+        return common >= 2 && common >= 0.7 * minOf(wa.size, wb.size)
     }
 
     /** Lied ist fast vorbei (weniger als 1,5 Min. übrig): gar nicht erst hinschalten. */
