@@ -1121,22 +1121,35 @@ def update_core():
             continue
         cand.append((0 if ccs.get(sid) in ("DE", "AT", "CH") else 1, pos[sid], sid))
     cand.sort()
+    alt = CORE["ids"]
     CORE["ids"] = {sid for _, _, sid in cand[:size]}
     rest = max(1, len(stations) - len(CORE["ids"]))
     CORE["rest"] = int(min(7200, max(600, rest / max(0.3, rate * 0.3))))
-    first = not CORE["at"]
     CORE["at"] = t
-    if first and CORE["ids"]:
-        # Beim ersten Mal die Warteschlange neu ordnen: Kernliste gleich dran, der Rest verteilt über die Wartezeit
-        import heapq
-        items = []
+    neu = CORE["ids"] - alt
+    if not neu:
+        return
+    import heapq
+    if not CORE.get("sortiert"):
+        # Beim ersten Mal (sobald es Kandidaten gibt) die ganze Warteschlange neu ordnen:
+        # Kernliste gleich dran, der Rest verteilt über die Wartezeit
+        CORE["sortiert"] = True
+        items, k = [], 0
         for _, sid in due:
             if sid in CORE["ids"]:
-                items.append((t + len(items) * 0.01, sid))
+                items.append((t + k * 0.01, sid)); k += 1
             else:
                 items.append((t + (hash(sid) % CORE["rest"]), sid))
-        due[:] = items
-        heapq.heapify(due)
+    else:
+        # Neu in der Kernliste: gleich wieder dran statt erst nach der langen Wartezeit für den Rest
+        items, k = [], 0
+        for when, sid in due:
+            if sid in neu and when > t + 90:
+                items.append((t + k * 0.01, sid)); k += 1
+            else:
+                items.append((when, sid))
+    due[:] = items
+    heapq.heapify(due)
 
 
 def schedule_all():
