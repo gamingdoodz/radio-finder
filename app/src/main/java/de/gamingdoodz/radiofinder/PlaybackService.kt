@@ -143,7 +143,9 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             val have = (0 until p.mediaItemCount).mapTo(HashSet()) { p.getMediaItemAt(it).mediaId }
             val artist = last.mediaMetadata.artist?.toString()?.substringBefore(" · ")?.trim().orEmpty()
-            val more = (if (artist.length >= 2) FreeMusic.search(artist) else emptyList()) + FreeMusic.charts()
+            // Kindermodus: nur Kinderlieder anhängen (nicht die allgemeinen Charts)
+            val more = if (Settings.kidsMode(this@PlaybackService)) FreeMusic.kids()
+                else (if (artist.length >= 2) FreeMusic.search(artist) else emptyList()) + FreeMusic.charts()
             val items = more.filter { (it.id.startsWith("jm:") || it.id.startsWith("au:")) && !it.preview && it.id !in have }
                 .distinctBy { it.id }.take(30).map { it.toMediaItem() }
             val now = session?.player ?: return@launch
@@ -521,7 +523,9 @@ class PlaybackService : MediaLibraryService() {
                 sleepHandler.removeCallbacks(heardRunnable)
                 if (t.contains(" - ") || t.contains(" – ")) {
                     heardTitle = t
-                    heardStation = item.mediaMetadata.artist?.toString().orEmpty()
+                    // Sendername (nicht "Internetradio"), damit im Verlauf steht, wo das Lied lief
+                    heardStation = item.mediaMetadata.extras?.getString("name")?.takeIf { it.isNotBlank() }
+                        ?: item.mediaMetadata.artist?.toString().orEmpty()
                     sleepHandler.postDelayed(heardRunnable, 45_000)
                 }
                 updateArtwork(item, t)
@@ -978,6 +982,8 @@ class PlaybackService : MediaLibraryService() {
         val p = session?.player ?: return@Runnable
         if (p.currentMediaItem?.mediaId != item.mediaId || !p.isPlaying) return@Runnable
         val e = Entry.fromMediaItem(item) ?: return@Runnable
+        // Im Hit-Mix wählt die App die Sender: die gehören nicht zu "zuletzt gehört" (die eigenen Lieder stehen im Verlauf)
+        if (hitMix.isActive && e.kind == Kind.STATION) return@Runnable
         Recent.add(this, if (e.kind == Kind.STATION) e.copy(title = e.name, subtitle = "Internetradio") else e)
     }
 
@@ -1250,10 +1256,9 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == CMD_NEXT) {
                 // Weiter gedrückt, bevor überhaupt ein Lied kam: das war Werbung am Senderanfang -> merken (auch für andere)
                 val sid = NowSong.stationId
-                if (hitMix.isActive && sid != null && NowSong.title == null && NowSong.sinceTune() in 4_000..60_000) {
-                    val ms = NowSong.sinceTune() + 10_000
-                    Ads.record(this@PlaybackService, sid, ms)
-                    Radar.reportAd(sid, ms)
+                // Nur bei Sendern, die sonst Liedtitel schicken (sonst ist "kein Titel" ganz normal und keine Werbung)
+                if (hitMix.isActive && sid != null && NowSong.title == null && NowSong.sinceTune() in 4_000..60_000 && Ads.hasIcy(this@PlaybackService, sid)) {
+                    Ads.record(this@PlaybackService, sid, NowSong.sinceTune() + 10_000)
                 }
                 val p = session.player
                 if (hitMix.isActive) {
@@ -1332,7 +1337,11 @@ class PlaybackService : MediaLibraryService() {
             // Fehler (z. B. kein Netz) nie bis zu Android Auto durchreichen: dann eben eine leere Liste
             val items: List<MediaItem> = try { withTimeout(15_000) { when (parentId) {
                 // Android Auto zeigt bis zu 4 Ordner als Reiter: übersichtlich wie in der App
-                ROOT_ID -> listOf(
+                // Kindermodus: auch im Auto nur Kindersachen
+                ROOT_ID -> if (Settings.kidsMode(applicationContext)) listOf(
+                    folderItem(KIDS_ID, "Kinderlieder"),
+                    folderItem(STORIES_ID, "Hörspiele"),
+                ) else listOf(
                     folderItem(FORYOU_ID, "Für dich"),
                     folderItem(RADIO_ID, "Radio"),
                     folderItem(MUSIC_ID, "Musik"),
@@ -1406,7 +1415,7 @@ class PlaybackService : MediaLibraryService() {
                             LiveIndex.findSong(ti, a)
                         }.distinctBy { it.station.id }
                     }
-                    listOf(hitMixItem("radiocharts", "Mix: Meistgespielt", "Hit-Mix")) +
+                    listOf(hitMixItem("radiocharts", "Hit-Mix: Meistgespielt", "Hit-Mix")) +
                         withCovers(live.map { it.station.toEntry(it.title) })
                 }
                 CHARTS_LIVE_ID -> {
@@ -1427,7 +1436,8 @@ class PlaybackService : MediaLibraryService() {
                 POPULAR_ID -> StationRepository.load(applicationContext).take(50).map { it.toEntry().toMediaItem() }
                 FREEGENRES_ID -> FREE_TAGS.map { (name, tag) -> folderItem("ftag:$tag", name) }
                 STORIES_ID -> listOf(folderItem(STORY_CONT_ID, "▶ Weiterhören")) +
-                    Podcasts.all.map { folderItem("cat:" + it.key, (if (it.kids) "🧸 " else "") + it.name) }
+                    Podcasts.all.filter { it.kids || !Settings.kidsMode(applicationContext) }
+                        .map { folderItem("cat:" + it.key, (if (it.kids) "🧸 " else "") + it.name) }
                 else -> when {
                     parentId.startsWith("cat:") -> {
                         val cat = Podcasts.all.firstOrNull { it.key == parentId.removePrefix("cat:") }
@@ -1476,7 +1486,7 @@ class PlaybackService : MediaLibraryService() {
                 Radar.sync()
                 // Musikrichtung ("Rock"): Mix zuerst, dann Musik auf passenden Sendern – keine Lieder mit "Rock" im Titel
                 Genres.fromText(query)?.let { g ->
-                    val mix = hitMixItem(if (g.key == "charts") null else g.key, "⚡ ${g.name}-Mix", "Hit-Mix · nur ${g.name}")
+                    val mix = hitMixItem(if (g.key == "charts") null else g.key, "⚡ Hit-Mix: ${g.name}", "nur ${g.name}")
                     fun publishGenre(items: List<MediaItem>) {
                         val all = (listOf(mix) + items).distinctBy { it.mediaId }
                         remember(all)
@@ -1659,7 +1669,20 @@ class PlaybackService : MediaLibraryService() {
                     val chosenId = chosen.mediaId.removePrefix("st:")
                     val chosenBase = MixLogic.stationBaseName(LiveIndex.get(chosenId)?.station?.name ?: chosen.mediaMetadata.extras?.getString("name").orEmpty())
                     val chosenSong = LiveIndex.get(chosenId)?.normalized
-                    LiveIndex.topMusic()
+                    // Weiter bleibt in der Richtung: nach einem Rocksender kein Popsender, im Kindermodus nur Kindersender
+                    val chosenSt = LiveIndex.get(chosenId)?.station
+                    val dir = chosenSt?.let { MixLogic.mainGenre(it.tags, it.name) }
+                    val kidIds = if (Settings.kidsMode(this@PlaybackService))
+                        (try { StationRepository.kids(this@PlaybackService) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() })
+                            .map { it.id }.toSet() else null
+                    val all = LiveIndex.topMusic()
+                    val pool = when {
+                        kidIds != null -> all.filter { it.station.id in kidIds }
+                        dir != null -> all.filter { MixLogic.stationFits(dir, it.station.tags, it.station.name) && it.station.tags.isNotBlank() }
+                            .takeIf { it.size >= 3 } ?: all
+                        else -> all
+                    }
+                    pool
                         .filter { "st:" + it.station.id != chosen.mediaId }
                         .filter { chosenBase.isEmpty() || MixLogic.stationBaseName(it.station.name) != chosenBase }
                         .filter { chosenSong == null || !MixLogic.sameSong(it.normalized, chosenSong) }

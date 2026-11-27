@@ -11,7 +11,7 @@ import org.json.JSONObject
 object Playlists {
     /** Fertige Playlists: Anzeigename to Suchbegriff bei Deezer. */
     val curated = listOf(
-        "Top Hits Deutschland" to "Top Deutschland",
+        "Top-Hits Deutschland" to "Top Deutschland",
         "Weihnachtshits" to "Weihnachtshits",
         "Party Hits" to "Party Hits",
         "80er Hits" to "80er Hits",
@@ -22,9 +22,9 @@ object Playlists {
         "Rock Klassiker" to "Rock Classics",
         "Deutschrap" to "Deutschrap Hits",
         "Chill & Entspannen" to "Chill Hits",
-        "Love Songs" to "Love Songs",
+        "Liebeslieder" to "Love Songs",
         "Sommerhits" to "Sommerhits",
-        "Workout" to "Workout Hits",
+        "Sport & Workout" to "Workout Hits",
         "Kinderlieder" to "Kinderlieder Hits",
     )
 
@@ -70,7 +70,7 @@ object Playlists {
 
     /** Jede Woche 4 andere: so gibt es immer wieder neue Playlists. */
     private val pool = listOf(
-        Def("Throwback Hits", "Erinnerst du dich?", "Throwback Hits"), Def("Deutsche Klassiker", "Zum Mitsingen", "Deutsche Klassiker"),
+        Def("Erinnerungs-Hits", "Erinnerst du dich?", "Throwback Hits"), Def("Deutsche Klassiker", "Zum Mitsingen", "Deutsche Klassiker"),
         Def("Ballermann Hits", "Party wie auf Malle", "Ballermann Hits"), Def("Akustik", "Unplugged & ruhig", "Acoustic Hits"),
         Def("Dance Classics", "Die großen Clubhits", "Dance Classics"), Def("Rock-Hymnen", "Laut aufdrehen", "Rock Anthems"),
         Def("One-Hit-Wonder", "Einmal ganz oben", "One Hit Wonder"), Def("Filmmusik", "Die besten Soundtracks", "Movie Soundtrack Hits"),

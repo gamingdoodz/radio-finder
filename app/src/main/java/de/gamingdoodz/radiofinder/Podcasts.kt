@@ -72,8 +72,10 @@ object Podcasts {
                     val g = o.optJSONArray("genres")
                     val genres = (0 until (g?.length() ?: 0)).joinToString(" ") { g?.optString(it).orEmpty() } + " " + o.optString("primaryGenreName")
                     val kidsGenre = Regex("(?i)kinder|kids|famil|children").containsMatchIn(genres)
-                    val kidsName = Regex("(?i)kinder|kids|kind\\b|märchen|maerchen|gute.?nacht|hörspiel für|ohrenbär|kakadu|sandmann|maus").containsMatchIn(o.optString("collectionName"))
-                    if (!kidsGenre && !kidsName) return@mapNotNull null
+                    // "Gute Nacht" allein reicht nicht (viele Einschlaf-Podcasts sind für Erwachsene), "Kind" auch nicht
+                    val kidsName = Regex("(?i)kinder|kids|für kinder|märchen|maerchen|hörspiel für|ohrenbär|kakadu|sandmann|die maus|figarino|bobo|benjamin blümchen|bibi").containsMatchIn(o.optString("collectionName"))
+                    val adultGenre = Regex("(?i)comedy|crime|gesundheit|health|fitness|nachrichten|news|politik|wirtschaft|business|sexual|beziehung").containsMatchIn(genres)
+                    if (!kidsGenre && !(kidsName && !adultGenre)) return@mapNotNull null
                 }
                 val name = o.optString("collectionName").ifBlank { o.optString("trackName") }
                 Entry(
@@ -90,6 +92,10 @@ object Podcasts {
             emptyList()
         }
     }
+
+    /** Shows, deren Folgen aufeinander aufbauen (Feed sagt "serial", Hörbücher): dort Folge 1 zuerst zeigen, sonst die neueste. */
+    private val serial = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    fun isSerial(show: Entry) = show.url.startsWith("ia:") || serial[show.url] == true
 
     /** Folgen einer Show in Erscheinungs-Reihenfolge: Folge 1 zuerst. */
     suspend fun episodes(show: Entry): List<Entry> =
@@ -137,6 +143,7 @@ object Podcasts {
                 XmlPullParser.TEXT, XmlPullParser.CDSECT -> text.append(p.text)
                 XmlPullParser.END_TAG -> when (p.name) {
                     "title" -> if (inItem) title = text.toString().trim()
+                    "itunes:type" -> if (!inItem) serial[show.url] = text.toString().trim().equals("serial", ignoreCase = true)
                     "item" -> {
                         inItem = false
                         if (audio.isNotEmpty() && title.isNotEmpty()) {

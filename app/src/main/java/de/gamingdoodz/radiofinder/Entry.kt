@@ -10,7 +10,7 @@ enum class Kind { STATION, TRACK, SHOW }
 
 /** Ein Eintrag in den Listen: ein Radiosender oder ein freies Lied. */
 data class Entry(
-    val id: String,          // "st:" Sender, sonst freie Lieder ("jm:" Jamendo, "au:" Audius, "ia:" Archiv)
+    val id: String,          // "st:" Sender, sonst freie Lieder ("jm:" Jamendo, "au:" Audius, "am:" Archiv-Musik; "ia:" Hörbuch-Kapitel)
     val kind: Kind,
     val title: String,       // was groß angezeigt wird (z. B. laufendes Lied)
     val subtitle: String,    // Sendername oder Künstler

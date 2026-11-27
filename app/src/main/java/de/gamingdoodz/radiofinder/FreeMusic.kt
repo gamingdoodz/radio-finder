@@ -101,7 +101,7 @@ object Archive {
                     val who = f.optString("creator").ifBlank { doc.creator }.ifBlank { doc.title }
                     val path = name.split("/").joinToString("/") { enc(it).replace("+", "%20") }
                     Entry(
-                        id = "ia:${doc.id}/$name",
+                        id = "am:${doc.id}/$name",
                         kind = Kind.TRACK,
                         title = title,
                         subtitle = "$who · Archiv",

@@ -25,7 +25,7 @@ object Genres {
         Genre("charts", "Charts", "#FFEAB308", "#FFB45309", R.drawable.ic_star, "charts", 0, "pop"),
         Genre("pop", "Pop & Deutsch-Pop", "#FFEC4899", "#FF9D174D", R.drawable.ic_mic, "pop", 132, "pop"),
         Genre("rap", "Rap & Hip-Hop", "#FF8B5CF6", "#FF4C1D95", R.drawable.ic_fire, "hip hop", 116, "hiphop"),
-        Genre("dance", "Dance & Electronic", "#FF6366F1", "#FF3730A3", R.drawable.ic_eq, "dance", 113, "electronic"),
+        Genre("dance", "Dance & Elektro", "#FF6366F1", "#FF3730A3", R.drawable.ic_eq, "dance", 113, "electronic"),
         Genre("rock", "Rock & Alternative", "#FFEF4444", "#FF7F1D1D", R.drawable.ic_album, "rock", 152, "rock"),
         Genre("schlager", "Schlager", "#FFF97316", "#FF9A3412", R.drawable.ic_heart_white, "schlager", null, null, "Schlager Hits"),
         Genre("party", "Party & Après-Ski", "#FFD946EF", "#FF86198F", R.drawable.ic_bolt, "party", null, null, "Party Hits"),

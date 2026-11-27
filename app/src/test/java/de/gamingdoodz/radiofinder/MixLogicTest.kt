@@ -175,11 +175,18 @@ class MixLogicTest {
     @Test fun genreNamenDerAppWerdenErkannt() {
         // Namen der Genre-Kacheln (Suchvorschläge tippen genau diese ein)
         val names = mapOf("Weihnachten" to "xmas", "Charts" to "charts", "Pop & Deutsch-Pop" to "pop", "Rap & Hip-Hop" to "rap",
-            "Dance & Electronic" to "dance", "Rock & Alternative" to "rock", "Schlager" to "schlager", "Party & Après-Ski" to "party",
+            "Dance & Elektro" to "dance", "Rock & Alternative" to "rock", "Schlager" to "schlager", "Party & Après-Ski" to "party",
             "80er" to "80s", "90er" to "90s", "2000er" to "2000s", "Sommerhits" to "summer", "Deutschrap" to "deutschrap",
             "Rock-Klassiker" to "rockclassics", "Oldies" to "oldies", "Latin & Reggaeton" to "latin", "Country" to "country",
             "Jazz & Soul" to "jazz", "Klassik" to "classic", "Chill & Entspannen" to "chill", "Kindermusik" to "kids")
         for ((n, k) in names) assertEquals(n, k, MixLogic.genreKeyFor(n))
+    }
+
+    @Test fun senderRichtung() {
+        // Weiter nach einem Rocksender: Richtung erkennen, damit kein Popsender folgt
+        assertTrue(MixLogic.mainGenre("rock,classic rock", "ROCK ANTENNE") in setOf("rock", "rockclassics"))
+        assertEquals(null, MixLogic.mainGenre("", "Radio Hamburg"))
+        assertEquals("schlager", MixLogic.mainGenre("schlager,volksmusik", "Radio Schlagerparadies"))
     }
 
     @Test fun daumenRunter() {

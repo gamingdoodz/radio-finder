@@ -250,7 +250,7 @@ class MainActivity : ComponentActivity() {
             val t = input.text.toString().trim()
             if (t.isNotEmpty()) handleWish(t) else wishDialog()
         }
-        findViewById<View>(R.id.fullStopMix).setOnClickListener { stopHitMix(); updatePlayer() }
+        findViewById<View>(R.id.fullStopMix).setOnClickListener { stopHitMix(); mixEndedHint(); updatePlayer() }
         back.setOnClickListener { backCallback.handleOnBackPressed() }
 
         findViewById<View>(R.id.navHome).setOnClickListener { selectTab(Tab.HOME) }
@@ -266,7 +266,13 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullClose).setOnClickListener { showFull(false) }
         findViewById<View>(R.id.fullPlay).setOnClickListener { togglePlay() }
         findViewById<View>(R.id.fullNext).setOnClickListener { next() }
-        findViewById<View>(R.id.fullPrev).setOnClickListener { forgetWanted(); controller?.seekToPreviousMediaItem() }
+        findViewById<View>(R.id.fullPrev).setOnClickListener {
+            forgetWanted()
+            val c = controller ?: return@setOnClickListener
+            // Im Hit-Mix: vorheriger Sender (wie in der Benachrichtigung)
+            if (HitMix.canGoBack(this) && !c.hasPreviousMediaItem()) c.sendCustomCommand(SessionCommand(PlaybackService.CMD_PREV, Bundle.EMPTY), Bundle.EMPTY)
+            else c.seekToPreviousMediaItem()
+        }
         findViewById<View>(R.id.fullStop).setOnClickListener {
             forgetWanted()
             if (HitMix.activeName(this) != null) stopHitMix()
@@ -616,7 +622,7 @@ class MainActivity : ComponentActivity() {
         val chip = findViewById<TextView>(R.id.liveChip)
         val n = LiveIndex.fresh().size
         chip.visibility = if (page == null && tab == Tab.HOME && n > 0) View.VISIBLE else View.GONE
-        chip.text = "● $n live"
+        chip.text = "● ${"%,d".format(n).replace(',', '.')} Sender live"
         backCallback.isEnabled = page != null || full.visibility == View.VISIBLE ||
             (!kids() && tab != Tab.HOME)
         pageTitle.text = when (val p = page) {
@@ -916,7 +922,7 @@ class MainActivity : ComponentActivity() {
     // ---------- Einschlaf-Modus ----------
 
     private fun bedtimeSheet() {
-        val cat = Podcasts.kidsCategories.first()
+        val cat = Podcasts.kidsCategories.firstOrNull { it.key == "gutenacht" } ?: Podcasts.kidsCategories.first()
         val shows = storyShows[cat.key].orEmpty().take(6)
         if (shows.isEmpty()) {
             // Erst laden, dann die Auswahl von selbst öffnen
@@ -977,22 +983,29 @@ class MainActivity : ComponentActivity() {
                     }, Settings.alarmHour(this), Settings.alarmMinute(this), true).show()
                 },
                 Option(R.drawable.ic_radio, "Was soll spielen?", Settings.alarmLabel(this)) { alarmSourceSheet() },
-                Option(R.drawable.ic_sun, if (Settings.alarmWeekdays(this)) "Nur Mo–Fr (tippen für jeden Tag)" else "Jeden Tag (tippen für nur Mo–Fr)", null) {
-                    Settings.setAlarm(this, weekdays = !Settings.alarmWeekdays(this))
+                // Klar getrennt: was eingestellt ist (Untertitel) und was ein Tipp macht (Titel)
+                Option(R.drawable.ic_sun, if (Settings.alarmWeekdays(this)) "Auf jeden Tag umstellen" else "Auf nur Mo–Fr umstellen",
+                    if (Settings.alarmWeekdays(this)) "Eingestellt: nur Mo–Fr" else "Eingestellt: jeden Tag") {
+                    val wd = !Settings.alarmWeekdays(this)
+                    Settings.setAlarm(this, weekdays = wd)
+                    showHint(if (wd) "Wecker klingelt nur noch Mo–Fr" else "Wecker klingelt jeden Tag")
                 },
-                if (on) Option(R.drawable.ic_close, "Wecker ausschalten", null) { Settings.setAlarm(this, on = false) }
-                else Option(R.drawable.ic_play, "Wecker einschalten", null) { Settings.setAlarm(this, on = true) },
+                if (on) Option(R.drawable.ic_close, "Wecker ausschalten", null) { Settings.setAlarm(this, on = false); showHint("Wecker aus") }
+                else Option(R.drawable.ic_play, "Wecker einschalten", null) {
+                    Settings.setAlarm(this, on = true); ensureExactAlarm()
+                    showHint("Wecker an: %02d:%02d Uhr".format(Settings.alarmHour(this), Settings.alarmMinute(this)))
+                },
             )
         )
     }
 
     private fun alarmSourceSheet() {
         val opts = mutableListOf(
-            Option(R.drawable.ic_sun, "Guten-Morgen-Mix", "Gute-Laune-Hits") { Settings.setAlarm(this, source = "hitmix:pop", label = "Guten-Morgen-Mix") },
-            Option(R.drawable.ic_star, "Charts-Mix", "Aktuelle Hits") { Settings.setAlarm(this, source = "hitmix:", label = "Charts-Mix") },
+            Option(R.drawable.ic_sun, "Guten-Morgen-Mix", "Gute-Laune-Hits") { Settings.setAlarm(this, source = "hitmix:pop", label = "Guten-Morgen-Mix"); showHint("Weckt mit dem Guten-Morgen-Mix") },
+            Option(R.drawable.ic_star, "Charts-Mix", "Aktuelle Hits") { Settings.setAlarm(this, source = "hitmix:", label = "Charts-Mix"); showHint("Weckt mit dem Charts-Mix") },
         )
         (Favorites.all(this) + Recent.all(this)).filter { it.kind == Kind.STATION }.distinctBy { it.id }.take(6).forEach { st ->
-            opts.add(Option(R.drawable.ic_radio, st.name, "Sender") { Settings.setAlarm(this, source = st.toJson().toString(), label = st.name) })
+            opts.add(Option(R.drawable.ic_radio, st.name, "Sender") { Settings.setAlarm(this, source = st.toJson().toString(), label = st.name); showHint("Weckt mit ${st.name}") })
         }
         sheet("Was soll spielen?", "Beim Wecken", null, "", false, null, opts)
     }
@@ -1041,7 +1054,7 @@ class MainActivity : ComponentActivity() {
         val btn = findViewById<TextView>(R.id.watchBtn)
         val n = WatchService.queries(this).size
         btn.visibility = if (n > 0 && !kids()) View.VISIBLE else View.GONE
-        btn.text = if (n > 1) "$n" else "Wunsch"
+        btn.text = if (n > 1) "$n Wünsche" else "1 Wunsch"
         btn.setOnClickListener { watchSheet() }
     }
 
@@ -1081,6 +1094,12 @@ class MainActivity : ComponentActivity() {
         } else showHint("Hit-Mix sucht einen Sender mit einem Hit…")
     }
 
+    /** Nach "Mix beenden" läuft der Sender weiter: das sagen, sonst wirkt es, als hätte der Knopf nichts getan. */
+    private fun mixEndedHint() {
+        val st = controller?.currentMediaItem?.let { Entry.fromMediaItem(it) }?.name
+        showHint(if (st != null) "Mix beendet – $st läuft normal weiter" else "Mix beendet")
+    }
+
     private fun stopHitMix() {
         controller?.sendCustomCommand(SessionCommand(PlaybackService.CMD_HITMIX, Bundle.EMPTY), Bundle().apply { putBoolean("stop", true) })
     }
@@ -1090,7 +1109,7 @@ class MainActivity : ComponentActivity() {
     /** Einheitlicher Knopf zum Starten eines Hit-Mix (läuft er schon, steht das im Statusbalken). */
     @Suppress("UNUSED_PARAMETER")
     private fun hitMixRow(key: String?, label: String, sub: String): Row =
-        button(R.drawable.ic_bolt, "Hit-Mix $label") { startHitMix(key, label) }
+        button(R.drawable.ic_bolt, "Hit-Mix: $label") { startHitMix(key, label) }
 
     private fun next() {
         forgetWanted()
@@ -1194,7 +1213,7 @@ class MainActivity : ComponentActivity() {
             val season = Moments.now().firstOrNull { it.action == Moments.Action.HITMIX && it.genreKey != null && it.genreKey != "charts" }
             rows.add(Row.Quick(listOfNotNull(
                 Triple(R.drawable.ic_bolt, "Hit-Mix", { startHitMix(null, "– Charts") }),
-                season?.let { m -> Triple(R.drawable.ic_star, m.title.substringBefore("-").substringBefore(" ").take(12), { startHitMix(m.genreKey, "– ${m.title}") }) },
+                season?.let { m -> Triple(R.drawable.ic_star, seasonLabel(m), { startHitMix(m.genreKey, "– ${m.title}") }) },
                 Triple(R.drawable.ic_heart, "Mein Mix", { startHitMix("mine", "– Mein Mix") }),
                 Triple(R.drawable.ic_kids, "Kinder", { musicAudience = 1; loadKids(); selectTab(Tab.FIND) }),
             )))
@@ -1371,7 +1390,7 @@ class MainActivity : ComponentActivity() {
                 .setPositiveButton("Löschen") { _, _ -> Playlists.delete(this, p.name); page = null; render(); updateBack() }
                 .setNegativeButton("Abbrechen", null).show()
         })
-        rows.add(Row.Header("Lieder", "${songs.size} Lieder · Tippen zum Hören"))
+        rows.add(Row.Header("Lieder", "${songs.size} Lieder · Tippen: im Radio hören, sonst Vorschau"))
         songs.forEach { e -> rows.add(Row.Item(e, songs, liveText(e))) }
     }
 
@@ -1412,7 +1431,7 @@ class MainActivity : ComponentActivity() {
     private var musicAudience = 0 // 0 = Erwachsene, 1 = Kinder
 
     private fun audienceChips(selected: Int, onSelect: (Int) -> Unit) =
-        Row.Segment(listOf("Für Erwachsene", "Für Kinder"), selected, onSelect)
+        Row.Segment(listOf("Alle", "Für Kinder"), selected, onSelect)
 
     private fun renderFind() {
         if (!kids()) rows.add(audienceChips(musicAudience) { musicAudience = it; if (it == 1) loadKids(); render() })
@@ -1420,14 +1439,18 @@ class MainActivity : ComponentActivity() {
         rows.add(hitMixRow(null, "Charts", "Nur aktuelle Hits aus dem Radio – springt automatisch weiter"))
         // Playlists mit bekannten Liedern (als Radio-Mix)
         loadPlaylistCovers()
+        // Jede Playlist nur einmal (nicht "Bald ist Weihnachten" und "Weihnachtshits" mit denselben Liedern)
+        val seen = HashSet<String>()
+        fun fresh(l: List<Playlists.Def>) = l.filter { seen.add(it.query) }
         rows.add(Row.Header("Gerade angesagt", "Live aus dem Radio berechnet"))
-        rows.add(Row.Carousel(Playlists.trending.map { plEntry(it) }))
+        rows.add(Row.Carousel(fresh(Playlists.trending).map { plEntry(it) }))
         rows.add(Row.Header("Passend zu jetzt", "Jahreszeit, Wochentag, Uhrzeit"))
-        rows.add(Row.Carousel(Playlists.forNow().map { plEntry(it) }))
+        rows.add(Row.Carousel(fresh(Playlists.forNow()).map { plEntry(it) }))
         rows.add(Row.Header("Neu diese Woche", "Jeden Montag andere Playlists"))
-        rows.add(Row.Carousel(Playlists.weekly().map { plEntry(it) }))
+        rows.add(Row.Carousel(fresh(Playlists.weekly()).map { plEntry(it) }))
         rows.add(Row.Header("Klassiker", "Die Dauerbrenner"))
-        rows.add(Row.Carousel(Playlists.classics.map { plEntry(it) }))
+        // Kinderlieder stehen im Kinder-Bereich, nicht zwischen den Klassikern
+        rows.add(Row.Carousel(fresh(Playlists.classics.filter { !it.query.startsWith("Kinderlieder") }).map { plEntry(it) }))
         val genres = Genres.all.filter { it.key != "kids" }
         rows.add(Row.Header("Genres & Stimmungen", "Jedes mit eigenem Hit-Mix", "ALLE ${genres.size}") { openPage(Page.GenresPage) })
         genres.take(6).chunked(2).forEach { rows.add(Row.Tiles(it[0], it.getOrNull(1))) }
@@ -1461,21 +1484,21 @@ class MainActivity : ComponentActivity() {
     /** Der eine beste Treffer ganz oben. */
     private fun topRow(): Row? {
         radioHits.firstOrNull()?.let { e ->
-            return Row.Top(e, "LÄUFT GERADE LIVE", "${e.subtitle} · tippen und komplett hören") { play(e, radioHits.toList()) }
+            return Row.Top(e, "LÄUFT GERADE LIVE", "${e.subtitle} · tippen und live mithören") { play(e, radioHits.toList()) }
         }
         val nq = Scanner.normalize(query)
         stationHits.firstOrNull { Scanner.normalize(it.name).startsWith(nq) }?.let { e ->
             return Row.Top(e, "SENDER", "Jetzt einschalten") { play(e, stationHits) }
         }
         songHits.firstOrNull { Scanner.normalize(it.title) == nq }?.let { e ->
-            return Row.Top(e, "SONG", "${e.subtitle}") { onEntryTap(e, songHits) }
+            return Row.Top(e, "LIED", "${e.subtitle}") { onEntryTap(e, songHits) }
         }
         artistMix?.let { a ->
             val e = Entry("ar:${a.id}", Kind.TRACK, a.name, "Künstler", "", a.picture, a.name)
             return Row.Top(e, "KÜNSTLER", "${a.name}-Mix: nur ${a.name} aus dem Radio") { startHitMix("artist:${a.id}:${a.name}", "– ${a.name}") }
         }
         songHits.firstOrNull()?.let { e ->
-            return Row.Top(e, "SONG", "${e.subtitle}") { onEntryTap(e, songHits) }
+            return Row.Top(e, "LIED", "${e.subtitle}") { onEntryTap(e, songHits) }
         }
         return null
     }
@@ -1497,14 +1520,14 @@ class MainActivity : ComponentActivity() {
         }
         if (asGenre != null) {
             // Musikrichtung: der Mix ganz oben, er spielt nur diese Richtung
-            rows.add(button(R.drawable.ic_bolt, "${asGenre.name}-Mix starten") { startHitMix(asGenre.key, "– ${asGenre.name}") })
+            rows.add(button(R.drawable.ic_bolt, "Hit-Mix: ${asGenre.name} starten") { startHitMix(asGenre.key, "– ${asGenre.name}") })
         }
         if (searchFilter == 0) topRow()?.let { rows.add(it) }
         if (scanning) rows.add(Row.Status(statusText(), scanDone, scanTotal))
         else if (!deepSearch) rows.add(Row.More(if (asGenre != null) "📻 Mehr ${asGenre.name}-Sender abfragen" else "📻 Alle Radios nach „$query“ durchsuchen") { startSearch() })
 
         if (showRadio) {
-        rows.add(Row.Header(if (asGenre != null) "${asGenre.name} gerade im Radio" else "Läuft gerade im Radio", "Komplett hören"))
+        rows.add(Row.Header(if (asGenre != null) "${asGenre.name} gerade im Radio" else "Läuft gerade im Radio", "Live mithören"))
         if (radioHits.isEmpty()) {
             rows.add(Row.Empty(when {
                 asGenre != null -> if (genreStations.containsKey(asGenre.key)) "Gerade kein Lied auf ${asGenre.name}-Sendern erkannt." else "Suche ${asGenre.name}-Sender…"
@@ -1529,7 +1552,7 @@ class MainActivity : ComponentActivity() {
 
         artistMix?.let { a ->
             if (HitMix.activeName(this) == null) {
-                if (radioHits.isNotEmpty()) rows.add(button(R.drawable.ic_bolt, "${a.name}-Mix starten") {
+                if (radioHits.isNotEmpty()) rows.add(button(R.drawable.ic_bolt, "Hit-Mix: ${a.name} starten") {
                     startHitMix("artist:${a.id}:${a.name}", "– ${a.name}")
                 })
             }
@@ -1539,7 +1562,7 @@ class MainActivity : ComponentActivity() {
             val now = dedupe(LiveIndex.fresh().filter { n -> aw.all { n.normalized.contains(it) } }
                 .map { it.station.toEntry(it.title) }).filter { e -> radioHits.none { it.id == e.id } }
             if (now.isNotEmpty()) {
-                rows.add(Row.Header("Von ${a.name} gerade im Radio", "Komplett hören"))
+                rows.add(Row.Header("Von ${a.name} gerade im Radio", "Live mithören"))
                 now.forEach { rows.add(Row.Item(it, now, "● LIVE")) }
             }
         }
@@ -1549,17 +1572,23 @@ class MainActivity : ComponentActivity() {
         }
         }
         if (showSongs) {
-        rows.add(Row.Header(if (asGenre != null) "Top-Songs ${asGenre.name}" else "Songs", "Tippen zum Hören"))
+        rows.add(Row.Header(if (asGenre != null) "Top-Lieder ${asGenre.name}" else "Lieder", "Tippen: im Radio hören, sonst Vorschau"))
         when {
             songLoading -> rows.add(Row.Empty("Suche…"))
-            songHits.isEmpty() -> rows.add(Row.Empty("Keine Songs gefunden."))
+            songHits.isEmpty() -> rows.add(Row.Empty("Keine Lieder gefunden."))
             else -> limited("songs", songHits, n) { e -> rows.add(Row.Item(e, songHits, liveText(e))) }
         }
-        rows.add(Row.Header("Freie Musik", "Jamendo · Audius · Internet Archive"))
-        when {
-            freeLoading -> rows.add(Row.Empty("Suche…"))
-            freeHits.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
-            else -> limited("free", freeHits, n) { rows.add(Row.Item(it, freeHits)) }
+        // Freie Musik nur, wenn sie wirklich zur Suche passt (bei "Helene Fischer" keine fremden Indie-Lieder)
+        val qw = Scanner.words(query)
+        val freeShown = if (songHits.isEmpty() || asGenre != null) freeHits
+            else freeHits.filter { MixLogic.searchMatches(Scanner.normalize(it.title + " " + it.subtitle), qw) }
+        if (freeLoading || freeShown.isNotEmpty() || songHits.isEmpty()) {
+            rows.add(Row.Header("Freie Musik", "Kostenlos ganz hören"))
+            when {
+                freeLoading -> rows.add(Row.Empty("Suche…"))
+                freeShown.isEmpty() -> rows.add(Row.Empty("Nichts gefunden."))
+                else -> limited("free", freeShown, n) { rows.add(Row.Item(it, freeShown)) }
+            }
         }
         }
         if (showStories) {
@@ -1574,7 +1603,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderGenre(g: Genre) {
-        rows.add(Row.Hero(g, "Radio live · Top-Songs · Freie Musik"))
+        rows.add(Row.Hero(g, if (g.jamendoTag != null) "Radio live · Top-Lieder · Freie Musik" else "Radio live · Top-Lieder"))
         rows.add(hitMixRow(g.key, g.name, "Nur ${g.name}-Hits aus dem Radio – springt automatisch weiter"))
         val stations = genreStations[g.key]
         rows.add(Row.Header("Sender", "● LIVE zeigt, was gerade läuft"))
@@ -1590,12 +1619,12 @@ class MainActivity : ComponentActivity() {
         }
         val songs = genreSongs[g.key].orEmpty()
         if (songs.isNotEmpty()) {
-            rows.add(Row.Header("Top-Songs", "Tippen zum Hören"))
+            rows.add(Row.Header("Top-Lieder", "Tippen: im Radio hören, sonst Vorschau"))
             addSongs(songs, ranked = true)
         }
         val free = genreFree[g.key].orEmpty()
         if (free.isNotEmpty()) {
-            rows.add(Row.Header("Freie Musik", "Komplett hören"))
+            rows.add(Row.Header("Freie Musik", "Kostenlos ganz hören"))
             free.forEach { rows.add(Row.Item(it, free)) }
         }
     }
@@ -1638,16 +1667,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderShow(show: Entry) {
-        val list = episodes[show.url]
+        val raw = episodes[show.url]
+        // Serien (Hörbuch, Fortsetzungen) von Folge 1 an, alles andere wie in jeder Podcast-App: neueste zuerst
+        val serial = Podcasts.isSerial(show)
+        val list = if (serial || raw == null) raw else raw.asReversed().toList()
         rows.add(Row.Item(show, emptyList()))
         if (!list.isNullOrEmpty()) {
-            val i = Positions.nextIndex(this, list)
-            val ep = list[i]
-            rows.add(button(R.drawable.ic_play,
-                if (i == 0 && Positions.get(this, ep.id) == 0L) "Von Anfang an hören" else "Weiterhören: ${ep.title}"
-            ) { play(ep, list) })
+            val started = list.firstOrNull { Positions.get(this, it.id) > 0 && !Positions.isDone(this, it.id) }
+            if (serial) {
+                val i = Positions.nextIndex(this, list)
+                val ep = list[i]
+                rows.add(button(R.drawable.ic_play,
+                    if (i == 0 && Positions.get(this, ep.id) == 0L) "Von Anfang an hören" else "Weiterhören: ${ep.title}"
+                ) { play(ep, list) })
+            } else {
+                val ep = started ?: list.first()
+                rows.add(button(R.drawable.ic_play, if (started != null) "Weiterhören: ${ep.title}" else "Neueste Folge hören") { play(ep, list) })
+            }
         }
-        rows.add(Row.Header("Folgen", "Von Anfang an · ⏭ spielt die nächste Folge · merkt sich, wo du warst"))
+        rows.add(Row.Header("Folgen", (if (serial) "Von Anfang an" else "Neueste zuerst") + " · ⏭ spielt die nächste Folge · merkt sich, wo du warst"))
         when {
             list == null -> rows.add(Row.Empty(if (show.url in episodesFailed) "Gerade nichts geladen – zum Neuladen nach unten ziehen" else "Lade Folgen…"))
             list.isEmpty() -> rows.add(Row.Empty("Keine Folgen gefunden."))
@@ -1749,7 +1787,7 @@ class MainActivity : ComponentActivity() {
         }
         val heard = Heard.all(this).take(50)
         if (heard.isNotEmpty()) {
-            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen zum Hören", "LEEREN") {
+            rows.add(Row.Header("Verlauf", "Was lief wann? Tippen: im Radio hören, sonst Vorschau", "LEEREN") {
                 AlertDialog.Builder(this).setTitle("Verlauf leeren?")
                     .setMessage("Alle gehörten Lieder werden aus dem Verlauf entfernt.")
                     .setPositiveButton("Leeren") { _, _ -> Heard.clear(this); render() }
@@ -1957,7 +1995,7 @@ class MainActivity : ComponentActivity() {
         val names = listOf(
             3 to ("Automatisch" to "Im WLAN hoch, unterwegs normal – empfohlen"),
             0 to ("Datensparend" to "96 kbit/s, unterwegs werden weniger Sender abgefragt"),
-            1 to ("Normal" to "96 kbit/s, Standard"),
+            1 to ("Normal" to "96 kbit/s, alle Sender werden laufend abgefragt"),
             2 to ("Hoch" to "≈ 192 kbit/s – beste Qualität, mehr Daten"),
         )
         sheet("Audioqualität", "Für freie Musik", null, "", false, null,
@@ -2283,7 +2321,7 @@ class MainActivity : ComponentActivity() {
         val rules = listOf("xmas" to "weihnacht|christmas", "kids" to "kinder", "chill" to "ruhig|entspann|chill|schlaf|kuschel",
             "party" to "party|feier|ballermann", "80s" to "80er", "90s" to "90er", "2000s" to "2000er", "oldies" to "oldie|60er|70er",
             "rap" to "rap|hip ?hop", "rock" to "rock|metal", "schlager" to "schlager", "dance" to "dance|techno|house|tanz",
-            "summer" to "sommer|gute laune", "classic" to "klassik", "jazz" to "jazz|soul", "charts" to "hits|charts")
+            "summer" to "sommer", "pop" to "gute laune|fröhlich|happy", "classic" to "klassik", "jazz" to "jazz|soul", "charts" to "hits|charts")
         return rules.firstOrNull { Regex(it.second).containsMatchIn(t) }?.let { Radar.Wish(it.first, null, false) }
     }
 
@@ -2310,7 +2348,7 @@ class MainActivity : ComponentActivity() {
             if (artist.isNotBlank() && artist != song)
                 opts.add(Option(R.drawable.ic_close, "$artist nicht mehr spielen", "Keine Lieder von $artist im Mix") { dislike(song, true) })
         }
-        if (mixOn) opts.add(Option(R.drawable.ic_stop, "Mix beenden", null) { stopHitMix(); updatePlayer() })
+        if (mixOn) opts.add(Option(R.drawable.ic_stop, "Mix beenden", null) { stopHitMix(); mixEndedHint(); updatePlayer() })
         if (Dislikes.count(this) > 0)
             opts.add(Option(R.drawable.ic_heart_outline, "Gesperrte Lieder wieder erlauben", "${Dislikes.count(this)} gesperrt") { Dislikes.clear(this); showHint("Alles wieder erlaubt") })
         if (opts.isEmpty()) return
@@ -2580,7 +2618,10 @@ class MainActivity : ComponentActivity() {
         val t0 = System.currentTimeMillis()
         val indexTitle = if (isStation) LiveIndex.get(item.mediaId.removePrefix("st:"))
             ?.takeIf { t0 - it.time < 120_000 && t0 - it.since < 6 * 60_000 }?.title else null
-        val title = live ?: indexTitle ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
+        val raw = live ?: indexTitle
+        // Schöne Schreibweise vom Cover-Treffer statt "ED SHEERAN - SHAPE OF YOU"
+        val pretty = if (isStation && raw != null && isMusic(raw)) Covers.get(raw)?.let { "${it.artist} - ${it.title}" } else null
+        val title = pretty ?: raw?.let { Text.clean(it) } ?: m.title?.toString()?.takeIf { it.isNotBlank() } ?: entry?.name ?: ""
         if (isStation && live == null) checkStationTitle(item.mediaId, entry)
         checkWanted(live)
         val ad = adInfo(c, item.mediaId, live)
@@ -2588,7 +2629,8 @@ class MainActivity : ComponentActivity() {
             c.playbackState == Player.STATE_BUFFERING -> "Verbinde…"
             ad != null -> adText(ad)
             c.playerError != null -> "Nicht erreichbar – tippe auf Play"
-            isStation && HitMix.activeName(this) != null -> "⚡ ${HitMix.activeName(this)} · ${entry?.name ?: ""}"
+            isStation && HitMix.activeName(this) != null -> mixStatus()?.let { "⚡ ${HitMix.activeName(this)} · $it" }
+                ?: "⚡ ${HitMix.activeName(this)} · ${entry?.name ?: ""}"
             isStation && live == null && indexTitle != null -> entry?.name ?: ""
             isStation -> entry?.name ?: (m.artist?.toString() ?: "")
             entry?.preview == true -> "${m.artist ?: ""} · Vorschau"
@@ -2615,22 +2657,17 @@ class MainActivity : ComponentActivity() {
         if (full.visibility == View.VISIBLE) {
             findViewById<TextView>(R.id.fullTitle).text = title
             findViewById<TextView>(R.id.fullSub).text = sub
-            findViewById<TextView>(R.id.fullSource).text = when {
-                ad != null -> "📢 WERBUNG"
-                isStation -> "INTERNETRADIO"
-                entry?.preview == true -> "VORSCHAU"
-                else -> "FREIE MUSIK"
-            }
+            findViewById<TextView>(R.id.fullSource).text = sourceLabel(item.mediaId, ad != null, entry)
             findViewById<View>(R.id.fullBadge).visibility = if (isStation) View.VISIBLE else View.GONE
             findViewById<ImageButton>(R.id.fullPlay).setImageResource(playIcon)
             findViewById<ImageButton>(R.id.fullFav).setImageResource(if (isFav) R.drawable.ic_heart else R.drawable.ic_heart_outline)
             // 30-s-Vorschauen kann man nirgends sonst wieder entfernen: dort kein Herz
-            findViewById<View>(R.id.fullFav).visibility = if (entry?.preview == true || item.mediaId.startsWith("hd:")) View.GONE else View.VISIBLE
+            findViewById<View>(R.id.fullFav).visibility = if (entry?.preview == true || item.mediaId.startsWith("hd:") || item.mediaId.startsWith("hitmix:")) View.GONE else View.VISIBLE
             findViewById<View>(R.id.fullNext).visibility = if (canNext) View.VISIBLE else View.GONE
-            findViewById<View>(R.id.fullPrev).visibility = if (c.hasPreviousMediaItem()) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.fullPrev).visibility = if (c.hasPreviousMediaItem() || HitMix.canGoBack(this)) View.VISIBLE else View.GONE
             findViewById<EqualizerView>(R.id.fullEq).apply { bars = 9; this.playing = c.isPlaying }
             findViewById<View>(R.id.fullSeek).visibility = if (isStation && !NowSong.known()) View.INVISIBLE else View.VISIBLE
-            val story = item.mediaId.startsWith("pc:") || item.mediaId.startsWith("ia:")
+            val story = item.mediaId.startsWith("pc:") || item.mediaId.startsWith("ia:") || item.mediaId.startsWith("lv:")
             val againOk = isStation && live != null && LiveIndex.isMusic(live)
             val canShare = (isStation && live != null && isMusic(live)) || (!isStation && !story)
             findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk || canShare) View.VISIBLE else View.GONE
@@ -2665,6 +2702,9 @@ class MainActivity : ComponentActivity() {
         val known = Ads.duration(this, id)
         val elapsed = NowSong.sinceTune()
         // Bekannte Vorab-Werbung: Countdown, auch wenn der Sender währenddessen schon den Liedtitel schickt
+        // Aber nicht, wenn längst hörbar Musik läuft (Werbung war diesmal kürzer oder gar nicht da)
+        val musicHeard = live != null && LiveIndex.isMusic(live) && !Ads.isAd(live) && SoundSense.musicFor(8_000)
+        if (musicHeard) return null
         if (known > 0 && elapsed < known) return AdInfo(known - elapsed, known, elapsed)
         if (live != null && LiveIndex.isMusic(live) && !Ads.isAd(live)) return null
         if (Ads.isAd(live)) return AdInfo(if (known > elapsed) known - elapsed else -1, known, elapsed)
@@ -2726,7 +2766,7 @@ class MainActivity : ComponentActivity() {
                 } else miniP.visibility = View.INVISIBLE
             } else {
                 miniP.visibility = View.INVISIBLE
-                if (full.visibility == View.VISIBLE) findViewById<TextView>(R.id.fullSource).text = "INTERNETRADIO"
+                if (full.visibility == View.VISIBLE) findViewById<TextView>(R.id.fullSource).text = sourceLabel(item.mediaId, false, Entry.fromMediaItem(item))
             }
         }
         val pos = c.currentPosition.coerceAtLeast(0)
@@ -2759,7 +2799,8 @@ class MainActivity : ComponentActivity() {
                 songKnown -> {
                     seek.visibility = View.VISIBLE; seek.isEnabled = false
                     seek.max = NowSong.durMs.toInt().coerceAtLeast(1); seek.progress = e.toInt()
-                    posText.text = fmt(e); durText.text = "-" + fmt((NowSong.durMs - e).coerceAtLeast(0))
+                    // Wie bei Spotify: links wie weit, rechts wie lang das Lied insgesamt ist
+                    posText.text = fmt(e); durText.text = fmt(NowSong.durMs)
                 }
                 NowSong.startMs > 0 -> { seek.visibility = View.INVISIBLE
                      posText.text = "Lied läuft seit ${fmt(e)}"; durText.text = "LIVE" }
@@ -2772,7 +2813,13 @@ class MainActivity : ComponentActivity() {
                     val n = sid?.let { LiveIndex.get(it) }?.takeIf { nt != null && Scanner.normalize(nt) == it.normalized }
                     // Mindestens so lange, wie wir den Sender schon hören (das Lied lief beim Einschalten schon)
                     val min = maxOf(n?.let { LiveIndex.minRunning(it) } ?: 0L, if (nt != null) NowSong.sinceTune() else 0L)
-                    posText.text = if (nt != null && min >= 1_000L) "Lied läuft seit mind. ${fmt(min)}" else ""
+                    val d = NowSong.durMs
+                    if (nt != null && d > 0 && min >= 1_000L && min < d) {
+                        // Länge bekannt, Anfang nicht: Leiste ab "mindestens" (wächst mit, nie zu weit)
+                        seek.visibility = View.VISIBLE; seek.isEnabled = false
+                        seek.max = d.toInt(); seek.progress = min.toInt()
+                        posText.text = "mind. ${fmt(min)}"; durText.text = fmt(d)
+                    } else posText.text = if (nt != null && min >= 1_000L) "Lied läuft seit mind. ${fmt(min)}" else ""
                 }
             }
         } else {
@@ -2782,8 +2829,35 @@ class MainActivity : ComponentActivity() {
                 seek.progress = pos.toInt()
                 posText.text = fmt(pos)
             }
-            durText.text = if (dur > 0) "-" + fmt(dur - pos) else ""
+            durText.text = if (dur > 0) fmt(dur) else ""
         }
+    }
+
+    /** Kurzer, ganzer Name für den Saison-Knopf (nicht "Weihnachts" oder "Après"). */
+    private fun seasonLabel(m: Moments.Moment): String = when (m.key) {
+        "xmas" -> "Weihnachten"
+        "nye" -> "Silvester"
+        "apres" -> "Après-Ski"
+        "summer" -> "Sommerhits"
+        else -> m.title.substringBefore(" ").take(14)
+    }
+
+    /** Hit-Mix wartet oder sucht gerade: das soll man sehen statt nur den Sendernamen. */
+    private fun mixStatus(): String? {
+        val now = HitMix.nowPlaying(this) ?: return null
+        val waiting = now.startsWith("Suche") || now.startsWith("Gerade läuft kein") || now.contains("ich springe") || now.startsWith("Zurück zu")
+        return now.takeIf { waiting }
+    }
+
+    /** Kleine Zeile über dem Titel: woher das gerade kommt. */
+    private fun sourceLabel(id: String, ad: Boolean, entry: Entry?): String = when {
+        ad -> "📢 WERBUNG"
+        id.startsWith("hitmix:") -> "HIT-MIX · Suche passenden Sender…"
+        id.startsWith("st:") && HitMix.activeName(this) != null -> "HIT-MIX"
+        id.startsWith("st:") -> "INTERNETRADIO"
+        id.startsWith("pc:") || id.startsWith("ia:") || id.startsWith("lv:") -> "HÖRSPIEL & PODCAST"
+        entry?.preview == true -> "VORSCHAU"
+        else -> "FREIE MUSIK"
     }
 
     private fun fmt(ms: Long): String {

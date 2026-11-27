@@ -108,6 +108,13 @@ object MixLogic {
         return (if (nameHit) 3 else 0) + good.coerceAtMost(3) * 2 + (if (firstGood) 1 else 0) - bad * 2
     }
 
+    /** Klare Richtung eines Senders (z. B. "rock" bei ROCK ANTENNE), null = gemischt/unklar (Hits, Pop, Sommer). */
+    fun mainGenre(tags: String, name: String): String? =
+        stationRules.keys.filter { it != "summer" }
+            .map { it to stationScore(it, tags, name) }
+            .filter { it.second >= 5 }
+            .maxByOrNull { it.second }?.first
+
     /** Sender passt zur Richtung (mindestens ein passender Tag und nicht vor allem ein Hit-/Pop-Sender). */
     fun stationFits(genreKey: String, tags: String, name: String) = stationScore(genreKey, tags, name) >= 2
 

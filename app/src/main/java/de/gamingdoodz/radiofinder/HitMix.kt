@@ -35,6 +35,8 @@ class HitMix(
         fun prefs(context: Context) = context.applicationContext.getSharedPreferences("hitmix", Context.MODE_PRIVATE)
         fun activeName(context: Context): String? = prefs(context).getString("name", null)
         fun nowPlaying(context: Context): String? = prefs(context).getString("now", null)
+        /** Im Mix gibt es einen vorherigen Sender (für "Zurück" im Player). */
+        fun canGoBack(context: Context) = prefs(context).getBoolean("prev", false) && activeName(context) != null
     }
 
     private var job: Job? = null
@@ -60,7 +62,8 @@ class HitMix(
         val cur = currentStation
         if (cur != null && MixLogic.stationBaseName(cur.name) == MixLogic.stationBaseName(n.station.name)) return false
         switchedTitle?.let { if (MixLogic.sameSong(n.normalized, it)) return false }
-        val recent = if (allowRepeats) played.takeLast(8) else played
+        // Auch im Notfall nicht nach ein paar Liedern dasselbe wieder (gut 1,5 Stunden Ruhe vor Wiederholungen)
+        val recent = if (allowRepeats) played.takeLast(30) else played
         return recent.none { it == n.normalized || MixLogic.sameSong(n.normalized, it) }
     }
 
@@ -351,7 +354,7 @@ class HitMix(
         endTimer?.cancel(); endTimer = null
         history.clear(); currentStation = null
         fadeJob?.cancel(); fadeJob = null
-        prefs(context).edit().remove("name").remove("now").apply()
+        prefs(context).edit().remove("name").remove("now").remove("prev").apply()
     }
 
     private var waitingForNext = false
@@ -378,6 +381,19 @@ class HitMix(
         scope.launch { Radar.sync(force = true) }
         if (item == null) {
             waitingForNext = true
+            // Weiter soll immer weiterschalten: dann wenigstens ein anderer Sender dieser Richtung (Mix springt weiter, sobald ein Hit anfängt)
+            val cur = currentStation
+            val others = stations.filter { st -> st.id in genreIds && st.id != currentStationId &&
+                (cur == null || MixLogic.stationBaseName(st.name) != MixLogic.stationBaseName(cur.name)) }.shuffled()
+            if (cur != null && others.isNotEmpty()) { history.addLast(cur); while (history.size > 20) history.removeFirst() }
+            val alt = genreFallback(others)
+            if (alt != null) {
+                prefs(context).edit().putBoolean("prev", history.isNotEmpty()).apply()
+                switchedAt = System.currentTimeMillis(); confirmed = false
+                switchTo(alt)
+                return true
+            }
+            if (cur != null && others.isNotEmpty()) history.removeLastOrNull()
             prefs(context).edit().putString("now", "Gerade läuft kein anderer Hit – ich springe, sobald einer anfängt").apply()
             return false
         }
@@ -682,7 +698,8 @@ class HitMix(
         waitingForNext = false
         candidate = null
         val song = now?.title?.takeIf { LiveIndex.isMusic(it) }
-        prefs(context).edit().putString("now", "Zurück zu ${st.name}" + (song?.let { " · läuft jetzt: $it" } ?: " · live")).apply()
+        prefs(context).edit().putString("now", "Zurück zu ${st.name}" + (song?.let { " · läuft jetzt: $it" } ?: " · live"))
+            .putBoolean("prev", history.isNotEmpty()).apply()
         switchTo(st.toEntry(song).toMediaItem())
         return true
     }
@@ -737,6 +754,7 @@ class HitMix(
         val n = c.now
         // Für "Zurück": vorherigen Sender merken
         currentStation?.let { prev -> if (prev.id != n.station.id) { history.addLast(prev); while (history.size > 20) history.removeFirst() } }
+        if (history.isNotEmpty()) prefs(context).edit().putBoolean("prev", true).apply()
         currentStation = n.station
         currentStationId = n.station.id
         currentSongKey = c.key
