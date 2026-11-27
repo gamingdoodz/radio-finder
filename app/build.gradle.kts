@@ -52,6 +52,9 @@ android {
     // Modell unkomprimiert lassen (schneller laden)
     androidResources { noCompress += "tflite" }
 
+    // Unit-Tests laufen ohne Gerät; Android-Aufrufe liefern dort Standardwerte statt abzustürzen
+    testOptions { unitTests.isReturnDefaultValues = true }
+
     lint {
         checkReleaseBuilds = false
         abortOnError = false
@@ -77,4 +80,8 @@ dependencies {
     implementation("com.google.guava:guava:33.3.1-android")
     // Klang-Erkennung (YAMNet) auf dem Handy, Apache 2.0
     implementation("com.google.ai.edge.litert:litert:1.4.0")
+
+    testImplementation("junit:junit:4.13.2")
+    // Echtes org.json für Tests (im Android-Stub fehlt es)
+    testImplementation("org.json:json:20240303")
 }

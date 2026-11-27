@@ -200,6 +200,42 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    // ---------- Wecker: Ersatz-Ton, wenn kein Radio kommt (kein Netz, Sender kaputt) ----------
+    private var alarmTone: android.media.Ringtone? = null
+    private var alarmAt = 0L
+
+    /** 40 s nach dem Wecken noch keine Musik: Weckton des Handys, damit niemand verschläft. Radio wird weiter versucht. */
+    private val alarmCheck = object : Runnable {
+        override fun run() {
+            val p = session?.player
+            if (p?.isPlaying == true) { stopAlarmTone(); return }
+            // Wecker wurde inzwischen von Hand gestoppt: nichts tun
+            if (p != null && !p.playWhenReady && alarmTone == null) return
+            if (alarmTone == null) try {
+                val uri = android.media.RingtoneManager.getActualDefaultRingtoneUri(this@PlaybackService, android.media.RingtoneManager.TYPE_ALARM)
+                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+                alarmTone = android.media.RingtoneManager.getRingtone(this@PlaybackService, uri)?.apply {
+                    audioAttributes = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+                    if (android.os.Build.VERSION.SDK_INT >= 28) isLooping = true
+                    play()
+                }
+                // Radio nochmal versuchen (Netz kann inzwischen da sein)
+                p?.let { if (it.playerError != null || it.playbackState == Player.STATE_IDLE) { it.prepare(); it.play() } }
+            } catch (_: Exception) {}
+            // Höchstens 3 Minuten klingeln; sobald Radio spielt, aus
+            if (System.currentTimeMillis() - alarmAt > 4 * 60_000L) { stopAlarmTone(); return }
+            sleepHandler.postDelayed(this, 5_000)
+        }
+    }
+
+    private fun stopAlarmTone() {
+        sleepHandler.removeCallbacks(alarmCheck)
+        try { alarmTone?.stop() } catch (_: Exception) {}
+        alarmTone = null
+    }
+
     private fun startSleepTimer(min: Int) {
         sleepHandler.removeCallbacks(sleepRunnable)
         session?.player?.volume = 1f
@@ -371,12 +407,15 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // Wecker von Hand gestoppt: Ersatz-Ton auch aus
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) stopAlarmTone()
                 if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
                     Settings.prefs(this@PlaybackService).edit().putLong("user_stopped", if (playWhenReady) 0L else System.currentTimeMillis()).apply()
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!isPlaying) savePosition() else startPlayingChecks()
+                if (isPlaying && alarmTone != null) stopAlarmTone()
                 if (isPlaying && stationStart == 0L && session?.player?.currentMediaItem?.mediaId?.startsWith("st:") == true) {
                     stationStart = System.currentTimeMillis()
                 }
@@ -468,7 +507,10 @@ class PlaybackService : MediaLibraryService() {
     private fun onStreamTitle(stationId: String, raw: String) {
         val now = System.currentTimeMillis()
         val clean = Text.clean(raw)
-        val music = LiveIndex.isMusic(clean) && !Ads.isAd(clean)
+        // Sendername als Künstler ("ROCK ANTENNE - Wir rocken"): Jingle, kein neues Lied (sonst schaltet der Mix mitten im Lied um)
+        val stationName = LiveIndex.get(stationId)?.station?.name
+            ?: exo?.currentMediaItem?.takeIf { it.mediaId == "st:$stationId" }?.mediaMetadata?.extras?.getString("name")
+        val music = LiveIndex.isMusic(clean) && !Ads.isAd(clean) && !MixLogic.isStationJingle(clean, stationName)
         // Werbeblock mitten im Programm, vom Sender im Titel gemeldet: stumm, bis wieder Musik kommt
         if (Ads.isAd(clean) && stationId == NowSong.stationId) {
             if (adTitleSince == 0L) {
@@ -647,6 +689,7 @@ class PlaybackService : MediaLibraryService() {
         Favorites.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         Settings.prefs(this).unregisterOnSharedPreferenceChangeListener(settingsListener)
         sleepHandler.removeCallbacks(fadeInRunnable)
+        stopAlarmTone()
         try { dynamics?.release() } catch (_: Exception) {}
         try { equalizer?.release() } catch (_: Exception) {}
         SoundSense.release()
@@ -805,6 +848,8 @@ class PlaybackService : MediaLibraryService() {
             Regex("kinderlieder|kindermusik|kinder musik").containsMatchIn(q) -> "kids"
             Regex("^(hits|charts|aktuelle hits|hit mix|hitmix|nur hits)$").containsMatchIn(q.trim()) -> "charts"
             else -> Genres.all.firstOrNull { g -> g.key != "charts" && q.trim() == g.name.lowercase() }?.key
+                // "Spiel Rockmusik", "Spiel 80er Hits": Richtung erkannt -> passender Mix
+                ?: Genres.fromText(q)?.key
         }
         if (theme != null) {
             hitMix.start(if (theme == "charts") null else theme)?.let { updateFavButton(); return it }
@@ -1009,6 +1054,9 @@ class PlaybackService : MediaLibraryService() {
                 session.player.volume = 0.15f
                 sleepHandler.removeCallbacks(fadeInRunnable)
                 sleepHandler.postDelayed(fadeInRunnable, 4_000)
+                stopAlarmTone()
+                alarmAt = System.currentTimeMillis()
+                sleepHandler.postDelayed(alarmCheck, 40_000)
             }
             if (customCommand.customAction == favCommand.customAction) {
                 session.player.currentMediaItem?.let { Entry.fromMediaItem(it) }?.let {
@@ -1186,6 +1234,30 @@ class PlaybackService : MediaLibraryService() {
             searchJob?.cancel()
             searchJob = scope.launch {
                 Radar.sync()
+                // Musikrichtung ("Rock"): Mix zuerst, dann Musik auf passenden Sendern – keine Lieder mit "Rock" im Titel
+                Genres.fromText(query)?.let { g ->
+                    val mix = hitMixItem(if (g.key == "charts") null else g.key, "⚡ ${g.name}-Mix", "Hit-Mix · nur ${g.name}")
+                    fun publishGenre(items: List<MediaItem>) {
+                        val all = (listOf(mix) + items).distinctBy { it.mediaId }
+                        remember(all)
+                        searchResults[query] = all
+                        session.notifySearchResultChanged(browser, query, all.size, params)
+                    }
+                    publishGenre(emptyList())
+                    val stations = try {
+                        if (g.key == "charts") StationRepository.byTag("charts") else StationRepository.forGenre(applicationContext, g)
+                    } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
+                    fun genreItems(): List<MediaItem> {
+                        val ids = stations.mapTo(HashSet()) { it.id }
+                        val live = LiveIndex.fresh().filter { it.station.id in ids && LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it) }
+                            .sortedByDescending { it.since }.take(25).map { it.station.toEntry(it.title).toMediaItem() }
+                        return live + stations.take(15).map { it.toEntry().toMediaItem() }
+                    }
+                    publishGenre(withContext(Dispatchers.Default) { genreItems() })
+                    withTimeoutOrNull(6_000) { LiveIndex.refresh(stations.take(30), maxAgeMs = 60_000L) }
+                    publishGenre(withContext(Dispatchers.Default) { genreItems() })
+                    return@launch
+                }
                 val words = Scanner.words(query)
                 val radioHits = Collections.synchronizedList(mutableListOf<MediaItem>())
                 // Läuft gerade irgendwo (Server-Stand): sofort da (Suche über alle Titel im Hintergrund)

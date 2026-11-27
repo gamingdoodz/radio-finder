@@ -9,9 +9,7 @@ import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
-import java.text.Normalizer
 import java.util.Collections
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -37,11 +35,7 @@ object Scanner {
     @OptIn(ExperimentalCoroutinesApi::class)
     private val io = Dispatchers.IO.limitedParallelism(64)
 
-    fun normalize(s: String): String {
-        val n = Normalizer.normalize(s.lowercase(Locale.ROOT), Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
-        return n.replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
-    }
+    fun normalize(s: String): String = MixLogic.normalize(s)
 
     fun words(query: String): List<String> = normalize(query).split(" ").filter { it.isNotBlank() }
 

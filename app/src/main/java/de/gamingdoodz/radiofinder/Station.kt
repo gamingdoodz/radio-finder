@@ -2,6 +2,8 @@ package de.gamingdoodz.radiofinder
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -15,6 +17,8 @@ data class Station(
     val url: String,
     val favicon: String,
     val hls: Boolean,
+    /** Tags von radio-browser (z. B. "rock,classic rock"), klein geschrieben. Leer = unbekannt. */
+    val tags: String = "",
 )
 
 /** Holt die Senderliste von radio-browser.info und merkt sie sich einen Tag lang. */
@@ -109,6 +113,26 @@ object StationRepository {
     private val tagCache = HashMap<String, List<Station>>()
     private val emptyTags = HashMap<String, Long>()
 
+    /**
+     * Sender, die wirklich zur Richtung passen: Tags/Name geprüft (ein Hit-Sender mit "pop, rock, hits" ist kein Rocksender),
+     * die passendsten zuerst. Weihnachten und Kinder haben eigene Listen.
+     */
+    suspend fun forGenre(context: Context, genre: Genre?): List<Station> = when (genre?.key) {
+        null, "charts" -> emptyList()
+        "kids" -> kids(context)
+        "xmas" -> coroutineScope {
+            listOf("christmas", "weihnachten", "weihnachtsmusik").map { async { byTag(it) } }
+                .map { it.await() }.flatten().distinctBy { it.id }
+        }
+        else -> {
+            val all = byTag(genre.radioTag)
+            val scored = all.map { it to MixLogic.stationScore(genre.key, it.tags, it.name) }
+            val fit = scored.filter { it.second >= 2 }.sortedByDescending { it.second }.map { it.first }
+            // Kaum passende (z. B. alte Liste ohne Tags): lieber die besten der Liste als gar keine
+            if (fit.size >= 3) fit else scored.sortedByDescending { it.second }.map { it.first }.take(12)
+        }
+    }
+
     /** Sender zu einem Genre (erst deutsche, dann weltweit). */
     suspend fun byTag(tag: String): List<Station> {
         synchronized(tagCache) {
@@ -175,6 +199,7 @@ object StationRepository {
             url = url,
             favicon = o.optString("favicon").trim(),
             hls = o.optInt("hls", 0) == 1,
+            tags = o.optString("tags").lowercase().take(300),
         )
     }
 
@@ -205,6 +230,7 @@ object StationRepository {
                     .put("url_resolved", s.url)
                     .put("favicon", s.favicon)
                     .put("hls", if (s.hls) 1 else 0)
+                    .put("tags", s.tags)
             )
         }
         try { file.writeText(arr.toString()) } catch (_: Exception) {}

@@ -321,7 +321,8 @@ object Radar {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { i ->
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
-                val st = Station(o.optString("id"), StationRepository.cleanName(o.optString("name")), o.optString("url"), o.optString("favicon"), false)
+                val st = Station(o.optString("id"), StationRepository.cleanName(o.optString("name")), o.optString("url"), o.optString("favicon"), false,
+                    o.optString("tags").lowercase().take(300))
                 val t = Text.clean(o.optString("title"))
                 if (t.isNotBlank()) LiveIndex.put(st, t)
                 // Als Sender anzeigen (Titel = Sendername), das laufende Lied in der Unterzeile
@@ -362,7 +363,8 @@ object Radar {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { i ->
                 val o = arr.optJSONObject(i) ?: return@mapNotNull null
-                Station(o.optString("id"), StationRepository.cleanName(o.optString("name")), o.optString("url"), o.optString("favicon"), false)
+                Station(o.optString("id"), StationRepository.cleanName(o.optString("name")), o.optString("url"), o.optString("favicon"), false,
+                    o.optString("tags").lowercase().take(300))
             }.filter { it.id.isNotBlank() && it.url.isNotBlank() && !Blocklist.blocked(it.id, it.url) }
         }.getOrNull()?.takeIf { it.isNotEmpty() }
     }

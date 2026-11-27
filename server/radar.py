@@ -525,12 +525,15 @@ async def h_list(req):
         sel = [st for st in stations if rx.search(st.get("tags", "")) or rx.search(st["name"].lower())][:100]
     elif typ.startswith("tag:"):
         tag = typ[4:]
-        de = [st for st in stations if tag in st.get("tags", "") and st.get("cc") == "DE"][:30]
-        other = [st for st in stations if tag in st.get("tags", "") and st.get("cc") != "DE"][:40]
+        # Ganzes Wort im Tag statt Teilwort: "rock" passt zu "rock" und "classic rock", nicht zu "rockabilly" oder "krautrock".
+        # Größere Auswahl mit Tags: die App sortiert selbst aus, welche Sender wirklich zur Richtung passen.
+        trx = re.compile(r"(^|,)[^,]*\b" + re.escape(tag) + r"\b[^,]*(,|$)")
+        de = [st for st in stations if trx.search(st.get("tags", "")) and st.get("cc") in ("DE", "AT", "CH")][:60]
+        other = [st for st in stations if trx.search(st.get("tags", "")) and st.get("cc") not in ("DE", "AT", "CH")][:60]
         sel = de + other
     else:
         sel = []
-    out = [{"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"]} for st in sel]
+    out = [{"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"], "tags": st.get("tags", "")} for st in sel]
     _lists_cache[typ] = (time.time(), out)
     return gz(web.json_response(out))
 

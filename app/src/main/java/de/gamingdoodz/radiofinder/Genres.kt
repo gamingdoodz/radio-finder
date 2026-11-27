@@ -44,21 +44,7 @@ object Genres {
         Genre("kids", "Kindermusik", "#FF22C55E", "#FF166534", R.drawable.ic_kids, "kinder", 95, "kids"),
     )
 
-    private val rules = listOf(
-        "xmas" to "weihnacht|christmas|xmas", "kids" to "kinderlied|kindermusik", "80s" to "80er|achtziger|80s",
-        "90s" to "90er|neunziger|90s", "2000s" to "2000er|nuller", "oldies" to "oldie|60er|70er|sechziger|siebziger",
-        "deutschrap" to "deutschrap", "rap" to "rap|hip ?hop", "schlager" to "schlager", "party" to "party|ballermann|après|apres",
-        "rock" to "rock", "dance" to "dance|techno|house|edm", "chill" to "chill|entspann|ruhig", "summer" to "sommerhits",
-        "jazz" to "jazz|soul", "classic" to "klassik", "latin" to "latin|reggaeton", "country" to "country",
-    )
-    private val generic = Regex("(?i)\\b(songs?|lieder|musik|hits|mix|aus den|sachen|irgendwas|was)\\b")
-
-    /** "Songs aus den 80ern" ist kein Lied, sondern eine Musikrichtung: dann passt der Hit-Mix. */
-    fun fromText(q: String): Genre? {
-        val t = q.lowercase().trim()
-        val short = t.split(Regex("\\s+")).size == 1
-        if (!short && !generic.containsMatchIn(t)) return null
-        val key = rules.firstOrNull { (_, rx) -> Regex(rx).containsMatchIn(t) }?.first ?: return null
-        return all.firstOrNull { it.key == key }
-    }
+    /** "Rock", "Rockmusik", "Songs aus den 80ern" ist kein Lied, sondern eine Musikrichtung: dann passt der Hit-Mix.
+     *  "Rock DJ" oder "Kid Rock" bleiben eine Lied-/Künstlersuche. Regeln in [MixLogic.genreKeyFor]. */
+    fun fromText(q: String): Genre? = MixLogic.genreKeyFor(q)?.let { k -> all.firstOrNull { it.key == k } }
 }

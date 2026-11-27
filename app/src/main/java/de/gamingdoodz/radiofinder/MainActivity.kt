@@ -449,14 +449,8 @@ class MainActivity : ComponentActivity() {
     private fun loadGenre(g: Genre) {
         if (genreStations.containsKey(g.key) || !genreLoading.add(g.key)) return
         lifecycleScope.launch {
-            val st = async { StationRepository.byTag(g.radioTag) }
-            val songs = async {
-                when {
-                    g.playlist != null -> Deezer.playlistByName(g.playlist).take(40)
-                    g.deezerGenre != null -> Deezer.genreChart(g.deezerGenre, 30)
-                    else -> emptyList()
-                }
-            }
+            val st = async { genreStationList(g) }
+            val songs = async { genreTopSongs(g) }
             val free = async { if (g.jamendoTag != null) Jamendo.byTag(g.jamendoTag) else emptyList() }
             val stations = st.await()
             genreStations[g.key] = stations
@@ -468,6 +462,64 @@ class MainActivity : ComponentActivity() {
             genreLoading.remove(g.key)
             render()
         }
+    }
+
+    /** Sender einer Richtung, die wirklich passen (Tags geprüft). Charts: Hit-Sender. */
+    private suspend fun genreStationList(g: Genre): List<Station> =
+        if (g.key == "charts") StationRepository.byTag("charts") else StationRepository.forGenre(applicationContext, g)
+
+    /** Top-Lieder einer Richtung. */
+    private suspend fun genreTopSongs(g: Genre): List<Entry> = when {
+        g.key == "kids" -> Deezer.kidsHits().take(40)
+        g.playlist != null -> Deezer.playlistByName(g.playlist).take(40)
+        g.deezerGenre != null -> Deezer.genreChart(g.deezerGenre, 30)
+        else -> emptyList()
+    }
+
+    /**
+     * Suche nach einer Musikrichtung ("Rock", "Rockmusik", "80er"): nur Lieder, Sender und freie Musik dieser Richtung.
+     * Vorher kamen Lieder mit dem Wort "Rock" im Titel ("Rock DJ") und Sender, deren Lied zufällig "rock" enthielt.
+     */
+    private fun genreSearch(g: Genre, myId: Int, deep: Boolean) {
+        scanning = false
+        render()
+        searchJob = lifecycleScope.launch {
+            launch {
+                val songs = genreSongs[g.key] ?: try { genreTopSongs(g) } catch (_: Exception) { emptyList() }
+                if (myId == searchId) { songHits = songs; songLoading = false; render() }
+            }
+            launch {
+                val free = genreFree[g.key] ?: try { g.jamendoTag?.let { Jamendo.byTag(it) } ?: emptyList() } catch (_: Exception) { emptyList() }
+                if (myId == searchId) { freeHits = free; freeLoading = false; render() }
+            }
+            if (deep) launch {
+                val st = Podcasts.search(query, limit = 12)
+                if (myId == searchId) { storyShows["search"] = st; render() }
+            }
+            val stations = genreStations[g.key] ?: try { genreStationList(g) } catch (_: Exception) { emptyList() }
+            if (myId != searchId) return@launch
+            genreStations.putIfAbsent(g.key, stations)
+            stationHits = stations.take(30).map { it.toEntry() }
+            showGenreLive(stations, myId)
+            // Frisch nachsehen, was auf den Sendern dieser Richtung gerade läuft
+            try { LiveIndex.refresh(stations.take(if (deep) 60 else 30), maxAgeMs = if (deep) 15_000L else 60_000L) } catch (_: Exception) {}
+            if (myId == searchId) showGenreLive(stations, myId)
+        }
+    }
+
+    /** "Läuft gerade": Musik auf den Sendern der Richtung und Top-Lieder der Richtung, die irgendwo laufen. */
+    private suspend fun showGenreLive(stations: List<Station>, myId: Int) {
+        val ids = stations.mapTo(HashSet()) { it.id }
+        val songs = songHits
+        val live = withContext(Dispatchers.Default) {
+            val onSongs = songs.map { LiveIndex.Song(it) }.flatMap { LiveIndex.matching(it) }
+            val onStations = LiveIndex.fresh().filter { it.station.id in ids && LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it) }
+            (onStations.sortedByDescending { it.since } + onSongs.sortedByDescending { it.since })
+                .distinctBy { it.station.id }.take(40).map { it.station.toEntry(it.title) }
+        }
+        if (myId != searchId) return
+        radioHits.clear(); radioHits.addAll(live)
+        render()
     }
 
     // ================= Navigation =================
@@ -572,6 +624,8 @@ class MainActivity : ComponentActivity() {
         freeLoading = true
         scanDone = 0
         scanTotal = 0
+        // Musikrichtung statt Lied ("Rock"): eigene Suche nach Richtung
+        Genres.fromText(q)?.let { g -> genreSearch(g, myId, deep); return }
         // Sofort: was die App schon weiß
         LiveIndex.find(q).forEach { radioHits.add(it.station.toEntry(it.title)) }
         render()
@@ -1294,14 +1348,20 @@ class MainActivity : ComponentActivity() {
         val showSongs = searchFilter == 0 || searchFilter == 2
         val showStories = searchFilter == 0 || searchFilter == 3
         val n = if (searchFilter == 0) 5 else 30
+        val asGenre = Genres.fromText(query)
+        if (asGenre != null) {
+            // Musikrichtung: der Mix ganz oben, er spielt nur diese Richtung
+            rows.add(button(R.drawable.ic_bolt, "${asGenre.name}-Mix starten") { startHitMix(asGenre.key, "– ${asGenre.name}") })
+        }
         if (searchFilter == 0) topRow()?.let { rows.add(it) }
         if (scanning) rows.add(Row.Status(statusText(), scanDone, scanTotal))
-        else if (!deepSearch) rows.add(Row.More("📻 Alle Radios nach „$query“ durchsuchen") { startSearch() })
+        else if (!deepSearch) rows.add(Row.More(if (asGenre != null) "📻 Mehr ${asGenre.name}-Sender abfragen" else "📻 Alle Radios nach „$query“ durchsuchen") { startSearch() })
 
         if (showRadio) {
-        rows.add(Row.Header("Läuft gerade im Radio", "Komplett hören"))
+        rows.add(Row.Header(if (asGenre != null) "${asGenre.name} gerade im Radio" else "Läuft gerade im Radio", "Komplett hören"))
         if (radioHits.isEmpty()) {
             rows.add(Row.Empty(when {
+                asGenre != null -> if (genreStations.containsKey(asGenre.key)) "Gerade kein Lied auf ${asGenre.name}-Sendern erkannt." else "Suche ${asGenre.name}-Sender…"
                 scanning -> "Suche läuft…"
                 deepSearch -> "„$query“ läuft gerade auf keinem der Sender."
                 else -> "Noch nicht durchsucht."
@@ -1311,11 +1371,8 @@ class MainActivity : ComponentActivity() {
             loadCovers(list)
             limited("radio", list, n) { rows.add(Row.Item(Covers.dress(it), list, "● LIVE")) }
         }
-        val asGenre = Genres.fromText(query)
         if (asGenre != null) {
-            // Musikrichtung statt Lied: der Wächter sucht genaue Titel, hier passt der Hit-Mix
-            rows.add(Row.Empty("Der Wächter sucht bestimmte Lieder. Für „${asGenre.name}“ spielt der Hit-Mix nur passende Lieder."))
-            rows.add(button(R.drawable.ic_bolt, "${asGenre.name}-Mix starten") { startHitMix(asGenre.key, "– ${asGenre.name}") })
+            // Musikrichtung statt Lied: der Wächter sucht genaue Titel, hier passt der Hit-Mix (Knopf steht oben)
         } else if (WatchService.activeQuery(this) == null) {
             rows.add(button(R.drawable.ic_bell, "Wächter: abspielen, sobald es läuft") {
                 WatchService.start(this, query)
@@ -1340,12 +1397,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (stationHits.isNotEmpty()) {
-            rows.add(Row.Header("Sender", "Tippen: Sender hören"))
+            rows.add(Row.Header(if (asGenre != null) "${asGenre.name}-Sender" else "Sender", "Tippen: Sender hören"))
             limited("stations", stationHits, if (searchFilter == 0) 4 else 30) { rows.add(Row.Item(it, stationHits)) }
         }
         }
         if (showSongs) {
-        rows.add(Row.Header("Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
+        rows.add(Row.Header(if (asGenre != null) "Top-Songs ${asGenre.name}" else "Songs", "Tippen: im Radio hören, Vorschau oder Wächter"))
         when {
             songLoading -> rows.add(Row.Empty("Suche…"))
             songHits.isEmpty() -> rows.add(Row.Empty("Keine Songs gefunden."))

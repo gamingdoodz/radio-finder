@@ -48,6 +48,9 @@ jobs:
             exit 1
           fi
 
+      - name: Tests (Suche, Hit-Mix-Regeln, Senderdaten)
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
+
       - name: APK und Store-Paket bauen
         run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
 

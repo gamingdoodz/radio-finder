@@ -98,6 +98,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   radar läuft als root und schreibt `hitradar.json` selbst. Noch offen bis zur Freigabe: KI nur bei Bedarf (`llm-dienst.sh`, macht `ops/run.sh`).
   Danach prüfen, ob `updateErlaubt`/`updateDran` so ankommen, wie `absprache.py` sie liest.
 - Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; Equalizer („Klang“) erledigt; als Nächstes eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
+- Suche/Mix nach Richtung am Handy prüfen (z. B. „Rock“ eingeben, Rock-Mix 30 Min. laufen lassen), Wecker ohne Netz testen.
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
@@ -128,3 +129,8 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: Hit-Mix: kürzere Lücke beim Umschalten. Vorladen nur kurz vor dem geplanten Wechsel (nächster Sender wird ~8 s vorher gewählt, Verbindung mit höchstens 8 KB aufgebaut), Player startet nach 1 s Puffer statt 2,5 s und lädt höchstens 20 s vor (spart Daten beim Umschalten), Sender, die lange zum Starten brauchen, werden gemerkt und seltener gewählt. Echtes Vorpuffern mit zweitem Player bewusst nicht (doppelter Datenverbrauch, Session/Equalizer hängen am Player).
 - 27.11.: Zeitplan-Lauf von „App bauen“ lädt nicht mehr hoch, wenn in den letzten 20 Stunden schon von Hand hochgeladen wurde (höchstens 1 Upload am Tag).
 - 27.11.: Hit-Mix schaltet nicht mehr fälschlich um: Slogan/Sendername als Titel mitten im Lied wird ignoriert, solange die Klang-Erkennung Musik hört; anders geschriebener Titel (Radio Edit, feat.) gilt als dasselbe Lied; Liedende laut Länge und veralteter Server-Stand schalten nicht um, solange noch Musik läuft (höchstens 20 s bzw. 1 Min. länger).
+- 27.11.: Qualitätsrunde Suche/Mix: Suche nach einer Richtung („Rock“, „Rockmusik“, „hard rock“, „80er Hits“) zeigt nur diese Richtung (Mix-Knopf oben, Top-Songs der Richtung, passende Sender, freie Musik per Tag); „Rock DJ“, „Kid Rock“, „Metallica“ bleiben Lied-/Künstlersuche. Gleiches in Android Auto (Suche und „Spiel Rockmusik“). Regeln in `MixLogic.kt`, Tests in `app/src/test` (laufen bei „App bauen“ vor dem Bauen).
+- 27.11.: Hit-Mix spielt keine falsche Musik mehr: Genre-Mixe ohne deutsche Pop-Charts (vorher Pop im Rock-Mix), nie „irgendeine Musik“ bei festen Mixen (Genre, Künstler, Playlist), Sender werden nach Tags geprüft (Hit-Sender mit „pop, rock, hits“ zählt nicht als Rocksender), Lieblingssender halten nur offene Mixe fest, Ersatz ist ein Sender der Richtung statt irgendeines Senders. Kein Umschalten mehr, wenn der Sender seinen Namen als Künstler schickt („ROCK ANTENNE - Wir rocken Bayern“). Lieder werden über ganze Wörter erkannt („Up“ passt nicht mehr zu „Superstar“).
+- 27.11.: Wecker: kommt nach 40 s kein Radio (kein Netz, Sender kaputt), klingelt der Weckton des Handys (höchstens 4 Min., aus beim Stoppen oder sobald Radio spielt).
+- 27.11.: Server `/list?t=tag:…`: ganzes Wort im Tag, DACH zuerst, mit Tags in der Antwort (App sortiert selbst aus). Aktiv nach dem nächsten Neustart über radar-update.sh.
+
