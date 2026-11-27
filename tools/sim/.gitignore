@@ -1,0 +1,5 @@
+src/app/
+build/
+.gradle/
+.kotlin/
+bericht.md
