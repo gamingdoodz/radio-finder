@@ -151,6 +151,13 @@ class PlaybackService : MediaLibraryService() {
     private var nonMusicSeen = false
     private var exo: ExoPlayer? = null
     private var dynamics: DynamicsProcessing? = null
+    private var equalizer: android.media.audiofx.Equalizer? = null
+
+    /** Klang (Equalizer) neu anlegen, z. B. nach Änderung in den Einstellungen. */
+    private fun setupKlang(sessionId: Int) {
+        try { equalizer?.release() } catch (_: Exception) {}
+        equalizer = if (sessionId == C.AUDIO_SESSION_ID_UNSET) null else Klang.create(this, sessionId)
+    }
 
     /** Am Ende des Schlaf-Timers: 60 Sekunden langsam leiser, dann aus. */
     private val sleepRunnable = object : Runnable {
@@ -220,6 +227,7 @@ class PlaybackService : MediaLibraryService() {
 
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "normalize") exo?.let { setupNormalizer(it.audioSessionId) }
+        if (key == "klang") exo?.let { setupKlang(it.audioSessionId) }
     }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> updateFavButton() }
 
@@ -252,6 +260,7 @@ class PlaybackService : MediaLibraryService() {
         exo = player
         Jamendo.highQuality = Settings.highQuality(this)
         setupNormalizer(player.audioSessionId)
+        setupKlang(player.audioSessionId)
         player.addListener(object : Player.Listener {
             private var retries = 0
 
@@ -273,7 +282,10 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
 
-            override fun onAudioSessionIdChanged(audioSessionId: Int) = setupNormalizer(audioSessionId)
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                setupNormalizer(audioSessionId)
+                setupKlang(audioSessionId)
+            }
 
             override fun onEvents(player: Player, events: Player.Events) {
                 // Widget auf dem Startbildschirm aktualisieren
@@ -570,6 +582,7 @@ class PlaybackService : MediaLibraryService() {
         Settings.prefs(this).unregisterOnSharedPreferenceChangeListener(settingsListener)
         sleepHandler.removeCallbacks(fadeInRunnable)
         try { dynamics?.release() } catch (_: Exception) {}
+        try { equalizer?.release() } catch (_: Exception) {}
         session?.run {
             if (player !== localPlayer) localPlayer?.release()
             player.release()

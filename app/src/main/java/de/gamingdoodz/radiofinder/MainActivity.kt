@@ -1593,6 +1593,7 @@ class MainActivity : ComponentActivity() {
             Row.Setting(R.drawable.ic_radio, "Sender aus", "Gegen fremdsprachige Werbung", value = Region.label(this)) { regionSheet() },
             Row.Setting(R.drawable.ic_eq, "Audioqualität", if (q == 3) "Gerade: " + (if (Settings.highQuality(this)) "Hoch (WLAN)" else "Normal (mobil)") else "Für freie Musik",
                 value = listOf("Sparend", "Normal", "Hoch", "Auto")[q.coerceIn(0, 3)]) { qualitySheet() },
+            Row.Setting(R.drawable.ic_eq, "Klang", "Equalizer: Bass, klare Stimmen, Auto", value = Klang.label(this)) { klangSheet() },
             Row.Setting(R.drawable.ic_radio, "Lautstärke angleichen", "Alle Sender gleich laut",
                 toggle = norm, chevron = false) { Settings.setNormalize(this, !norm); render() },
             Row.Setting(R.drawable.ic_radio, "Werbung stumm schalten", "Bekannte Werbung am Senderanfang, mit Countdown",
@@ -1727,6 +1728,17 @@ class MainActivity : ComponentActivity() {
                     Region.load(this)
                     Radar.resetSync()
                     lifecycleScope.launch { Radar.sync(force = true); render() }
+                    render()
+                }
+            })
+    }
+
+    private fun klangSheet() {
+        sheet("Klang", "Gilt für alles, was Hitradar abspielt", null, "", false, null,
+            Klang.options.map { (key, ns) ->
+                val (n, sub) = ns
+                Option(if (key == Settings.klang(this)) R.drawable.ic_play else R.drawable.ic_eq, n, sub) {
+                    Settings.setKlang(this, key)
                     render()
                 }
             })

@@ -97,7 +97,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   radar läuft seit 27.11. 7:43 schon mit dem neuen Stand (vom Spiel neu gestartet; Verteiler, Shoutcast, rechtssicher, Hinweise),
   radar läuft als root und schreibt `hitradar.json` selbst. Noch offen bis zur Freigabe: KI nur bei Bedarf (`llm-dienst.sh`, macht `ops/run.sh`).
   Danach prüfen, ob `updateErlaubt`/`updateDran` so ankommen, wie `absprache.py` sie liest.
-- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; als Nächstes Equalizer, eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
+- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; Equalizer („Klang“) erledigt; als Nächstes eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
@@ -121,3 +121,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: Media3 1.8.0 (Bau grün).
 - 27.11.: Rechtssicher: Server-Mix (/mix) und Weiterleitung (/relay) abgeschaltet, Alexa spielt Sender direkt (nur https), Casten nur https-Sender, Archiv nur CC/gemeinfrei (ohne Great 78), Lizenzliste ergänzt.
 - 27.11.: radar-update erkennt, wenn radar schon anders neu gestartet wurde (kein unnötiger Neustart). Play-Upload vom 26.11. abends erfolgreich.
+- 27.11.: Klang-Voreinstellungen (Equalizer des Handys, `Klang.kt`): Aus, Mehr Bass, Klare Stimmen, Auto, Mehr Höhen.

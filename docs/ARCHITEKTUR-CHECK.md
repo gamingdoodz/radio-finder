@@ -131,7 +131,7 @@ Hintergrund, Android Auto (Listen, Suche, Sprache), Casten, Schlaf-Timer, Wecker
 ### Fehlt für „vollwertig“ (nach Wichtigkeit)
 1. **Eigene Musikdateien** (Ordner, Alben, Künstler, Genres, Suche) – inkl. Android Auto.
 2. **Offline**: nur eigene Dateien, freie Lieder mit Download-Erlaubnis und Podcast-Folgen (Media3 `DownloadManager`). Keine Radiomusik.
-3. **Equalizer** mit Bändern und Voreinstellungen (Technik schon im Code: `DynamicsProcessing`).
+3. ~~Equalizer~~ **umgesetzt 27.11.:** Einstellungen → Wiedergabe → „Klang“ (Aus, Mehr Bass, Klare Stimmen, Auto, Mehr Höhen), über den Equalizer des Handys.
 4. ~~Liedtexte~~: nur mit lizenziertem Anbieter (kostet Geld) – daher nicht.
 5. **Warteschlange bearbeiten** (verschieben, entfernen, „als Nächstes“ für eigene Lieder).
 6. **Übergänge**: lückenlos (Media3 kann das bei Dateien) und optional Überblenden zwischen Liedern.

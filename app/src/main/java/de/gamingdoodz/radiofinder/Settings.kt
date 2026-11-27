@@ -67,6 +67,8 @@ object Settings {
     fun setQuality(context: Context, q: Int) = prefs(context).edit().putInt("quality", q).apply()
 
     /** Lautstärke zwischen Sendern angleichen. */
+    fun klang(context: Context) = prefs(context).getString("klang", "off") ?: "off"
+    fun setKlang(context: Context, v: String) = prefs(context).edit().putString("klang", v).apply()
     fun normalize(context: Context) = prefs(context).getBoolean("normalize", true)
     fun setNormalize(context: Context, on: Boolean) = prefs(context).edit().putBoolean("normalize", on).apply()
 
