@@ -219,4 +219,40 @@ class MixLogicTest {
         assertEquals("wdr 2", MixLogic.stationBaseName("WDR 2"))
         assertFalse(MixLogic.stationBaseName("WDR 2") == MixLogic.stationBaseName("WDR 4"))
     }
+
+    private fun q(s: String) = MixLogic.normalize(s).split(" ").filter { it.isNotBlank() }
+
+    @Test fun sucheGanzeWoerterUndWortanfaenge() {
+        val t = n("Helene Fischer - Atemlos durch die Nacht")
+        assertTrue(MixLogic.searchMatches(t, q("helene fischer")))
+        assertTrue(MixLogic.searchMatches(t, q("helen")))              // beim Tippen
+        assertTrue(MixLogic.searchMatches(t, q("atemlos")))
+        assertTrue(MixLogic.searchMatches(t, q("Fischer atemlos")))   // Reihenfolge egal
+        // Nicht mitten im Wort: "up" ist nicht "superstar", "nacht" nicht "Weihnachten"
+        assertFalse(MixLogic.searchMatches(n("Jessie J - Superstar"), q("up")))
+        assertFalse(MixLogic.searchMatches(n("Wham! - Last Christmas (Weihnachten)"), q("nacht")))
+        // Zusammengeschrieben
+        assertTrue(MixLogic.searchMatches(n("AC/DC - Highway to Hell"), q("acdc")))
+        assertTrue(MixLogic.searchMatches(n("AC/DC - Highway to Hell"), q("ac dc")))
+    }
+
+    @Test fun sucheMitTippfehlern() {
+        val t = n("Helene Fischer - Atemlos durch die Nacht")
+        assertFalse(MixLogic.searchMatches(t, q("helene fisher")))           // genau: nein
+        assertTrue(MixLogic.searchMatches(t, q("helene fisher"), fuzzy = true))
+        assertTrue(MixLogic.searchMatches(t, q("atemlo durch"), fuzzy = true))
+        assertTrue(MixLogic.searchMatches(n("Ed Sheeran - Shape of You"), q("ed sheran"), fuzzy = true))
+        assertTrue(MixLogic.searchMatches(n("Rammstein - Du hast"), q("ramstein"), fuzzy = true))
+        // Kurze Wörter bleiben genau (sonst fände "rock" auch "rick")
+        assertFalse(MixLogic.searchMatches(n("Rick Astley - Never Gonna Give You Up"), q("rock"), fuzzy = true))
+        assertFalse(MixLogic.searchMatches(t, q("adele"), fuzzy = true))
+    }
+
+    @Test fun senderNamen() {
+        assertTrue(MixLogic.stationNameMatches(n("ROCK ANTENNE"), q("rock antenne")))
+        assertTrue(MixLogic.stationNameMatches(n("Rockantenne Heavy Metal"), q("antenne")))
+        assertTrue(MixLogic.stationNameMatches(n("ANTENNE BAYERN"), q("antene bayern"), fuzzy = true))
+        assertTrue(MixLogic.stationNameMatches(n("1LIVE"), q("1live")))
+        assertFalse(MixLogic.stationNameMatches(n("Radio Hamburg"), q("bayern"), fuzzy = true))
+    }
 }

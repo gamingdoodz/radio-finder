@@ -42,7 +42,8 @@ object IcyReader {
             if (metaInt <= 0 || metaInt > 128_000) return null
 
             val input = BufferedInputStream(c.inputStream)
-            for (block in 0 until 2) {
+            // Großer Abstand zwischen den Titeln (viel Musik vorweg): nur einen Block lesen, spart Daten
+            for (block in 0 until if (metaInt > 32_000) 1 else 2) {
                 skipFully(input, metaInt)
                 val len = input.read()
                 if (len < 0) return null

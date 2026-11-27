@@ -688,9 +688,10 @@ class HitMix(
         // Mobil: Statusseiten (fast keine Daten) + jedes Mal ein paar Sender direkt, reihum
         LiveIndex.refresh(stations, maxAgeMs = 15_000L, statusOnly = true)
         // Genre-Sender (z. B. Weihnachtssender) häufiger anschauen
-        val genre = stations.filter { it.id in genreIds }.take(25)
-        if (genre.isNotEmpty()) LiveIndex.refresh(genre, maxAgeMs = 40_000L)
-        val batch = if (Settings.saver(context)) 15 else 30
+        // Ohne Server kostet jede Sender-Abfrage ~16–32 KB: mobil sparsam (vorher bis ~90 MB pro Stunde)
+        val genre = stations.filter { it.id in genreIds }.take(12)
+        if (genre.isNotEmpty()) LiveIndex.refresh(genre, maxAgeMs = 60_000L)
+        val batch = if (Settings.saver(context)) 6 else 12
         if (stations.isNotEmpty()) {
             val from = rotation % stations.size
             val part = (stations.drop(from) + stations.take(from)).take(batch)

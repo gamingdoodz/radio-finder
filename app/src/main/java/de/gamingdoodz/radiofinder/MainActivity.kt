@@ -239,7 +239,7 @@ class MainActivity : ComponentActivity() {
                 clear.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
                 findViewById<View>(R.id.mic).visibility = if (s.isNullOrEmpty()) View.VISIBLE else View.GONE
                 typing.removeCallbacks(typeSearch)
-                if ((s?.trim()?.length ?: 0) >= 3 && input.hasFocus()) typing.postDelayed(typeSearch, 700)
+                if ((s?.trim()?.length ?: 0) >= 3 && input.hasFocus()) typing.postDelayed(typeSearch, 450)
             }
         })
         clear.setOnClickListener { input.setText(""); startSearch() }
@@ -640,6 +640,22 @@ class MainActivity : ComponentActivity() {
 
     private val typing = Handler(Looper.getMainLooper())
     private val typeSearch = Runnable { startSearch(deep = false) }
+
+    /**
+     * Antworten der Suche 10 Minuten merken (höchstens 40): Tippen, Löschen, nochmal dasselbe Wort oder
+     * Zurück zur Suche fragt nicht jedes Mal neu im Netz (schneller, spart Daten). Leere Antworten nicht.
+     */
+    private val searchMemo = object : LinkedHashMap<String, Pair<Long, Any?>>(48, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, Any?>>?) = size > 40
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T> remembered(key: String, ttlMs: Long = 10 * 60_000L, load: suspend () -> T): T {
+        searchMemo[key]?.let { (t, v) -> if (System.currentTimeMillis() - t < ttlMs) return v as T }
+        val v = load()
+        if (v != null && (v as? Collection<*>)?.isEmpty() != true) searchMemo[key] = System.currentTimeMillis() to v
+        return v
+    }
     private var deepSearch = false
 
     /** deep = auch alle Radios durchsuchen (beim Tippen nur die schnellen Teile). */
@@ -677,41 +693,47 @@ class MainActivity : ComponentActivity() {
         scanTotal = 0
         // Musikrichtung statt Lied ("Rock"): eigene Suche nach Richtung
         Genres.fromText(q)?.let { g -> genreSearch(g, myId, deep); return }
-        // Sofort: was die App schon weiß
-        LiveIndex.find(q).forEach { radioHits.add(it.station.toEntry(it.title)) }
         render()
 
         searchJob = lifecycleScope.launch {
+            // Sofort: was die App schon weiß (alle laufenden Titel, im Hintergrund durchsucht – auch mit Tippfehlern)
             launch {
-                val a = Deezer.artist(q)
+                val local = withContext(Dispatchers.Default) { LiveIndex.find(q) }
+                if (myId == searchId) {
+                    local.forEach { n -> if (radioHits.none { it.id == "st:" + n.station.id }) radioHits.add(n.station.toEntry(n.title)) }
+                    render()
+                }
+            }
+            launch {
+                val a = remembered("artist:$q") { Deezer.artist(q) }
                 if (myId == searchId) { artistMix = a; render() }
             }
             launch {
-                val songs = Deezer.search(q)
+                val songs = remembered("songs:$q") { Deezer.search(q) }
                 if (myId == searchId) { songHits = songs; songLoading = false; render() }
             }
             if (deep) launch {
-                val st = Podcasts.search(q, limit = 12)
+                val st = remembered("pod:$q") { Podcasts.search(q, limit = 12) }
                 if (myId == searchId) { storyShows["search"] = st; render() }
             }
             launch {
-                val free = FreeMusic.search(q, quick = !deep)
+                val free = remembered("free:$q:$deep") { FreeMusic.search(q, quick = !deep) }
                 if (myId == searchId) { freeHits = free; freeLoading = false; render() }
             }
             val all = try { StationRepository.scanList(applicationContext) } catch (_: Exception) { emptyList() }
             if (myId != searchId) return@launch
             if (!deep) {
                 val words = Scanner.words(q)
-                stationHits = withContext(Dispatchers.Default) { all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() } }
+                stationHits = withContext(Dispatchers.Default) { Scanner.stationsByName(all, words, 8).map { it.toEntry() } }
                 if (myId != searchId) return@launch
                 render()
-                Radar.stations(q)?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } }
+                remembered("st:$q", 2 * 60_000L) { Radar.stations(q) }?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } }
                 return@launch
             }
             val words = Scanner.words(q)
-            stationHits = withContext(Dispatchers.Default) { all.filter { Scanner.matches(it.name, words) }.take(8).map { it.toEntry() } }
+            stationHits = withContext(Dispatchers.Default) { Scanner.stationsByName(all, words, 8).map { it.toEntry() } }
             if (myId != searchId) return@launch
-            launch { Radar.stations(q)?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } } }
+            launch { remembered("st:$q", 2 * 60_000L) { Radar.stations(q) }?.let { if (myId == searchId && it.isNotEmpty()) { stationHits = it; render() } } }
             val toScan = all.filter { !LiveIndex.isFresh(it) }
             scanTotal = toScan.size
             render()
@@ -732,7 +754,7 @@ class MainActivity : ComponentActivity() {
                 }
             )
             if (myId != searchId) return@launch
-            Scanner.lastHits = result + LiveIndex.find(q).map { Scanner.Hit(it.station, it.title) }
+            Scanner.lastHits = result + withContext(Dispatchers.Default) { LiveIndex.find(q) }.map { Scanner.Hit(it.station, it.title) }
             scanning = false
             render()
         }

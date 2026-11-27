@@ -247,4 +247,61 @@ object MixLogic {
     /** "Radio Paradise Mellow Mix FLAC+meta" und "… 128k AAC" sind derselbe Sender: Name ohne Qualitätsangaben. */
     fun stationBaseName(name: String): String =
         normalize(name).split(" ").filter { it.isNotEmpty() && !quality.matches(it) }.joinToString(" ").ifEmpty { normalize(name) }
+
+    // ---------------- Suche: Treffer finden (auch beim Tippen und mit kleinen Tippfehlern) ----------------
+
+    /** Wie viele Buchstaben dürfen bei einem Suchwort falsch sein? Kurze Wörter genau, ab 5 einer, ab 8 zwei. */
+    fun typoAllowance(word: String) = when { word.length >= 8 -> 2; word.length >= 5 -> 1; else -> 0 }
+
+    /** Unterschied zweier Wörter in Buchstaben (Einfügen, Löschen, Tauschen), höchstens bis max (sonst max + 1). */
+    fun editDistance(a: String, b: String, max: Int): Int {
+        if (kotlin.math.abs(a.length - b.length) > max) return max + 1
+        var prev = IntArray(b.length + 1) { it }
+        var cur = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            cur[0] = i
+            var rowMin = cur[0]
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+                if (cur[j] < rowMin) rowMin = cur[j]
+            }
+            if (rowMin > max) return max + 1
+            val t = prev; prev = cur; cur = t
+        }
+        return prev[b.length]
+    }
+
+    /**
+     * Passt ein Suchwort zu einem Wort im Text? Genau, als Wortanfang (beim Tippen: "helen" findet "Helene"),
+     * zusammengeschrieben ("acdc" = "ac dc") und – nur wenn fuzzy – mit kleinem Tippfehler ("fisher" = "Fischer").
+     * Nie mitten im Wort ("up" findet nicht "superstar").
+     */
+    fun wordMatches(q: String, textWord: String, fuzzy: Boolean): Boolean {
+        if (q == textWord) return true
+        if (q.length >= 3 && textWord.startsWith(q)) return true
+        if (!fuzzy) return false
+        val max = typoAllowance(q)
+        if (max == 0) return false
+        // Auch beim Tippen mit Fehler: Anfang des Textworts vergleichen ("fishe" ~ "fische…")
+        if (textWord.length > q.length + max && editDistance(q, textWord.substring(0, q.length), max) <= max) return true
+        return editDistance(q, textWord, max) <= max
+    }
+
+    /** Alle Suchwörter (normalisiert) kommen im normalisierten Text vor? */
+    fun searchMatches(normalizedText: String, queryWords: List<String>, fuzzy: Boolean = false): Boolean {
+        if (queryWords.isEmpty()) return false
+        val words = normalizedText.split(' ').filter { it.isNotEmpty() }
+        return queryWords.all { q ->
+            words.any { wordMatches(q, it, fuzzy) } ||
+                // zusammengeschrieben: "acdc" passt zu "ac dc", "dietoten" zu "die toten"
+                (q.length >= 4 && words.indices.any { i -> i + 1 < words.size && (words[i] + words[i + 1]).let { it == q || it.startsWith(q) } })
+        }
+    }
+
+    /** Sendername passt? Wie oben, zusätzlich Wortteile ab 4 Buchstaben ("antenne" in "Rockantenne"). */
+    fun stationNameMatches(normalizedName: String, queryWords: List<String>, fuzzy: Boolean = false): Boolean =
+        queryWords.isNotEmpty() && queryWords.all { q ->
+            (q.length >= 4 && normalizedName.contains(q)) || searchMatches(normalizedName, listOf(q), fuzzy)
+        }
 }

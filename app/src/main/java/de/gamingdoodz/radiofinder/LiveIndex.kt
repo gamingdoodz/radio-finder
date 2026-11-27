@@ -208,10 +208,31 @@ object LiveIndex {
             .also { topCache = Cache(g, System.currentTimeMillis(), it) }
     }
 
+    /**
+     * Was läuft gerade passend zur Suche? Ganze Wörter und Wortanfänge; findet das nichts, auch mit kleinen
+     * Tippfehlern. Neueste Lieder zuerst (frisch angefangen = am besten zum Hören).
+     */
     fun find(query: String): List<Now> {
         val words = Scanner.words(query)
         if (words.isEmpty()) return emptyList()
-        return fresh().filter { n -> words.all { n.normalized.contains(it) } }
+        // Schnell über den Wort-Index: jedes Suchwort nur mit den verschiedenen Wörtern vergleichen, nicht mit 8.000 Titeln
+        fun viaIndex(fuzzy: Boolean): List<Now> {
+            if (words.any { it.length < 2 }) return emptyList()
+            val idx = index()
+            var result: Set<Now>? = null
+            for (q in words) {
+                val set = HashSet<Now>()
+                for ((k, l) in idx) if (MixLogic.wordMatches(q, k, fuzzy)) set.addAll(l)
+                result = result?.let { r -> r.filterTo(HashSet()) { it in set } } ?: set
+                if (result.isEmpty()) return emptyList()
+            }
+            return result?.toList().orEmpty()
+        }
+        val hits = viaIndex(false).ifEmpty { viaIndex(true) }.ifEmpty {
+            // Sonderfälle (zusammengeschrieben "acdc", Ein-Buchstaben-Wörter): alle Titel durchgehen
+            fresh().filter { MixLogic.searchMatches(it.normalized, words) }
+        }
+        return hits.sortedByDescending { it.since }
     }
 
     /** Läuft dieser Song (Titel + Künstler) gerade irgendwo? */

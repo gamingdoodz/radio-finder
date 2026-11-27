@@ -39,9 +39,16 @@ object Scanner {
 
     fun words(query: String): List<String> = normalize(query).split(" ").filter { it.isNotBlank() }
 
-    fun matches(text: String, words: List<String>): Boolean {
-        val t = normalize(text)
-        return words.isNotEmpty() && words.all { t.contains(it) }
+    /** Ganze Wörter oder Wortanfänge (nicht mitten im Wort: "up" passt nicht zu "superstar"). */
+    fun matches(text: String, words: List<String>): Boolean = MixLogic.searchMatches(normalize(text), words)
+
+    /** Sender nach Namen: erst genau, findet das nichts, auch mit kleinem Tippfehler ("antene bayern"). */
+    fun stationsByName(all: List<Station>, words: List<String>, n: Int): List<Station> {
+        if (words.isEmpty()) return emptyList()
+        val names = all.map { it to normalize(it.name) }
+        return names.filter { MixLogic.stationNameMatches(it.second, words) }.ifEmpty {
+            names.filter { MixLogic.stationNameMatches(it.second, words, fuzzy = true) }
+        }.take(n).map { it.first }
     }
 
     /** Fragt bei allen Sendern ab, was gerade läuft, und meldet jeden Titel. */

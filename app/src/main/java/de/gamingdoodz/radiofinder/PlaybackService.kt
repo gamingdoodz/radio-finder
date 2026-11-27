@@ -712,8 +712,13 @@ class PlaybackService : MediaLibraryService() {
             val sense = Settings.soundSense(this@PlaybackService)
             val on = id != null && again && Settings.muteAds(this@PlaybackService) && local
             val mixOn = id != null && again && mix && local && sense
+            // Mitten in einem Lied mit genau bekanntem Anfang und Länge muss im Mix niemand zuhören:
+            // Klang-Erkennung erst kurz vor dem Liedende wieder an (spart den größten Teil der Rechenzeit)
+            val e = NowSong.elapsed()
+            val midSong = mixOn && !on && !adMuted && !adTitle && NowSong.known() && NowSong.startLocal &&
+                e in 40_000L..(NowSong.durMs - 30_000L)
             // Klang-Erkennung nur in diesem kurzen Fenster bzw. während des Hit-Mix (spart Akku)
-            SoundSense.active = sense && (on || mixOn)
+            SoundSense.active = sense && (on || mixOn) && !midSong
             if (SoundSense.active && Settings.normalize(this@PlaybackService)) updateGainFromSound()
             if ((!on && !mixOn) || id == null) {
                 // Stummschaltung nicht hängen lassen (Mix beendet, Einstellung ausgeschaltet …)
@@ -1063,7 +1068,7 @@ class PlaybackService : MediaLibraryService() {
         // 2. Ein Sender mit dem Namen (alle ~50.000 auf dem Server)
         Radar.stations(query)?.firstOrNull()?.let { return it.toMediaItem() }
         val stations = StationRepository.load(applicationContext)
-        withContext(Dispatchers.Default) { stations.firstOrNull { Scanner.matches(it.name, words) } }?.let { return it.toEntry().toMediaItem() }
+        withContext(Dispatchers.Default) { Scanner.stationsByName(stations, words, 1).firstOrNull() }?.let { return it.toEntry().toMediaItem() }
         // 3. Ohne Server: selbst kurz suchen
         val hit = if (Radar.ok) null else withTimeoutOrNull(8_000) {
             Scanner.scan(stations, query, stopAfterFirst = true).firstOrNull()
@@ -1473,7 +1478,7 @@ class PlaybackService : MediaLibraryService() {
                 }.forEach { radioHits.add(it.station.toEntry(it.title).toMediaItem()) }
                 val stations = if (Radar.ok) emptyList() else try { StationRepository.load(applicationContext) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
                 val named = (Radar.stations(query)?.take(10)?.map { it.toMediaItem() }
-                    ?: withContext(Dispatchers.Default) { stations.filter { Scanner.matches(it.name, words) }.take(10) }.map { it.toEntry().toMediaItem() })
+                    ?: withContext(Dispatchers.Default) { Scanner.stationsByName(stations, words, 10) }.map { it.toEntry().toMediaItem() })
                 var free: List<MediaItem> = emptyList()
 
                 fun publish() {
