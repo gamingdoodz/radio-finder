@@ -618,7 +618,7 @@ class MainActivity : ComponentActivity() {
         chip.visibility = if (page == null && tab == Tab.HOME && n > 0) View.VISIBLE else View.GONE
         chip.text = "● $n live"
         backCallback.isEnabled = page != null || full.visibility == View.VISIBLE ||
-            (!kids() && (tab != Tab.HOME || query.isNotEmpty()))
+            (!kids() && tab != Tab.HOME)
         pageTitle.text = when (val p = page) {
             is Page.GenrePage -> p.genre.name
             Page.ChartsPage -> "Deutsche Charts"

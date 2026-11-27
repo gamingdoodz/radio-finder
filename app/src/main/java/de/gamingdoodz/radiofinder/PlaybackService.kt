@@ -655,9 +655,9 @@ class PlaybackService : MediaLibraryService() {
         } else if (music) adTitleSince = 0L
         if (music) {
             if (clean != NowSong.title) {
-                // "Erster Titel" nur direkt nach dem Einschalten – nicht das nächste Lied nach einem Jingle
-                // (dessen Anfang haben wir selbst gehört, also sekundengenau)
-                val first = !NowSong.musicSinceTune && NowSong.sinceTune() < 20_000L
+                // "Erster Titel" = erstes Lied seit dem Einschalten (auch nach Vorab-Werbung: dann sind wir mitten im Lied).
+                // Erst ein späterer Wechsel (nach Jingle/Moderation) ist selbst gehört und damit sekundengenau.
+                val first = !NowSong.musicSinceTune
                 NowSong.musicSinceTune = true
                 NowSong.title = clean
                 // Erster Titel nach dem Einschalten: Startzeit vom Server, sonst unbekannt. Wechsel beim Hören: jetzt.
@@ -756,6 +756,7 @@ class PlaybackService : MediaLibraryService() {
         private fun conv(items: List<MediaItem>) = items.mapNotNull { o -> Cast.convert(o)?.also { originals[o.mediaId] = o } }
         /** Gewählter Eintrag nach dem Umwandeln (http-Sender fallen weg, die Position verschiebt sich). -1 = geht nicht. */
         private fun setAt(items: List<MediaItem>, startIndex: Int, pos: Long) {
+            if (items.isEmpty()) { super.setMediaItems(items, 0, C.TIME_UNSET); return }
             val want = items.getOrNull(startIndex)?.mediaId
             val c = conv(items)
             val i = c.indexOfFirst { it.mediaId == want }
@@ -831,12 +832,11 @@ class PlaybackService : MediaLibraryService() {
         }
         val index = old.currentMediaItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
         val live = items.getOrNull(index)?.mediaId?.startsWith("st:") == true
-        // Läuft gerade etwas, das der Lautsprecher nicht kann: auf dem Handy weiterspielen
-        if (toCast && items.isNotEmpty() && Cast.convert(items[index]) == null) {
-            sleepHandler.post {
-                try { android.widget.Toast.makeText(this, "Dieser Sender geht nicht auf dem Lautsprecher – spielt weiter auf dem Handy", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
-            }
-            return
+        // Läuft gerade etwas, das der Lautsprecher nicht kann: Lautsprecher bleibt verbunden, man wählt einen anderen Sender
+        // (im Hit-Mix sucht der Mix selbst einen passenden)
+        val castable = !toCast || items.isEmpty() || Cast.convert(items[index]) != null
+        if (!castable) sleepHandler.post {
+            try { android.widget.Toast.makeText(this, "Dieser Sender geht nicht auf dem Lautsprecher – bitte einen anderen wählen", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
         }
         val pos = old.currentPosition
         // Lautsprecher weg (WLAN aus, Haus verlassen): nicht plötzlich laut aus dem Handy weiterspielen
@@ -847,7 +847,8 @@ class PlaybackService : MediaLibraryService() {
         } catch (_: Exception) { null } else null
         old.stop()
         s.player = target
-        if (items.isNotEmpty()) {
+        if (!castable) { if (hitMix.isActive) scope.launch { hitMix.next() } }
+        else if (items.isNotEmpty()) {
             if (live) target.setMediaItems(items, index, if (toCast) 0L else C.TIME_UNSET) else target.setMediaItems(items, index, pos)
             target.prepare()
             target.playWhenReady = play
@@ -1585,13 +1586,14 @@ class PlaybackService : MediaLibraryService() {
             val hm = mediaItems.firstOrNull { it.mediaId.startsWith("hitmix:") }
             if (hm != null) {
                 // Playlist/Mix lässt sich gerade nicht laden (Netz o. Ä.): trotzdem Musik statt Fehlermeldung
+                var failed = false
                 val first = try { hitMix.start(hm.mediaId.removePrefix("hitmix:").ifBlank { null }) }
-                    catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { failed = true; null }
                 updateFavButton()
                 // Nie leer zurückgeben (Android Auto zeigt sonst "Auswahl konnte nicht geladen werden"):
                 // bis ein passender Hit anfängt, läuft ein Sender mit Musik, der Mix springt dann selbst um
                 // Während des Ladens gestoppt (oder ein anderer Mix gewählt): nichts abspielen – Stopp bleibt Stopp
-                if (first == null && !hitMix.isActive) return MediaSession.MediaItemsWithStartPosition(emptyList(), 0, C.TIME_UNSET)
+                if (first == null && !failed && !hitMix.isActive) return MediaSession.MediaItemsWithStartPosition(emptyList(), 0, C.TIME_UNSET)
                 return MediaSession.MediaItemsWithStartPosition(listOf(first ?: anyMusicStation()), 0, C.TIME_UNSET)
             }
             // Einschlaf-Geschichte selbst nicht zurücksetzen (der Befehl dafür kann kurz vor dieser Stelle ankommen)

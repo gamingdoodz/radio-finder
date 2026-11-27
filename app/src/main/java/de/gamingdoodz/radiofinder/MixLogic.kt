@@ -136,8 +136,9 @@ object MixLogic {
         if (wa == wb) return true
         val common = wa.intersect(wb).size
         if (common < 2) return false
-        // Ein Titel steckt ganz im anderen ("… (feat. Sia)", "Radio Edit"): dasselbe Lied
-        if (common == minOf(wa.size, wb.size)) return true
+        // Ein Titel steckt ganz im anderen ("… feat. Sia", "Live"): dasselbe Lied – aber nur bei genug Wörtern
+        // (nur "Ed Sheeran" ist nicht "Ed Sheeran - Perfect")
+        if (common == minOf(wa.size, wb.size)) return common >= 3 && maxOf(wa.size, wb.size) - common <= 2
         // Beide haben eigene Wörter: fast alles muss gleich sein. Sonst wären zwei Lieder desselben Künstlers
         // mit langem Namen ("Red Hot Chili Peppers - Californication" / "- Otherside") fälschlich gleich.
         return common >= 0.85 * maxOf(wa.size, wb.size)

@@ -199,7 +199,7 @@ object Radar {
         if (!full) known.values.forEach { if (it.seen < t) it.seen = t }
         // Handy-Uhr geht anders als die Server-Uhr: Zeiten des Servers auf die Handy-Uhr umrechnen
         // (sonst wären bei 3 Min. Abweichung alle Lieder "fast vorbei" oder "gerade angefangen")
-        if (t > 0) clockOffset = (System.currentTimeMillis() - t).let { if (kotlin.math.abs(it) < 3_000L) 0L else it }
+        if (t > 0) clockOffset = (System.currentTimeMillis() - t).let { if (kotlin.math.abs(it) < 45_000L) 0L else it }   // kleine Werte = Alter des Server-Stands + Netz, keine falsche Uhr
         val off = clockOffset
         fun since(v: Long) = when { off == 0L -> v; v > 0 -> v + off; v < -1L -> -((-v) + off).coerceAtLeast(2L); else -> v }
         fun seen(v: Long) = if (off != 0L && v > 0) v + off else v

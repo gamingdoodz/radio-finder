@@ -90,7 +90,8 @@ open class RadioWidget : AppWidgetProvider() {
         PlayerControl.run(context, done = { result.finish() }) { c ->
             when (action) {
                 ACTION_PLAY -> when {
-                    c.playWhenReady && c.mediaItemCount > 0 -> c.pause()   // auch beim Verbinden/Puffern stoppbar
+                    c.playWhenReady && c.mediaItemCount > 0 && c.playbackState != androidx.media3.common.Player.STATE_IDLE &&
+                        c.playbackState != androidx.media3.common.Player.STATE_ENDED -> c.pause()   // auch beim Verbinden/Puffern stoppbar
                     c.mediaItemCount > 0 -> { c.prepare(); c.play() }
                     else -> {
                         val last = Recent.all(context).firstOrNull()

@@ -789,7 +789,7 @@ class HitMix(
                 val slow = startDelay(n.station.id).let { d -> if (d > 6_000L) 240_000L else if (d > 3_000L) d * 15 else 0L }
                 Triple(n, key, age + slow + (if (age > 180_000L) 300_000L else 0L) +
                     (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist)
-            }.sortedBy { it.third }.distinctBy { it.first.normalized }.take(limit).map { Choice(it.first, it.second) }
+            }.sortedBy { it.third }.distinctBy { it.second }.take(limit).map { Choice(it.first, it.second) }
     }
 
     // ---------- Wiedergabeliste: "Als Nächstes" zeigen, antippen springt hin ----------

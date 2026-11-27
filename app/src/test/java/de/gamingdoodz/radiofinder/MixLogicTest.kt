@@ -143,6 +143,10 @@ class MixLogicTest {
         // Künstler mit langem Namen: verschiedene Lieder bleiben verschieden
         assertFalse(MixLogic.sameSong(n("Red Hot Chili Peppers - Californication"), n("Red Hot Chili Peppers - Otherside")))
         assertFalse(MixLogic.sameSong(n("Earth, Wind & Fire - September"), n("Earth, Wind & Fire - Boogie Wonderland")))
+        // Sender schickt nur den Künstler: das ist nicht jedes Lied von ihm
+        assertFalse(MixLogic.sameSong(n("Ed Sheeran"), n("Ed Sheeran - Perfect")))
+        // Zusätze bleiben dasselbe Lied
+        assertTrue(MixLogic.sameSong(n("Calvin Harris - Summer"), n("Calvin Harris feat. Someone - Summer")))
     }
 
     @Test fun normalisieren() {
