@@ -135,8 +135,10 @@ object SoundSense : TeeAudioProcessor.AudioBufferSink {
             val speech = (0..3).maxOf { scores[it] }
             val music = maxOf((132..276).maxOf { scores[it] }, (24..31).maxOf { scores[it] })
             val now = when {
-                music >= 0.35f && music > speech -> State.MUSIC
-                speech >= 0.35f && speech >= music -> State.TALK
+                // Musik nur, wenn kaum Sprache dabei ist: Werbung mit Musik-Unterlage zählt nicht als Musik
+                music >= 0.45f && speech < 0.35f -> State.MUSIC
+                // Sprache auch über Musik-Unterlage (typisch Werbung, Moderation über Intro)
+                speech >= 0.45f && speech >= music * 0.7f -> State.TALK
                 else -> State.UNKNOWN
             }
             if (now != state) { state = now; streakSince = lastRun }

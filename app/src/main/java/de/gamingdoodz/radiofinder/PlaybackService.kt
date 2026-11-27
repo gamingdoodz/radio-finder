@@ -393,7 +393,7 @@ class PlaybackService : MediaLibraryService() {
                     hitMix.onJump(mediaItem.mediaId)
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
                 NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
-                adMuted = false; soundMuted = false
+                adMuted = false; soundMuted = false; adTitleSince = 0L
                 SoundSense.reset()
                 if (exo?.volume == 0f) exo?.volume = 1f
                 if (exo?.isPlaying == true) { sleepHandler.removeCallbacks(adMuteCheck); sleepHandler.post(adMuteCheck) }
@@ -461,12 +461,21 @@ class PlaybackService : MediaLibraryService() {
     private var adMuted = false
     /** Stumm, weil die Klang-Erkennung am Senderanfang nur Sprache hört (Werbe-Stream, noch kein Lied). */
     private var soundMuted = false
+    /** Seit wann meldet der Sender mitten im Programm ausdrücklich Werbung im Titel (0 = nicht). */
+    private var adTitleSince = 0L
 
     /** Titel direkt aus dem Stream (genau zum Hören passend, ohne Verzögerung). */
     private fun onStreamTitle(stationId: String, raw: String) {
         val now = System.currentTimeMillis()
         val clean = Text.clean(raw)
         val music = LiveIndex.isMusic(clean) && !Ads.isAd(clean)
+        // Werbeblock mitten im Programm, vom Sender im Titel gemeldet: stumm, bis wieder Musik kommt
+        if (Ads.isAd(clean) && stationId == NowSong.stationId) {
+            if (adTitleSince == 0L) {
+                adTitleSince = now
+                sleepHandler.removeCallbacks(adMuteCheck); sleepHandler.post(adMuteCheck)
+            }
+        } else if (music) adTitleSince = 0L
         if (music) {
             if (clean != NowSong.title) {
                 val first = NowSong.title == null
@@ -498,7 +507,10 @@ class PlaybackService : MediaLibraryService() {
             // Startet wieder beim nächsten Sender bzw. beim Weiterspielen.
             // Im Hit-Mix immer (wie ein Musikplayer: Ansagen und Werbung zwischen den Liedern stumm)
             val mix = hitMix.isActive
-            val again = p.isPlaying && (adMuted || mix || NowSong.sinceTune() < 195_000L)
+            // Gemeldeter Werbeblock höchstens 4 Minuten (falls der Sender danach keinen Liedtitel schickt)
+            if (adTitleSince > 0L && System.currentTimeMillis() - adTitleSince > 240_000L) adTitleSince = 0L
+            val adTitle = adTitleSince > 0L
+            val again = p.isPlaying && (adMuted || mix || adTitle || NowSong.sinceTune() < 195_000L)
             if (again) sleepHandler.postDelayed(this, 1_000)
             val id = NowSong.stationId
             val local = session?.player === localPlayer
@@ -526,7 +538,7 @@ class PlaybackService : MediaLibraryService() {
             if (music || since > 120_000L) soundMuted = false
             // Bekannte Werbung: ihre Dauer lang stumm (auch wenn der Sender schon den Liedtitel schickt),
             // ohne Titel bis zu 10 s länger, falls der Spot länger dauert
-            val shouldMute = talkMute || !music && (soundMuted || known > 0 && (since < known || (NowSong.title == null && since < known + 10_000)))
+            val shouldMute = talkMute || !music && (adTitle || soundMuted || known > 0 && (since < known || (NowSong.title == null && since < known + 10_000)))
             if (shouldMute && !adMuted) { adMuted = true; p.volume = 0f }
             else if (!shouldMute && adMuted) { adMuted = false; p.volume = 1f }
         }
