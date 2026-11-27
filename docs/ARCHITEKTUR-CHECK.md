@@ -33,7 +33,7 @@ Nutzen und Aufwand: ★ = wenig, ★★★ = viel.
 | 1 | **Server-Adresse nicht mehr fest einbauen**: kleine Datei `config.json` über GitHub Pages / raw.githubusercontent (kostenlos, weltweit gecacht). App liest sie einmal am Tag, fällt auf eingebaute Adressen zurück. | ★★★ | ★ | – |
 | 2 | **HTTP-Zwischenspeicher in der App** (`HttpResponseCache.install`) + **`Cache-Control`-Header** am Server für `/charts`, `/popular`, `/rising`, `/ads`, `/list`, `/cover`. Gleiche Anfrage wird dann gar nicht erst gestellt. | ★★ | ★ | ⬇⬇ |
 | 3 | **Eigene Musik vom Handy abspielen** (MediaStore, Ordner, Alben, Künstler). Das ist der größte Unterschied zu einem „vollwertigen Musikspieler“. Kostet null Server. | ★★★ | ★★ | – |
-| 4 | **Liedtexte über LRCLIB** (kostenlos, ohne Schlüssel, auch zeitgenau mitlaufend). Direkt aus der App, nicht über den Server. | ★★ | ★ | – |
+| 4 | ~~Liedtexte über LRCLIB~~ **gestrichen** (Liedtexte sind geschützt, LRCLIB hat keine Lizenz der Verlage, siehe Abschnitt 11). | – | – | – |
 | 5 | **Echter Equalizer** (Android `Equalizer`/`DynamicsProcessing` ist schon im Code für Lautstärke-Ausgleich). Bänder + Voreinstellungen (Bass, Auto, Sprache). | ★★ | ★ | – |
 | 6 | **Fallback-Server aktivieren**: Der Workflow „Server zu Hugging Face“ ist schon da (kostenloser Space), nur nicht eingeschaltet. Als zweite Adresse in `config.json`. | ★★ | ★ | verteilt |
 | 7 | **Statt Play-Test (12 Tester) zusätzlich IzzyOnDroid + Obtainium** anbieten: kostenlos, keine Tester nötig, Updates direkt aus den GitHub-Releases. | ★★★ | ★ | – |
@@ -42,7 +42,7 @@ Nutzen und Aufwand: ★ = wenig, ★★★ = viel.
 | 10 | **Abhängigkeiten aktualisieren** (Media3 1.5.1 → aktuell, Kotlin 2.0 → 2.2, AGP). Neue Media3-Versionen haben bessere Android-Auto- und Akkuwerte. | ★★ | ★ | – |
 | 11 | **MainActivity aufteilen** (je Bildschirm eine Datei + ViewModel). Nicht neu schreiben, Stück für Stück. | ★★ | ★★ | – |
 | 12 | **Automatische Tests** für reine Logik (Hit-Mix-Auswahl, Titel säubern, `normalize`, Abgleich `/sync`) im Workflow. Kostenlos, fängt Fehler vor dem Upload. | ★★ | ★★ | – |
-| 13 | **Offline-Lieder** (freie Musik von Jamendo/Archive mit Media3 `DownloadManager` speichern). | ★★ | ★★ | – |
+| 13 | **Offline-Lieder** nur für eigene Dateien und freie Musik mit Download-Erlaubnis (Jamendo `audiodownload_allowed`, CC-/gemeinfreie Archiv-Aufnahmen). **Nie Radiomusik.** | ★★ | ★★ | – |
 | 14 | **Wächter per Push statt Abfragen** (Server kennt eh alle Titel und meldet sich über Firebase Cloud Messaging, kostenlos). Spart Akku, Handy muss nicht jede Minute fragen. | ★★ | ★★★ | ⬆ wenig |
 
 Schon umgesetzt in diesem Check: siehe Abschnitt 9.
@@ -95,7 +95,7 @@ Schon umgesetzt in diesem Check: siehe Abschnitt 9.
 | **Nach Bedarf abfragen**: Sender, die nie gefunden/gehört werden und keine Musik spielen (Wort, Nachrichten), nur noch selten prüfen; beliebte/gesuchte Sender öfter. | mittel | ★ |
 | **`Cache-Control` + ETag** an den Antworten; App mit HTTP-Cache (Empfehlung 2). Charts/Beliebt/Werbelängen ändern sich selten. | mittel | ★ |
 | **Fertige Dateien statt Python**: Snapshot (`/sync` voll, `/charts`, `/popular`) als vorgepackte Datei schreiben und von Caddy direkt ausliefern lassen. Python rechnet nur noch alle 15 s einmal. | mittel | ★★ |
-| **Weiterleitung fürs Casten** (`/relay`, `/mix`) ist der einzige Teil mit Dauer-Datenverkehr. Begrenzen ist schon da (8 TB). Zusätzlich: nur wenn wirklich nötig (Sender ohne https), Höchstzahl je Gerät. | klein–mittel | ★ |
+| ~~Weiterleitung fürs Casten~~ (`/relay`, `/mix`): **abgeschaltet** aus rechtlichen Gründen (Abschnitt 11). Spart nebenbei den einzigen Dauer-Datenverkehr. | erledigt | – |
 | **Meldungen bündeln** (`/event`, `/ad`) statt jede einzeln. | klein | ★ |
 | **KI**: Regeln zuerst ist schon so. Häufige Wünsche dauerhaft speichern (Cache übersteht Neustart), dann startet die KI noch seltener. | klein | ★ |
 | **Server-Code aufteilen** (`radar.py` 1.750 Zeilen: Abfrage, Diff, Alexa, Relay, KI in eigene Dateien). Kein Leistungsgewinn, aber sicherere Updates. | Wartung | ★★ |
@@ -117,7 +117,7 @@ Schon umgesetzt in diesem Check: siehe Abschnitt 9.
 | Jamendo | Freie Lieder | 🟢 frei (nicht-kommerziell). Eine Client-ID für alle Nutzer → bei vielen Nutzern Tageslimit möglich; Ergebnisse in der App länger zwischenspeichern. |
 | Audius, Internet Archive | Freie Lieder | 🟢 frei. |
 | iTunes-Suche | Podcasts finden | 🟡 geht, aber Apple. Freie Alternativen: **Podcast Index** (kostenloser Schlüssel) oder **fyyd** (deutsch, ohne Schlüssel). |
-| **Neu: LRCLIB** | Liedtexte (zeitgenau) | 🟢 frei, ohne Schlüssel. |
+| ~~LRCLIB~~ | Liedtexte | 🔴 nicht nutzen: Texte ohne Verlagslizenz (Abschnitt 11). |
 | **Neu: ListenBrainz/Last.fm** | „Gehörtes“ teilen (Scrobbeln), Empfehlungen | 🟡 freiwillig, kostenlos. |
 | **Neu: eigene Dateien** (MediaStore) | Vollwertiger Player | 🟢 kein Server, kein Netz. |
 
@@ -130,13 +130,13 @@ Hintergrund, Android Auto (Listen, Suche, Sprache), Casten, Schlaf-Timer, Wecker
 
 ### Fehlt für „vollwertig“ (nach Wichtigkeit)
 1. **Eigene Musikdateien** (Ordner, Alben, Künstler, Genres, Suche) – inkl. Android Auto.
-2. **Offline**: freie Lieder/Podcast-Folgen herunterladen (Media3 `DownloadManager`).
+2. **Offline**: nur eigene Dateien, freie Lieder mit Download-Erlaubnis und Podcast-Folgen (Media3 `DownloadManager`). Keine Radiomusik.
 3. **Equalizer** mit Bändern und Voreinstellungen (Technik schon im Code: `DynamicsProcessing`).
-4. **Liedtexte** (LRCLIB), mitlaufend im Player und optional in Android Auto als Untertitel.
+4. ~~Liedtexte~~: nur mit lizenziertem Anbieter (kostet Geld) – daher nicht.
 5. **Warteschlange bearbeiten** (verschieben, entfernen, „als Nächstes“ für eigene Lieder).
 6. **Übergänge**: lückenlos (Media3 kann das bei Dateien) und optional Überblenden zwischen Liedern.
 7. **Wiedergabe-Tempo** für Podcasts/Hörbücher (0,8–2×), Kapitel, „Folge gehört“-Merker, Position je Folge.
-8. **Sender aufnehmen / Zeitversatz** (kurz zurückspulen im Radio) – Media3 kann begrenzten Puffer halten.
+8. ~~Sender aufnehmen~~: **nicht** einbauen (Mitschneiden von Radiomusik in einer App ist rechtlich heikel). Höchstens kurzer Puffer im Arbeitsspeicher zum Zurückspulen.
 9. **Lautstärke-Normalisierung je Lied** (ReplayGain-Tags bei eigenen Dateien).
 10. **Wear OS / Uhr-Steuerung** kommt über Media3 automatisch; prüfen, ob es schön aussieht.
 
@@ -207,7 +207,55 @@ und Stück für Stück, damit Android Auto und Hit-Mix stabil bleiben. Server-Ä
 ## 10. Vorschlag Reihenfolge
 
 1. Woche: Empfehlung 1, 2, 8, 10 (klein, schützen vor Ausfall).
-2. Woche: Liedtexte, Equalizer, IzzyOnDroid/Obtainium.
+2. Woche: Equalizer, IzzyOnDroid/Obtainium.
 3. danach: eigene Musikdateien + Offline (größter Funktionsgewinn).
 4. nebenbei: Shoutcast-Statusseiten und Bedarfs-Abfrage am Server (Serverlast runter).
 5. laufend: MainActivity stückweise aufteilen, Tests ergänzen.
+
+---
+
+## 11. Rechtssicherheit (Prüfung 27.11.)
+
+Vorgabe von Kevin: alles lizenzfrei bzw. rechtlich sauber, niemand soll wegen „Musik-Klau“ klagen können.
+Das hier ist eine technische Einschätzung, keine Rechtsberatung. Bei echten Zweifeln: kurze Beratung, z. B. bei der
+Verbraucherzentrale oder einem Anwalt für Urheberrecht (Erstberatung oft günstig).
+
+### Grundsatz, nach dem die App jetzt gebaut ist
+- **Radio wird nur empfangen, nie kopiert.** Die App spielt jeden Sender direkt von dessen eigenem Server ab, wie ein
+  Internetradio. Hitradar speichert keine Radiomusik, schneidet nichts zusammen und sendet nichts weiter.
+- **Hitradar speichert nur Fakten**: Titel/Künstler, die gerade laufen, Uhrzeiten, Zählungen. Das ist nicht geschützt.
+- **Musik zum Abspielen auf Abruf** nur aus Quellen mit Erlaubnis: freie Lizenzen (Creative Commons, gemeinfrei),
+  offizielle Schnittstellen der Anbieter (Jamendo, Audius, Deezer-Vorschau) und Podcasts aus ihren öffentlichen Feeds.
+
+### Geändert (riskant → entfernt)
+| Was | Warum riskant | Änderung |
+|---|---|---|
+| Server-Mix `/mix` (für Alexa) | Server schnitt Lieder verschiedener Sender zu einem neuen Dauer-Stream zusammen = eigenes „Programm“ aus fremder Musik, ohne Lizenz (GEMA/GVL). | **Abgeschaltet.** Alexa spielt jetzt den Sender direkt (nur https-Sender). „Weiter“ wählt einen anderen Sender, wie Umschalten. |
+| Weiterleitung `/relay` (Casten) | Server reichte Radio-Streams durch = Weitersenden über eigenen Server. | **Abgeschaltet.** Casten nur noch bei Sendern mit https (direkt vom Sender), Hit-Mix wählt beim Casten nur solche Sender. |
+| Internet Archive (freie Musik) | Im Archiv liegen auch hochgeladene Lieder ohne Erlaubnis und die „Great 78“-Sammlung (wegen der haben große Plattenfirmen das Archiv verklagt). | **Nur noch Einträge mit Creative-Commons- oder Gemeinfrei-Lizenz**, „Great 78“ (`georgeblood`) ausgeschlossen. LibriVox-Hörbücher sind gemeinfrei und bleiben. |
+| Liedtexte (geplant) | Liedtexte sind urheberrechtlich geschützt; freie Seiten wie LRCLIB haben keine Verlagslizenz. | **Gestrichen.** Nur mit lizenziertem Anbieter (kostenpflichtig). |
+| Sender aufnehmen / offline (geplant) | Mitschnitt von Radiomusik als App-Funktion ist heikel. | **Gestrichen.** Offline nur eigene Dateien und freie Musik mit Download-Erlaubnis. |
+| Lizenz-Hinweise | Apache-2.0-Bibliotheken verlangen einen Hinweis. | Liste in „Open-Source-Lizenzen“ vervollständigt (MediaRouter, Palette, SwipeRefresh, Play-Dienste). |
+
+### Geprüft, in Ordnung (mit Bedingungen)
+| Teil | Einschätzung |
+|---|---|
+| Radiosender abspielen (direkt) | 🟢 Wie jedes Internetradio-Verzeichnis. Die Sender zahlen ihre Lizenzen selbst. |
+| Hit-Mix in der App | 🟢 Die App schaltet nur zwischen Live-Sendern um (wie Zappen). Nichts wird gespeichert oder verändert. |
+| Werbung stumm schalten | 🟢 Werbeblocker sind in Deutschland erlaubt (BGH, Adblock-Urteile). Es wird nur leiser gestellt, nichts entfernt. |
+| Jamendo | 🟢 Creative-Commons-Musik über die offizielle API, nicht-kommerziell erlaubt (Hitradar ist kostenlos, ohne Werbung). Künstlername anzeigen. |
+| Audius | 🟢 Künstler laden selbst hoch, Abspielen über die offizielle API ist erlaubt. Bei Beschwerden löscht Audius. |
+| Deezer (Charts, Cover, 30-s-Vorschau) | 🟡 Über die öffentliche API erlaubt, Bedingungen: nicht-kommerziell, Deezer als Quelle nennen, Vorschau nicht speichern. Wird so gemacht. Falls Deezer die API sperrt: Cover über MusicBrainz/Cover Art Archive. |
+| Podcasts, LibriVox | 🟢 Öffentliche Feeds bzw. gemeinfrei. |
+| Senderlogos, Sendernamen | 🟢 Aus radio-browser.info, nur zur Erkennung. Auf Wunsch eines Senders entfernen (Sperrliste `blocklist.txt` gibt es schon). |
+| Charts/„Beliebt“/„Mehr wie dieses“ | 🟢 Nur Zählungen und Titel = Fakten. |
+| KI „Wünsch dir was“ | 🟢 Qwen2.5-1.5B unter Apache 2.0, läuft auf dem eigenen Server. |
+| Bibliotheken | 🟢 Alle Apache 2.0 (AndroidX, Media3, Kotlin, Coil, Guava, aiohttp); Play-Dienste unter Googles SDK-Lizenz. |
+
+### Noch offen / Entscheidung
+- **Ausländische Sender**: Gegen TuneIn haben Plattenfirmen in Großbritannien gewonnen, weil TuneIn Sender verlinkt hat,
+  die nur für ihr eigenes Land lizenziert waren. Danach hat TuneIn solche Sender auch in Deutschland gesperrt.
+  Hitradar zeigt standardmäßig weltweit ~50.000 Sender. Sicherer: Standard auf deutschsprachige Sender (DACH) und Weltweit
+  nur, wenn man es selbst einstellt. Diese Entscheidung trifft Kevin.
+- **Name „Hitradar“** vor einer größeren Veröffentlichung einmal im Markenregister (DPMA, kostenlos online) prüfen.
+- **Impressum/Kontakt**: Für Apps im Play Store ist eine Kontaktadresse Pflicht; bei Beschwerden schnell reagieren (Sender sperren, Eintrag löschen).

@@ -16,6 +16,8 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
 ## Regeln (immer)
 
+- **Rechtssicher (Kevin, 27.11.):** Radio nur direkt vom Sender abspielen, nie speichern, zusammenschneiden oder über den Server weiterleiten. Musik auf Abruf nur mit freier Lizenz/offizieller API. Keine Liedtexte ohne Lizenz. Details: `docs/ARCHITEKTUR-CHECK.md` Abschnitt 11.
+
 - Antworten auf Deutsch, kurz und knackig. Kevin ist Elektriker, hat keinen PC, arbeitet nur mit dem Handy (Galaxy S25 Ultra).
 - Commits immer als `user.name "gamingdoodz"`, `user.email "gamingdoodz@users.noreply.github.com"`. Keine Mitautor- oder Sitzungs-Zeilen in Commit-Texten (Workflow „Prüfregel Commit-Texte“ wird sonst rot).
 - Nirgends erwähnen, womit die App gebaut wurde (nicht in App, Code oder Commit-Texten). Entwickler ist „gamingdoodz“.
@@ -96,7 +98,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   vorgemerkt und wird ohne Freigabe nicht gemacht. Danach prüfen, ob der Neustart von selbst durchläuft (`/health` zeigt `hinweise`).
 - Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
   Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
-- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; als Nächstes Liedtexte (LRCLIB), Equalizer, eigene Musik vom Handy.
+- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; als Nächstes Equalizer, eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
@@ -118,3 +120,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: Server-Adressen aus `config/servers.json` (App liest täglich, eingebaute als Rückfall). Zwischenspeicher für seltene Server-Antworten auf dem Handy. Kein Signier-Schlüssel mehr im Repo, Release nur mit Upload-Secret.
 - 27.11.: Server: Shoutcast-2-Statusseite (`/statistics?json=1`) vor dem Anzapfen des Streams (weniger Daten/CPU). Wird erst nach Neustart über radar-update.sh aktiv.
 - 27.11.: Media3 1.8.0 (Bau grün).
+- 27.11.: Rechtssicher: Server-Mix (/mix) und Weiterleitung (/relay) abgeschaltet, Alexa spielt Sender direkt (nur https), Casten nur https-Sender, Archiv nur CC/gemeinfrei (ohne Great 78), Lizenzliste ergänzt.

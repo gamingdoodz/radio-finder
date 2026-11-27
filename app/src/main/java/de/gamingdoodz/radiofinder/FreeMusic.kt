@@ -68,7 +68,10 @@ object Archive {
         }
 
     private fun searchDocs(q: String, rows: Int, popular: Boolean): List<Doc> {
-        val query = enc("($q) AND mediatype:(audio) AND NOT collection:(podcasts)")
+        // Nur Aufnahmen mit freier Lizenz (Creative Commons oder gemeinfrei): im Archiv liegen auch hochgeladene
+        // Lieder ohne Erlaubnis und die umstrittene "Great 78"-Sammlung, die bleiben draußen.
+        val query = enc("($q) AND mediatype:(audio) AND NOT collection:(podcasts) AND NOT collection:(georgeblood) " +
+            "AND (licenseurl:*creativecommons.org* OR licenseurl:*publicdomain*)")
         val sort = if (popular) "&sort%5B%5D=downloads+desc" else ""
         val text = Net.get(
             "https://archive.org/advancedsearch.php?q=$query&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator$sort&rows=$rows&page=1&output=json"

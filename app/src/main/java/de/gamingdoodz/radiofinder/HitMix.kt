@@ -536,7 +536,9 @@ class HitMix(
         // Sender, bei denen beim Umschalten Werbung kommt, nur nehmen, wenn es gar nicht anders geht
         fun noAds(l: List<Pair<LiveIndex.Now, String>>) = l.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
         val tiers = listOf(fromPrimary, fromList, fromGenre, fromArtist, fromAny)
-        val list = (tiers.map { noAds(it) } + tiers).firstOrNull { it.isNotEmpty() } ?: return emptyList()
+        // Beim Casten nur Sender mit https (andere lassen sich nicht casten, Weiterleiten über den Server gibt es nicht)
+        fun castable(l: List<Pair<LiveIndex.Now, String>>) = if (Cast.active) l.filter { (n, _) -> Cast.isHttps(n.station.url) } else l
+        val list = (tiers.map { castable(noAds(it)) } + tiers.map { castable(it) }).firstOrNull { it.isNotEmpty() } ?: return emptyList()
         return list.sortedBy { (n, key) ->
                 // Bekannte Lieder deutlich bevorzugen: läuft auf vielen Sendern, oft gespielt heute, weit oben in der Liste
                 val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 60_000L
@@ -545,9 +547,7 @@ class HitMix(
                 val knownArtist = if (artistWords.any { w -> w.all { n.normalized.contains(it) } }) 90_000L else 0L
                 // Frisch angefangen zählt; fast vorbei (über 3 Min.) und Sender mit Vorab-Werbung rutschen nach hinten
                 val age = t - n.since
-                // Beim Casten: Sender mit https direkt nehmen, spart die Weiterleitung über den Server
-                val relay = if (Cast.active && !Cast.isHttps(n.station.url)) 45_000L else 0L
-                age + relay + (if (age > 180_000L) 300_000L else 0L) +
+                age + (if (age > 180_000L) 300_000L else 0L) +
                     (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist
             }.distinctBy { it.second }.take(limit).map { Choice(it.first, it.second) }
     }

@@ -1685,7 +1685,9 @@ class MainActivity : ComponentActivity() {
                             "• AndroidX Core, Activity, Lifecycle, RecyclerView – © The Android Open Source Project\n" +
                             "• Kotlin & Kotlin Coroutines – © JetBrains s.r.o.\n" +
                             "• Coil – © Coil Contributors\n" +
-                            "• Guava – © The Guava Authors"
+                            "• Guava – © The Guava Authors\n" +
+                            "• AndroidX MediaRouter, Palette, SwipeRefreshLayout – © The Android Open Source Project\n\n" +
+                            "Casten nutzt die Google Play-Dienste (Android Software Development Kit License)."
                     )
                     .setPositiveButton("OK", null)
                     .show()

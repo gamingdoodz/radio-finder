@@ -27,14 +27,17 @@ object Cast {
     @Volatile var active = false
     @Volatile var deviceName: String? = null
 
-    /** Gerät spielt nur verschlüsselte Streams: Sender ohne https laufen über den Hitradar-Server. */
+    /**
+     * Gerät spielt nur verschlüsselte Streams. Sender ohne https lassen sich nicht casten:
+     * Hitradar leitet keine Radiomusik über den eigenen Server weiter (rechtlich ein Weitersenden).
+     */
     fun convert(item: MediaItem): MediaItem? {
         val uri = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri ?: return null
         val url = uri.toString()
         val station = item.mediaId.startsWith("st:")
         val target = when {
             url.startsWith("https://") -> url
-            station -> Radar.relayUrl(item.mediaId.removePrefix("st:")) ?: return null
+            station -> return null
             else -> url.replaceFirst("http://", "https://")   // freie Musik/Podcasts bieten fast immer auch https
         }
         val mime = when {

@@ -1521,7 +1521,8 @@ def alexa_pick(query: str = "", genre: str = "", exclude: str = ""):
     for sid, n in fresh():
         st = m.get(sid)
         # Gewünschtes Lied: auch nehmen, wenn der Anfang unbekannt ist; sonst nur frische Lieder
-        if not st or sid == exclude or not is_song(n["title"]) or TALK.search(n["title"]) or \
+        # Alexa spielt nur https-Adressen; der Sender wird direkt abgespielt (keine Weiterleitung über den Server)
+        if not st or sid == exclude or not st["url"].startswith("https://") or not is_song(n["title"]) or TALK.search(n["title"]) or \
                 (ending_soon(n, t) and (n.get("exact") or not words)):
             continue
         if words:
@@ -1538,9 +1539,9 @@ def alexa_pick(query: str = "", genre: str = "", exclude: str = ""):
 
 
 def alexa_play(st, n, token: str, speech: str = ""):
-    # Durchgehender Mix: nach dem Lied geht es automatisch mit dem nächsten passenden Hit weiter
-    kind, genre = (token.split("|") + ["", ""])[:2]
-    url = f"{PUBLIC}/mix?g={genre if kind == 'mix' else ''}&first={st['id']}&r={int(time.time())}"
+    # Rechtssicher: Alexa spielt den Sender direkt von dessen Server. Hitradar schneidet nichts zusammen
+    # und leitet keine Musik weiter ("Weiter" wählt einen anderen Sender, wie Umschalten am Radio).
+    url = st["url"]
     out = {"version": "1.0", "response": {"shouldEndSession": True, "directives": [{
         "type": "AudioPlayer.Play", "playBehavior": "REPLACE_ALL",
         "audioItem": {"stream": {"url": url, "token": token, "offsetInMilliseconds": 0},
@@ -1567,8 +1568,6 @@ async def h_alexa(req):
     r = data.get("request", {})
     typ = r.get("type", "")
     token = (data.get("context", {}).get("AudioPlayer", {}) or {}).get("token", "") or r.get("token", "")
-    if not relay_ok():
-        return web.json_response(alexa_say("Hit Radar macht gerade eine Pause. Bitte versuch es später nochmal."))
 
     def mix(genre="", exclude="", speech=True):
         hit = alexa_pick(genre=genre, exclude=exclude) or alexa_pick(exclude=exclude)
@@ -1766,6 +1765,10 @@ async def h_sync(req):
     return web.Response(body=gzip.decompress(body), content_type="application/json")
 
 
+async def h_gone(_):
+    return web.Response(status=410, text="Abgeschaltet")
+
+
 async def main():
     app = web.Application()
     app.add_routes([web.get("/health", h_health), web.get("/search", h_search), web.get("/now", h_now),
@@ -1774,8 +1777,9 @@ async def main():
                     web.get("/ad", h_ad), web.get("/ads", h_ads), web.get("/stations", h_stations),
                     web.get("/cover", h_cover), web.get("/verify", h_verify), web.get("/list", h_list),
                     web.get("/event", h_event), web.get("/popular", h_popular),
-                    web.get("/relay", h_relay), web.post("/alexa", h_alexa),
-                    web.get("/rising", h_rising), web.get("/mix", h_mix)])
+                    # /relay und /mix abgeschaltet (Weitersenden bzw. Zusammenschneiden von Radiomusik ist ohne Lizenz nicht erlaubt)
+                    web.get("/relay", h_gone), web.post("/alexa", h_alexa),
+                    web.get("/rising", h_rising), web.get("/mix", h_gone)])
     runner = web.AppRunner(app, access_log=None)  # keine Such-/IP-Protokolle speichern
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
