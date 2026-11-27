@@ -446,7 +446,7 @@ class HitMix(
                 NowSong.title?.let { Scanner.normalize(it) } == switchedTitle
             if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(force = broken); continue }
             // Klang-Erkennung hört Moderation/Werbung zwischen den Liedern (ist schon stumm): gleich zum nächsten Hit
-            if (muteForTalk() && SoundSense.talkFor(3_000)) { switchNow(); continue }
+            if (muteForTalk() && SoundSense.talkFor(4_000)) { switchNow(); continue }
             // Liedende sekundengenau bekannt: kurz vor Schluss umschalten, bevor die Moderation anfängt
             planEndSwitch(myGen)
             if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
@@ -534,9 +534,11 @@ class HitMix(
      * (oder das Lied ist laut Länge vorbei). Mitten in einem Lied (Rap, gesprochene Stelle, Intro) nie.
      */
     fun muteForTalk(): Boolean {
-        if (job?.isActive != true || !SoundSense.talkFor(1_500)) return false
+        if (job?.isActive != true || !SoundSense.talkFor(2_000)) return false
         if (NowSong.stationId != currentStationId) return false
-        if (NowSong.title == null) return true
+        // Kein Lied gemeldet: nur, wenn der Sender überhaupt Titel schickt und zuletzt "kein Lied" gemeldet hat
+        // (Moderation/Jingle). Sender ohne Titel: Gesang und Sprache sind dort nicht sicher zu trennen, lieber nichts tun.
+        if (NowSong.title == null) return NowSong.localAt > 0
         return NowSong.known() && NowSong.elapsed() > NowSong.durMs - 15_000L
     }
 
