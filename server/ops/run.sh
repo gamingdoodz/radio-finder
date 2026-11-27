@@ -1,5 +1,5 @@
 #!/bin/bash
-# Morgen-Check 27.11.: Freigabe, Meldung, Hinweise, KI-Umstellung
+# Check 27.11. abends: Freigabe, KI-Umstellung, Hinweise, Liedanfang
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null && $AB bereit; then
