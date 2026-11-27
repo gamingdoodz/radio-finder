@@ -255,4 +255,10 @@ class MixLogicTest {
         assertTrue(MixLogic.stationNameMatches(n("1LIVE"), q("1live")))
         assertFalse(MixLogic.stationNameMatches(n("Radio Hamburg"), q("bayern"), fuzzy = true))
     }
+
+    @Test fun median() {
+        assertEquals(0L, MixLogic.median(emptyList()))
+        assertEquals(5L, MixLogic.median(listOf(9L, 1L, 5L)))
+        assertEquals(4L, MixLogic.median(listOf(2L, 6L, 3L, 5L)))
+    }
 }

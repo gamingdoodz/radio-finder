@@ -304,4 +304,11 @@ object MixLogic {
         queryWords.isNotEmpty() && queryWords.all { q ->
             (q.length >= 4 && normalizedName.contains(q)) || searchMatches(normalizedName, listOf(q), fuzzy)
         }
+
+    /** Mittlerer Wert (Ausreißer zählen nicht so stark wie beim Durchschnitt). */
+    fun median(values: List<Long>): Long {
+        if (values.isEmpty()) return 0L
+        val v = values.sorted()
+        return if (v.size % 2 == 1) v[v.size / 2] else (v[v.size / 2 - 1] + v[v.size / 2]) / 2
+    }
 }

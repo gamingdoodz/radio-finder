@@ -48,7 +48,21 @@ class HitMix(
     private var songStartedAt = 0L
     /** Zuletzt gespielte Lieder (unveränderliche Liste: wird aus mehreren Threads gelesen). */
     @Volatile private var played: List<String> = emptyList()
-    private fun addPlayed(key: String) { played = (played + key).takeLast(25) }
+    private fun addPlayed(key: String) { played = (played - key + key).takeLast(60) }
+
+    /**
+     * Wirklich etwas Neues? Nie derselbe Sender (auch nicht in anderer Qualität, "1LIVE" / "1LIVE AAC") und nie
+     * das Lied, das gerade lief (auch anders geschrieben). Die letzten Lieder auch dann nicht, wenn Wiederholungen
+     * ausnahmsweise erlaubt sind (sonst kam beim Weiterschalten oft dasselbe Lied wieder).
+     */
+    private fun isNew(n: LiveIndex.Now, allowRepeats: Boolean): Boolean {
+        if (n.station.id == currentStationId) return false
+        val cur = currentStation
+        if (cur != null && MixLogic.stationBaseName(cur.name) == MixLogic.stationBaseName(n.station.name)) return false
+        switchedTitle?.let { if (MixLogic.sameSong(n.normalized, it)) return false }
+        val recent = if (allowRepeats) played.takeLast(8) else played
+        return recent.none { it == n.normalized || MixLogic.sameSong(n.normalized, it) }
+    }
 
     val isActive get() = job?.isActive == true
 
@@ -493,7 +507,7 @@ class HitMix(
                 (!stillMusic() || NowSong.elapsed() > NowSong.durMs + 60_000L)
             if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(force = broken); continue }
             // Klang-Erkennung hört Moderation/Werbung zwischen den Liedern (ist schon stumm): gleich zum nächsten Hit
-            if (muteForTalk() && SoundSense.talkFor(4_000)) { switchNow(); continue }
+            if (muteForTalk() && (SoundSense.talkFor(4_000) || SoundSense.mostlyTalk(8_000))) { switchNow(); continue }
             // Liedende sekundengenau bekannt: kurz vor Schluss umschalten, bevor die Moderation anfängt
             planEndSwitch(myGen)
             if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
@@ -530,7 +544,9 @@ class HitMix(
     /** Läuft ein Lied mit sekundengenau bekanntem Anfang und bekannter Länge, kurz vor dem Ende umschalten. */
     private fun planEndSwitch(myGen: Int) {
         if (endTimer?.isActive == true) return
-        if (NowSong.stationId != currentStationId || !NowSong.known() || !NowSong.startLocal) return
+        // Auch mit Anfang vom Server (auf wenige Sekunden genau): kurz vor Schluss vorbereiten, dann umschalten,
+        // sobald die Musik aufhört (die Klang-Erkennung wartet, solange noch Musik läuft)
+        if (NowSong.stationId != currentStationId || !NowSong.known()) return
         val left = NowSong.durMs - NowSong.elapsed()
         if (left !in 0L..9_000L) return
         val title = NowSong.title
@@ -540,7 +556,8 @@ class HitMix(
             val next = withContext(Dispatchers.Default) { choose() }
             if (gen != myGen) return@launch
             if (next != null) { candidate = System.currentTimeMillis() to next; warmUp(next.now.station.url) }
-            delay((left - 1_200L).coerceAtLeast(0L))
+            // Anfang nur vom Server (± ein paar Sekunden): lieber etwas später, damit das Lied nicht abgeschnitten wird
+            delay((left - if (NowSong.startLocal) 1_200L else -3_000L).coerceAtLeast(0L))
             // Liedlänge stimmt nicht immer (Radio-Fassung, Titel kam früher): solange noch Musik zu hören ist, warten
             // (höchstens 20 s), dann umschalten, sobald die Musik aufhört
             var waited = 0L
@@ -612,12 +629,20 @@ class HitMix(
     @Volatile private var talkSince = 0L
 
     private fun talkNow(): Boolean {
-        if (job?.isActive != true || !SoundSense.talkFor(2_000)) return false
-        if (NowSong.stationId != currentStationId) return false
+        if (job?.isActive != true || NowSong.stationId != currentStationId) return false
+        val talking = SoundSense.talkFor(2_000)
+        if (!talking && NowSong.title == null) return false
         // Kein Lied gemeldet: nur, wenn der Sender überhaupt Titel schickt und zuletzt "kein Lied" gemeldet hat
         // (Moderation/Jingle). Sender ohne Titel: Gesang und Sprache sind dort nicht sicher zu trennen, lieber nichts tun.
         if (NowSong.title == null) return NowSong.localAt > 0
-        return NowSong.known() && NowSong.elapsed() > NowSong.durMs - 15_000L
+        if (talking && NowSong.known() && NowSong.elapsed() > NowSong.durMs - 15_000L) return true
+        // Viele Sender lassen den Liedtitel stehen, während schon moderiert oder Werbung gespielt wird.
+        // Hört die Klang-Erkennung dann länger überwiegend Sprache, ist das Lied vorbei – auch ohne bekannte Länge.
+        // (Mitten in einem Lied mit bekannter Länge länger warten: gesprochene Stellen, Rap-Intro.)
+        val heard = System.currentTimeMillis() - NowSong.titleAt
+        if (NowSong.titleAt == 0L || heard < 45_000L) return false
+        val midKnown = NowSong.known() && NowSong.elapsed() < NowSong.durMs - 30_000L
+        return SoundSense.mostlyTalk(if (midKnown) 16_000L else 8_000L)
     }
 
     /** Vorbereiteten Kandidaten nehmen, wenn er noch stimmt (läuft noch dasselbe Lied, nicht zu alt). */
@@ -627,7 +652,7 @@ class HitMix(
         if (System.currentTimeMillis() - at > 60_000L) return null
         val cur = LiveIndex.get(c.now.station.id) ?: return null
         if (cur.normalized != c.now.normalized || c.now.station.id == currentStationId) return null
-        if (c.key in played) return null
+        if (c.key in played || !isNew(cur, false)) return null
         if (almostOver(cur, System.currentTimeMillis())) return null
         return c
     }
@@ -757,7 +782,7 @@ class HitMix(
             .filter { (n, k) -> ok(k, n.normalized) }
         // Playlist: zuerst ihre eigenen Lieder, dann das Ersatz-Genre
         val fromPrimary = if (isPlaylist) liveOf(primary) else emptyList()
-        if (onlyPrimary) return fromPrimary.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
+        if (onlyPrimary) return fromPrimary.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) && isNew(n, allowRepeats) }
             .sortedBy { (n, _) -> t - n.since }.take(limit).map { Choice(it.first, it.second) }
         val fromList = liveOf(songs)
         val fromGenre = pool.filter { it.station.id in genreIds || theme(it) }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
@@ -790,7 +815,9 @@ class HitMix(
                 val slow = startDelay(n.station.id).let { d -> if (d > 6_000L) 240_000L else if (d > 3_000L) d * 15 else 0L }
                 Triple(n, key, age + slow + (if (age > 180_000L) 300_000L else 0L) +
                     (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist)
-            }.sortedBy { it.third }.distinctBy { it.second }.take(limit).map { Choice(it.first, it.second) }
+            }.sortedBy { it.third }.asSequence().filter { isNew(it.first, allowRepeats) }
+            .distinctBy { it.second }.distinctBy { MixLogic.stationBaseName(it.first.station.name) }
+            .take(limit).map { Choice(it.first, it.second) }.toList()
     }
 
     // ---------- Wiedergabeliste: "Als Nächstes" zeigen, antippen springt hin ----------

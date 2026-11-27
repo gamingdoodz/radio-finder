@@ -25,7 +25,14 @@ object SoundSense : TeeAudioProcessor.AudioBufferSink {
 
     /** Soll gerade zugehört werden? (setzt PlaybackService) */
     @Volatile var active = false
-        set(v) { if (field != v) { field = v; if (!v) fill = 0 } }
+        set(v) {
+            if (field != v) {
+                field = v
+                if (!v) fill = 0
+                // Nach einer Pause neu anfangen: ein alter Stand ("Musik seit 3 Min.") wäre falsch
+                else { state = State.UNKNOWN; streakSince = System.currentTimeMillis(); synchronized(history) { history.clear() } }
+            }
+        }
 
     @Volatile private var failed = false
     @Volatile private var busy = false
@@ -61,7 +68,23 @@ object SoundSense : TeeAudioProcessor.AudioBufferSink {
         private set
 
     /** Neuer Sender: altes Ergebnis vergessen. */
-    fun reset() { state = State.UNKNOWN; streakSince = 0L; fill = 0; lastRun = 0L; musicDb = Float.NaN; musicDbCount = 0 }
+    fun reset() { state = State.UNKNOWN; streakSince = 0L; fill = 0; lastRun = 0L; musicDb = Float.NaN; musicDbCount = 0; synchronized(history) { history.clear() } }
+
+    /** Die letzten Ergebnisse (Zeit, Ergebnis), für "überwiegend Sprache" auch über kurze Wackler hinweg. */
+    private val history = ArrayDeque<Pair<Long, State>>()
+
+    /**
+     * Überwiegend Sprache in den letzten ms (mindestens 60 % Sprache, kaum Musik)? Moderation über einem
+     * Musikbett schwankt zwischen "Sprache" und "unklar" – talkFor() bräche dann jedes Mal ab.
+     */
+    fun mostlyTalk(ms: Long): Boolean = synchronized(history) {
+        val since = System.currentTimeMillis() - ms
+        val recent = history.filter { it.first >= since }
+        if (recent.size < (ms / EVERY_MS * 0.6).toInt().coerceAtLeast(2)) return false
+        val talk = recent.count { it.second == State.TALK }
+        val music = recent.count { it.second == State.MUSIC }
+        talk >= recent.size * 0.6 && music <= recent.size / 5
+    }
 
     /** Läuft seit mindestens ms ununterbrochen Musik? */
     fun musicFor(ms: Long) = state == State.MUSIC && System.currentTimeMillis() - streakSince >= ms
@@ -148,6 +171,7 @@ object SoundSense : TeeAudioProcessor.AudioBufferSink {
                 else -> State.UNKNOWN
             }
             if (now != state) { state = now; streakSince = lastRun }
+            synchronized(history) { history.addLast(lastRun to now); while (history.size > 30) history.removeFirst() }
             // Lautstärke nur bei Musik messen (für gleiche Lautstärke zwischen Sendern)
             if (now == State.MUSIC) {
                 val db = MixLogic.rmsDb(samples)

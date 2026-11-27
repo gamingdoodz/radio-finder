@@ -268,7 +268,7 @@ class PlaybackService : MediaLibraryService() {
     /** Sender kurz nach einem Fehler nochmal versuchen – nur wenn weiter abgespielt werden soll. */
     private val retryRunnable = Runnable {
         val p = session?.player ?: return@Runnable
-        if (p.playWhenReady && p.playerError != null) { p.prepare(); p.play() }
+        if (p.playWhenReady && p.playerError != null) { NowSong.musicSinceTune = false; p.prepare(); p.play() }
     }
 
     /** Neu verbinden mit wachsender Pause (2, 4, 6 … höchstens 20 s), höchstens 20 Minuten lang. */
@@ -285,6 +285,7 @@ class PlaybackService : MediaLibraryService() {
         // Inzwischen gestoppt/pausiert oder läuft wieder: nichts tun (Stopp bleibt Stopp)
         if (!p.playWhenReady || p.playerError == null || !onPhone()) { reconnectSince = 0L; reconnectTry = 0; return }
         if (!Net.online(this)) { scheduleReconnect(); return }
+        NowSong.musicSinceTune = false   // nach dem Funkloch mitten in irgendein Lied
         p.prepare(); p.play()
     }
 
@@ -536,10 +537,15 @@ class PlaybackService : MediaLibraryService() {
                     // Radio länger als 8 s pausiert: neu verbinden, damit man live hört (nicht den alten Puffer)
                     // und die Liedzeit wieder zum Gehörten passt
                     val p = exo
-                    val longPause = pausedAt > 0L && System.currentTimeMillis() - pausedAt > 8_000L
+                    val pauseMs = if (pausedAt > 0L) System.currentTimeMillis() - pausedAt else 0L
+                    val longPause = pauseMs > 8_000L
                     pausedAt = 0L
+                    // Kurze Pause: es geht im Puffer weiter, das Lied ist also um die Pause "später" – Liedzeit mitschieben
+                    if (!longPause && pauseMs > 0L && NowSong.startMs > 0L) NowSong.startMs += pauseMs
                     if (longPause && p != null && onPhone() && p.currentMediaItem?.mediaId?.startsWith("st:") == true &&
                         p.playbackState != Player.STATE_IDLE) {
+                        // Neu verbunden = mitten in irgendein Lied: der nächste neue Titel ist kein selbst gehörter Anfang
+                        NowSong.musicSinceTune = false
                         sleepHandler.post { try { p.seekToDefaultPosition(); p.prepare() } catch (_: Exception) {} }
                     }
                 }
@@ -660,17 +666,26 @@ class PlaybackService : MediaLibraryService() {
                 val first = !NowSong.musicSinceTune
                 NowSong.musicSinceTune = true
                 NowSong.title = clean
+                NowSong.titleAt = now
                 // Erster Titel nach dem Einschalten: Startzeit vom Server, sonst unbekannt. Wechsel beim Hören: jetzt.
                 val norm = Scanner.normalize(clean)
-                NowSong.startMs = if (first) LiveIndex.get(stationId)?.takeIf { it.normalized == norm || LiveIndex.Song(
-                    Entry("", Kind.TRACK, clean.substringAfter(" - ").substringAfter(" – ").trim(),
-                        clean.substringBefore(" - ").substringBefore(" – ").trim(), "", "", "")).matches(it.normalized) }
-                    ?.takeIf { LiveIndex.sinceKnown(it, now) }?.since?.takeIf { it < now && now - it < 9 * 60_000L } ?: 0L
-                else now
+                NowSong.startMs = 0L
                 NowSong.startLocal = !first
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
-                // Zurück zu einem Sender, auf dem wir das Lied schon gehört haben: echte Liedzeit statt 0
-                if (first && NowSong.startMs == 0L) NowSong.recall(stationId, clean)
+                if (!first) {
+                    NowSong.startMs = now
+                    // Versatz zum Server messen, sobald der Server diesen Wechsel kennt (nächste Abgleiche)
+                    calibrate(stationId, norm, now)
+                } else if (!NowSong.recall(stationId, clean)) {
+                    // 1. Selbst schon gehört (oben): sekundengenau. 2. Server hat den Wechsel beobachtet: dessen Anfang
+                    // plus der gemessene Versatz dieses Senders (man hört später, als der Server sieht). 3. Sonst unbekannt.
+                    val server = Radar.serverStart(stationId, norm)
+                    NowSong.startMs = if (server > 0L) (server + Latency.of(this, stationId)).takeIf { it < now && now - it < 9 * 60_000L } ?: 0L
+                    else LiveIndex.get(stationId)?.takeIf { it.normalized == norm || LiveIndex.Song(
+                        Entry("", Kind.TRACK, clean.substringAfter(" - ").substringAfter(" – ").trim(),
+                            clean.substringBefore(" - ").substringBefore(" – ").trim(), "", "", "")).matches(it.normalized) }
+                        ?.takeIf { LiveIndex.sinceKnown(it, now) }?.since?.takeIf { it < now && now - it < 9 * 60_000L } ?: 0L
+                }
                 // laut.fm: Sender meldet sekundengenau Anfang und Ende des Liedes
                 if (NowSong.startMs == 0L || !NowSong.startLocal) {
                     val url = exo?.currentMediaItem?.takeIf { it.mediaId == "st:$stationId" }?.localConfiguration?.uri?.toString().orEmpty()
@@ -685,6 +700,7 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
             }
+            NowSong.musicSinceTune = true   // auch bei gleichem Titel nach Neu-Verbinden: ab jetzt hören wir Wechsel selbst
             NowSong.localAt = now
             LiveIndex.titleFromStream(stationId, clean, if (NowSong.startLocal) NowSong.startMs else 0L)
         } else if (NowSong.title != null) {
@@ -693,6 +709,18 @@ class PlaybackService : MediaLibraryService() {
         }
         if (hitMix.isActive) scope.launch { hitMix.onStreamTitle(stationId, clean, music) }
     }
+
+    /** Selbst gehörter Liedwechsel: nach dem nächsten Server-Abgleich vergleichen, wann der Server ihn gesehen hat. */
+    private fun calibrate(stationId: String, norm: String, heardAt: Long) {
+        for (delayMs in longArrayOf(90_000L, 200_000L)) sleepHandler.postDelayed({
+            val server = Radar.serverStart(stationId, norm)
+            if (server > 0L && calibrated != "$stationId|$norm") {
+                calibrated = "$stationId|$norm"
+                Latency.record(this, stationId, heardAt - server)
+            }
+        }, delayMs)
+    }
+    private var calibrated = ""
 
     /** Bekannte Vorab-Werbung eines Senders: stumm schalten, bis Musik kommt (höchstens die gelernte Dauer + 10 s). */
     private val adMuteCheck = object : Runnable {
@@ -716,7 +744,7 @@ class PlaybackService : MediaLibraryService() {
             // Klang-Erkennung erst kurz vor dem Liedende wieder an (spart den größten Teil der Rechenzeit)
             val e = NowSong.elapsed()
             val midSong = mixOn && !on && !adMuted && !adTitle && NowSong.known() && NowSong.startLocal &&
-                e in 40_000L..(NowSong.durMs - 30_000L)
+                e in 40_000L..(NowSong.durMs * 7 / 10)   // Radio-Fassungen sind oft kürzer: ab 70 % wieder zuhören
             // Klang-Erkennung nur in diesem kurzen Fenster bzw. während des Hit-Mix (spart Akku)
             SoundSense.active = sense && (on || mixOn) && !midSong
             if (SoundSense.active && Settings.normalize(this@PlaybackService)) updateGainFromSound()
@@ -1627,9 +1655,16 @@ class PlaybackService : MediaLibraryService() {
                 val chosen = resolved[0]
                 // Bekannte Lieder zuerst (vorberechnet), keine Sender mit Werbung beim Umschalten
                 val others = withContext(Dispatchers.Default) {
+                    // Weiter = wirklich etwas anderes: kein gleicher Sender in anderer Qualität, nicht dasselbe Lied
+                    val chosenId = chosen.mediaId.removePrefix("st:")
+                    val chosenBase = MixLogic.stationBaseName(LiveIndex.get(chosenId)?.station?.name ?: chosen.mediaMetadata.extras?.getString("name").orEmpty())
+                    val chosenSong = LiveIndex.get(chosenId)?.normalized
                     LiveIndex.topMusic()
                         .filter { "st:" + it.station.id != chosen.mediaId }
+                        .filter { chosenBase.isEmpty() || MixLogic.stationBaseName(it.station.name) != chosenBase }
+                        .filter { chosenSong == null || !MixLogic.sameSong(it.normalized, chosenSong) }
                         .filter { !Ads.likely(this@PlaybackService, it.station.id, it.station.url) }
+                        .distinctBy { MixLogic.stationBaseName(it.station.name) }
                         .take(30)
                 }
                     .map { liveTitle(it.station.toEntry(it.title).toMediaItem()) ?: it.station.toEntry(it.title).toMediaItem() }

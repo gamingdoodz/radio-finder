@@ -15,6 +15,8 @@ object NowSong {
     @Volatile var startLocal = false
     /** Seit dem Einschalten schon einen Liedtitel bekommen? (danach ist jeder neue Titel ein selbst gehörter Wechsel) */
     @Volatile var musicSinceTune = false
+    /** Seit wann steht dieser Liedtitel im Stream (beim Hören gesehen)? */
+    @Volatile var titleAt = 0L
 
     /** Zuletzt bekannter Liedanfang je Sender: Zurück zum Sender zeigt die echte Liedzeit statt bei 0 anzufangen. */
     private class Known(val title: String, val startMs: Long, val durMs: Long, val local: Boolean)

@@ -2491,7 +2491,13 @@ class MainActivity : ComponentActivity() {
             if (idx >= 0) c.setMediaItems(tracks.map { it.toMediaItem() }, idx, 0L) else c.setMediaItem(entry.toMediaItem())
         } else if (entry.kind == Kind.STATION) {
             // Ganze Senderliste laden: "Weiter" springt zum nächsten Sender
+            // Weiter = wirklich etwas anderes: derselbe Sender in anderer Qualität und dasselbe Lied nur einmal
+            val base = MixLogic.stationBaseName(entry.name)
+            val song = if (entry.title != entry.name) Scanner.normalize(entry.title) else null
             val stations = section.filter { it.kind == Kind.STATION }
+                .filter { it.id == entry.id || (MixLogic.stationBaseName(it.name) != base &&
+                    (song == null || it.title == it.name || !MixLogic.sameSong(Scanner.normalize(it.title), song))) }
+                .distinctBy { if (it.id == entry.id) "\u0000" else MixLogic.stationBaseName(it.name) }
             val idx = stations.indexOfFirst { it.id == entry.id }
             if (idx >= 0 && stations.size > 1) c.setMediaItems(stations.map { it.toMediaItem() }, idx, 0L)
             else c.setMediaItem(entry.toMediaItem())

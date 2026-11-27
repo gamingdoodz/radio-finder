@@ -161,6 +161,17 @@ object Radar {
 
     /** Was der Server zuletzt gemeldet hat: Sender-ID -> (Sender, Titel, seit, gesehen). */
     private class Live(val station: Station, var title: String, var since: Long, var seen: Long)
+    /**
+     * Liedanfang, wie ihn der Server gesehen hat (auf Handy-Uhr umgerechnet), nur wenn er ihn wirklich beobachtet hat
+     * und es derselbe Titel ist. 0 = unbekannt. Für den Ausgleich "Server sieht den Titel früher, als man ihn hört".
+     */
+    fun serverStart(stationId: String, normalizedTitle: String): Long = synchronized(known) {
+        val k = known[stationId] ?: return 0L
+        if (k.since <= 0L) return 0L
+        if (!MixLogic.sameSong(Scanner.normalize(k.title), normalizedTitle)) return 0L
+        k.since + clockOffset
+    }
+
     /** Handy-Uhr minus Server-Uhr (ms), beim letzten Abgleich gemessen. */
     @Volatile var clockOffset = 0L
         private set
