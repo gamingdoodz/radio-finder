@@ -3,7 +3,7 @@ name: App bauen
 on:
   push:
     branches: [main]
-    paths-ignore: ["server/**", "README.md"]
+    paths-ignore: ["server/**", "README.md", "docs/**", "**/*.md", "alexa/**"]
   workflow_dispatch:
   # Google erlaubt nur wenige Uploads pro Tag: nachts automatisch die neueste Version hochladen
   schedule:
