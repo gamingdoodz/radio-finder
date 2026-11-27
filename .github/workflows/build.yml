@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   build:
@@ -72,8 +73,18 @@ jobs:
 
       # Automatisch in den internen Play-Test hochladen (sobald der Schlüssel hinterlegt ist)
       # Hochladen nur nachts, von Hand oder wenn die Änderung "[play]" enthält (Tageslimit bei Google)
+      # Zeitplan-Lauf lädt nicht hoch, wenn heute schon von Hand hochgeladen wurde (höchstens 1 Upload am Tag)
+      - name: Schon heute hochgeladen?
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          seit=$(date -u -d '20 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          n=$(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?event=workflow_dispatch&status=success&created=%3E$seit" --jq '.total_count' || echo 0)
+          if [ "${n:-0}" -gt 0 ]; then echo "Heute schon von Hand hochgeladen, Zeitplan lädt nicht hoch."; echo "SCHON_HOCHGELADEN=1" >> "$GITHUB_ENV"; fi
+
       - name: In Google Play hochladen (interner + geschlossener Test)
-        if: ${{ env.PLAY_JSON != '' && (github.event_name != 'push' || contains(github.event.head_commit.message, '[play]')) }}
+        if: ${{ env.PLAY_JSON != '' && env.SCHON_HOCHGELADEN != '1' && (github.event_name != 'push' || contains(github.event.head_commit.message, '[play]')) }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
