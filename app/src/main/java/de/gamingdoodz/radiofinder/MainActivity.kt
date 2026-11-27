@@ -273,7 +273,7 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.fullCast).setOnClickListener { castDialog() }
         findViewById<View>(R.id.fullBack30).setOnClickListener { controller?.seekBack() }
         findViewById<View>(R.id.fullAgain).setOnClickListener { playAgain() }
-        findViewById<View>(R.id.fullShare).setOnClickListener { shareSong() }
+        findViewById<View>(R.id.fullShare).setOnClickListener { playerMenu() }
         findViewById<View>(R.id.fullSimilar).setOnClickListener { currentSongTitle()?.let { moreLike(it) } }
         findViewById<View>(R.id.fullFwd30).setOnClickListener { controller?.seekForward() }
         findViewById<View>(R.id.fullSpeed).setOnClickListener {
@@ -954,7 +954,15 @@ class MainActivity : ComponentActivity() {
         c.setMediaItem(hitMixItem(key, "⚡ Hit-Mix $label"))
         c.prepare()
         c.play()
-        showHint("Hit-Mix sucht einen Sender mit einem Hit…")
+        // Für "Weiterhören" auf der Startseite merken (nicht die einmaligen "Mehr wie …"-Mixe)
+        if (key?.startsWith("similar:") != true)
+            Settings.prefs(this).edit().putString("lastMixKey", key ?: "").putString("lastMixLabel", label).apply()
+        // Beim allerersten Mix kurz erklären, was passiert
+        val p = Settings.prefs(this)
+        if (!p.getBoolean("mixIntro", false)) {
+            p.edit().putBoolean("mixIntro", true).apply()
+            showHint("So geht der Hit-Mix: Ich springe immer zu einem Sender, auf dem gerade ein passendes Lied anfängt. Werbung und Moderation überspringe ich.", long = true)
+        } else showHint("Hit-Mix sucht einen Sender mit einem Hit…")
     }
 
     private fun stopHitMix() {
@@ -1053,6 +1061,13 @@ class MainActivity : ComponentActivity() {
 
     private fun renderHome() {
         if (!Net.online(this)) rows.add(Row.Empty("⚠ Keine Internetverbindung – Radio und Suche gehen gerade nicht."))
+
+        // Weiterhören mit einem Tipp: der zuletzt gestartete Mix (wenn gerade nichts läuft)
+        val lastLabel = Settings.prefs(this).getString("lastMixLabel", null)
+        if (lastLabel != null && controller?.isPlaying != true && HitMix.activeName(this) == null) {
+            val lastKey = Settings.prefs(this).getString("lastMixKey", "")?.ifBlank { null }
+            rows.add(button(R.drawable.ic_play, "Weiterhören: Hit-Mix ${lastLabel.removePrefix("– ")}") { startHitMix(lastKey, lastLabel) })
+        }
 
         // Schnellstart
         if (Settings.homeOn(this, "quick")) {
@@ -1349,6 +1364,12 @@ class MainActivity : ComponentActivity() {
         val showStories = searchFilter == 0 || searchFilter == 3
         val n = if (searchFilter == 0) 5 else 30
         val asGenre = Genres.fromText(query)
+        // Vorschläge beim Tippen: passende Musikrichtungen ("ro" -> Rock & Alternative, Rock-Klassiker)
+        if (asGenre == null && query.length in 2..20) {
+            val nq = Scanner.normalize(query)
+            val sugg = Genres.all.filter { g -> Scanner.normalize(g.name).split(" ").any { it.startsWith(nq) } }.take(3)
+            if (sugg.isNotEmpty()) rows.add(Row.Chips(sugg.map { it.name }, -1) { i -> sugg.getOrNull(i)?.let { startSearch(it.name) } })
+        }
         if (asGenre != null) {
             // Musikrichtung: der Mix ganz oben, er spielt nur diese Richtung
             rows.add(button(R.drawable.ic_bolt, "${asGenre.name}-Mix starten") { startHitMix(asGenre.key, "– ${asGenre.name}") })
@@ -2136,6 +2157,35 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Hit-Mix mit Liedern, die Sender oft zusammen mit diesem Lied spielen. */
+    /** •••-Menü im Player: Mehr davon, Teilen, Daumen runter. */
+    private fun playerMenu() {
+        val song = currentSongTitle()
+        val mixOn = HitMix.activeName(this) != null
+        val opts = mutableListOf<Option>()
+        if (song != null) {
+            opts.add(Option(R.drawable.ic_sparkle, "Mehr davon", "Hit-Mix mit ähnlichen Liedern") { moreLike(song) })
+            opts.add(Option(R.drawable.ic_share, "Teilen", null) { shareSong() })
+            opts.add(Option(R.drawable.ic_close, "Lied nicht mehr spielen", if (mixOn) "Kommt im Mix nicht mehr, gleich weiter" else "Kommt im Mix nicht mehr") { dislike(song, false) })
+            val artist = song.substringBefore(" - ").substringBefore(" – ").trim()
+            if (artist.isNotBlank() && artist != song)
+                opts.add(Option(R.drawable.ic_close, "$artist nicht mehr spielen", "Keine Lieder von $artist im Mix") { dislike(song, true) })
+        }
+        if (mixOn) opts.add(Option(R.drawable.ic_stop, "Mix beenden", null) { stopHitMix(); updatePlayer() })
+        if (Dislikes.count(this) > 0)
+            opts.add(Option(R.drawable.ic_heart_outline, "Gesperrte Lieder wieder erlauben", "${Dislikes.count(this)} gesperrt") { Dislikes.clear(this); showHint("Alles wieder erlaubt") })
+        if (opts.isEmpty()) return
+        sheet("Mehr", song ?: "", null, "", false, null, opts)
+    }
+
+    private fun dislike(song: String, wholeArtist: Boolean) {
+        val c = controller
+        if (c == null) { if (wholeArtist) Dislikes.addArtist(this, song) else Dislikes.addSong(this, song); return }
+        c.sendCustomCommand(SessionCommand(PlaybackService.CMD_DISLIKE, Bundle.EMPTY), Bundle().apply {
+            putString("title", song); putBoolean("artist", wholeArtist)
+        })
+        showHint(if (HitMix.activeName(this) != null) "Kommt nicht mehr – nächstes Lied…" else "Kommt im Mix nicht mehr")
+    }
+
     private fun moreLike(song: String) {
         startHitMix("similar:$song", "– Mehr wie dieses")
     }
@@ -2435,9 +2485,10 @@ class MainActivity : ComponentActivity() {
             val againOk = isStation && live != null && LiveIndex.isMusic(live)
             val canShare = (isStation && live != null && isMusic(live)) || (!isStation && !story)
             findViewById<View>(R.id.fullStoryBar).visibility = if (story || againOk || canShare) View.VISIBLE else View.GONE
-            findViewById<View>(R.id.fullShare).visibility = if (canShare) View.VISIBLE else View.GONE
-            findViewById<View>(R.id.fullSimilar).visibility = if (canShare && !kids()) View.VISIBLE else View.GONE
             val mixOn = HitMix.activeName(this) != null
+            // Aufgeräumt: "Mehr davon", Teilen und Daumen runter stecken im •••-Menü
+            findViewById<View>(R.id.fullShare).visibility = if ((canShare || mixOn) && !kids()) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.fullSimilar).visibility = View.GONE
             findViewById<View>(R.id.fullStopMix).visibility = if (mixOn) View.VISIBLE else View.GONE
             if (mixOn) findViewById<View>(R.id.fullStoryBar).visibility = View.VISIBLE
             // "Von vorn" nur, wenn das Lied gerade wirklich woanders frisch anfängt (sonst würde etwas anderes kommen)

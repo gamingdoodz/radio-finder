@@ -507,16 +507,14 @@
                     android:layout_marginStart="10dp"
                     android:background="@drawable/bg_search"
                     android:gravity="center"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:text="Teilen"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="•••"
+                    android:contentDescription="Mehr"
                     android:textColor="@color/c_ffffffff"
-                    android:textSize="13sp"
+                    android:textSize="15sp"
                     android:textStyle="bold"
                     android:singleLine="true"
-                    android:drawableStart="@drawable/ic_share"
-                    android:drawableTint="@color/c_ff2ee6a8"
-                    android:drawablePadding="6dp"
                     android:visibility="gone" />
 
                 <TextView

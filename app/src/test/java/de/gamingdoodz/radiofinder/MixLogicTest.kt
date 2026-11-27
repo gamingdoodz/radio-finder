@@ -164,4 +164,43 @@ class MixLogicTest {
         assertFalse(MixLogic.isStationJingle("Adele - Hello", null))
         assertFalse(MixLogic.isStationJingle("ROCK ANTENNE", "ROCK ANTENNE"))   // ohne Strich: entscheidet isMusic
     }
+
+    @Test fun genreNamenDerAppWerdenErkannt() {
+        // Namen der Genre-Kacheln (Suchvorschläge tippen genau diese ein)
+        val names = mapOf("Weihnachten" to "xmas", "Charts" to "charts", "Pop & Deutsch-Pop" to "pop", "Rap & Hip-Hop" to "rap",
+            "Dance & Electronic" to "dance", "Rock & Alternative" to "rock", "Schlager" to "schlager", "Party & Après-Ski" to "party",
+            "80er" to "80s", "90er" to "90s", "2000er" to "2000s", "Sommerhits" to "summer", "Deutschrap" to "deutschrap",
+            "Rock-Klassiker" to "rockclassics", "Oldies" to "oldies", "Latin & Reggaeton" to "latin", "Country" to "country",
+            "Jazz & Soul" to "jazz", "Klassik" to "classic", "Chill & Entspannen" to "chill", "Kindermusik" to "kids")
+        for ((n, k) in names) assertEquals(n, k, MixLogic.genreKeyFor(n))
+    }
+
+    @Test fun daumenRunter() {
+        val songs = setOf(MixLogic.songKey("Wham! - Last Christmas"))
+        val artists = setOf(MixLogic.artistOf("Mariah Carey - All I Want For Christmas Is You"))
+        assertTrue(MixLogic.disliked("WHAM! - Last Christmas (Remastered)", songs, artists))
+        assertTrue(MixLogic.disliked("Mariah Carey - Oh Santa!", songs, artists))
+        assertTrue(MixLogic.disliked("Mariah Carey & Ariana Grande - Oh Santa!", songs, artists))
+        assertFalse(MixLogic.disliked("Chris Rea - Driving Home For Christmas", songs, artists))
+        assertFalse(MixLogic.disliked("Mariah Smith - Carey On", emptySet(), setOf("mariah carey")))
+        assertFalse(MixLogic.disliked("Wham! - Last Christmas", emptySet(), emptySet()))
+    }
+
+    @Test fun fastVorbeiOhneBekanntenAnfang() {
+        assertTrue(MixLogic.unknownStartAlmostOver(seenForMs = 200_000, durMs = 230_000))
+        assertFalse(MixLogic.unknownStartAlmostOver(seenForMs = 20_000, durMs = 230_000))
+        assertTrue(MixLogic.unknownStartAlmostOver(seenForMs = 200_000, durMs = 0))
+        assertFalse(MixLogic.unknownStartAlmostOver(seenForMs = 60_000, durMs = 0))
+    }
+
+    @Test fun lautstaerkeAngleichen() {
+        assertEquals(0f, MixLogic.loudnessGain(-16f), 0.01f)
+        assertEquals(6f, MixLogic.loudnessGain(-22f), 0.01f)
+        assertEquals(-4f, MixLogic.loudnessGain(-12f), 0.01f)
+        assertEquals(8f, MixLogic.loudnessGain(-40f), 0.01f)      // höchstens +8 dB
+        assertEquals(0f, MixLogic.loudnessGain(-90f), 0.01f)      // Stille: nichts verstärken
+        val loud = FloatArray(1000) { if (it % 2 == 0) 0.5f else -0.5f }
+        assertEquals(-6.02f, MixLogic.rmsDb(loud), 0.05f)
+        assertEquals(-90f, MixLogic.rmsDb(FloatArray(100)), 0.01f)
+    }
 }

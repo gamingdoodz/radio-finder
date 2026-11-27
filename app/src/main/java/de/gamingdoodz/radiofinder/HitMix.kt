@@ -373,6 +373,8 @@ class HitMix(
         lastLocal = now
         val norm = Scanner.normalize(title)
         val sinceSwitch = now - switchedAt
+        // Daumen runter für dieses Lied/diesen Künstler: gleich weiter
+        if (music && Dislikes.isDisliked(context, title)) { switchNow(force = true); return }
         if (music && (switchedTitle == null || sameSong(norm, switchedTitle))) {
             // Läuft wie erwartet
             switchedTitle = norm; confirmed = true; waitingForNext = false
@@ -562,7 +564,11 @@ class HitMix(
 
     /** Lied ist fast vorbei (weniger als 1,5 Min. übrig): gar nicht erst hinschalten. */
     private fun almostOver(n: LiveIndex.Now, t: Long): Boolean {
-        if (!LiveIndex.sinceKnown(n, t)) return false
+        // Anfang unbekannt: wir wissen nur, seit wann wir das Lied dort sehen (ein Lied, das wir schon 4 Min. sehen, ist fast vorbei)
+        if (!LiveIndex.sinceKnown(n, t)) {
+            val seenFor = t - (n.since + LiveIndex.UNKNOWN_AGE)
+            return MixLogic.unknownStartAlmostOver(seenFor, Covers.byKey(n.normalized)?.durMs ?: 0L)
+        }
         val age = t - n.since
         val dur = Covers.byKey(n.normalized)?.durMs ?: 0L
         return if (dur > 0) dur - age < 90_000L else age > 210_000L
@@ -625,6 +631,13 @@ class HitMix(
 
     fun hasPrevious() = job?.isActive == true && history.isNotEmpty()
 
+    /** Daumen runter im laufenden Mix: merken und sofort zum nächsten passenden Lied. */
+    suspend fun dislike(title: String, wholeArtist: Boolean): Boolean {
+        if (wholeArtist) Dislikes.addArtist(context, title) else Dislikes.addSong(context, title)
+        candidate = null
+        return if (job?.isActive == true) next() else false
+    }
+
     private var rotation = 0
 
     private suspend fun poll(force: Boolean) {
@@ -677,10 +690,12 @@ class HitMix(
         val t = System.currentTimeMillis()
         val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
+        val noSongs = Dislikes.songs(context); val noArtists = Dislikes.artists(context)
         val pool = LiveIndex.fresh().filter {
             (ids == null || it.station.id in ids) && it.station.id != currentStationId && it.normalized != currentTitle &&
                 LiveIndex.isMusic(it.title) && !almostOver(it, t) &&
-                (anyMusic || LiveIndex.sinceKnown(it, t))   // nur Lieder, deren Anfang bekannt ist (sonst evtl. mittendrin)
+                (anyMusic || LiveIndex.sinceKnown(it, t)) &&   // nur Lieder, deren Anfang bekannt ist (sonst evtl. mittendrin)
+                !MixLogic.disliked(it.title, noSongs, noArtists)   // Daumen runter
         }
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
 

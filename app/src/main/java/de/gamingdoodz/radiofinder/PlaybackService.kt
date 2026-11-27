@@ -64,6 +64,7 @@ class PlaybackService : MediaLibraryService() {
         const val CMD_FADEIN = "FADE_IN"          // Wecker: leise anfangen, lauter werden
         const val CMD_BEDTIME = "BEDTIME"         // Einschlaf-Modus, args: "min"
         const val CMD_ENDLESS = "ENDLESS"         // Endlos freie Musik, args: "tag"
+        const val CMD_DISLIKE = "DISLIKE"         // Daumen runter, args: "title", "artist" (ganzer Künstler)
     }
 
     private var session: MediaLibrarySession? = null
@@ -321,9 +322,41 @@ class PlaybackService : MediaLibraryService() {
             d.setLimiterAllChannelsTo(DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, -1.5f, 0f))
             d.enabled = true
             dynamics = d
+            appliedGain = Float.NaN
+            gainForStation(NowSong.stationId)
         } catch (_: Exception) {
             dynamics = null
         }
+    }
+
+    // ---------- Gleiche Lautstärke zwischen Sendern ----------
+    private val loudPrefs by lazy { getSharedPreferences("loudness", MODE_PRIVATE) }
+    private var appliedGain = Float.NaN
+
+    /** Verstärkung des Normalisierers setzen (nur wenn er läuft, Android 9+). */
+    private fun applyGain(db: Float) {
+        if (db == appliedGain) return
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 28) dynamics?.setInputGainAllChannelsTo(db)
+            appliedGain = db
+        } catch (_: Exception) {}
+    }
+
+    /** Neuer Sender: gemerkten Pegel nehmen (sonst neutral), bis neu gemessen ist. */
+    private fun gainForStation(id: String?) {
+        val saved = id?.let { loudPrefs.getFloat(it, Float.NaN) } ?: Float.NaN
+        applyGain(if (saved.isNaN()) 0f else MixLogic.loudnessGain(saved))
+    }
+
+    /** Während Musik läuft: gemessenen Pegel übernehmen und je Sender merken. */
+    private fun updateGainFromSound() {
+        val id = NowSong.stationId ?: return
+        if (SoundSense.musicDbCount < 3) return
+        val db = SoundSense.musicDb
+        if (db.isNaN()) return
+        applyGain(MixLogic.loudnessGain(db))
+        val old = loudPrefs.getFloat(id, Float.NaN)
+        if (old.isNaN() || kotlin.math.abs(old - db) > 1f) loudPrefs.edit().putFloat(id, db).apply()
     }
 
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -507,6 +540,7 @@ class PlaybackService : MediaLibraryService() {
                     hitMix.onJump(mediaItem.mediaId)
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
                 NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
+                gainForStation(NowSong.stationId)
                 adMuted = false; soundMuted = false; adTitleSince = 0L
                 SoundSense.reset()
                 if (exo?.volume == 0f) exo?.volume = baseVolume
@@ -638,6 +672,7 @@ class PlaybackService : MediaLibraryService() {
             val mixOn = id != null && again && mix && local && sense
             // Klang-Erkennung nur in diesem kurzen Fenster bzw. während des Hit-Mix (spart Akku)
             SoundSense.active = sense && (on || mixOn)
+            if (SoundSense.active && Settings.normalize(this@PlaybackService)) updateGainFromSound()
             if ((!on && !mixOn) || id == null) return
             // Hit-Mix: Sprache zwischen den Liedern (Moderation, Jingle, Werbung) = stumm, bis wieder Musik kommt
             val talkMute = mixOn && hitMix.muteForTalk()
@@ -1068,7 +1103,7 @@ class PlaybackService : MediaLibraryService() {
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                         .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand).add(prevCommand)
                         .add(SessionCommand(CMD_FADEIN, Bundle.EMPTY)).add(SessionCommand(CMD_BEDTIME, Bundle.EMPTY))
-                        .add(SessionCommand(CMD_ENDLESS, Bundle.EMPTY)).build()
+                        .add(SessionCommand(CMD_ENDLESS, Bundle.EMPTY)).add(SessionCommand(CMD_DISLIKE, Bundle.EMPTY)).build()
                 )
                 .setCustomLayout(buttons())
                 .build()
@@ -1129,6 +1164,14 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == CMD_BEDTIME) {
                 bedtime = true
                 startSleepTimer(args.getInt("min", 45))
+            }
+            if (customCommand.customAction == CMD_DISLIKE) {
+                val title = args.getString("title")?.takeIf { it.isNotBlank() } ?: NowSong.title
+                val whole = args.getBoolean("artist", false)
+                if (title != null) scope.launch {
+                    if (hitMix.isActive) { hitMix.dislike(title, whole); updateFavButton() }
+                    else if (whole) Dislikes.addArtist(this@PlaybackService, title) else Dislikes.addSong(this@PlaybackService, title)
+                }
             }
             if (customCommand.customAction == CMD_FADEIN) {
                 baseVolume = 0.15f

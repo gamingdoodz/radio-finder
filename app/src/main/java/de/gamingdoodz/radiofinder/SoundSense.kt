@@ -54,8 +54,14 @@ object SoundSense : TeeAudioProcessor.AudioBufferSink {
 
     fun init(c: Context) { appContext = c.applicationContext }
 
+    /** Pegel der Musik auf diesem Sender (dBFS, gleitender Mittelwert) und wie viele Stücke gemessen wurden. */
+    @Volatile var musicDb = Float.NaN
+        private set
+    @Volatile var musicDbCount = 0
+        private set
+
     /** Neuer Sender: altes Ergebnis vergessen. */
-    fun reset() { state = State.UNKNOWN; streakSince = 0L; fill = 0; lastRun = 0L }
+    fun reset() { state = State.UNKNOWN; streakSince = 0L; fill = 0; lastRun = 0L; musicDb = Float.NaN; musicDbCount = 0 }
 
     /** Läuft seit mindestens ms ununterbrochen Musik? */
     fun musicFor(ms: Long) = state == State.MUSIC && System.currentTimeMillis() - streakSince >= ms
@@ -142,6 +148,14 @@ object SoundSense : TeeAudioProcessor.AudioBufferSink {
                 else -> State.UNKNOWN
             }
             if (now != state) { state = now; streakSince = lastRun }
+            // Lautstärke nur bei Musik messen (für gleiche Lautstärke zwischen Sendern)
+            if (now == State.MUSIC) {
+                val db = MixLogic.rmsDb(samples)
+                if (db > -60f) {
+                    musicDb = if (musicDb.isNaN()) db else musicDb * 0.7f + db * 0.3f
+                    musicDbCount++
+                }
+            }
         } catch (_: Throwable) {
             failed = true
         }

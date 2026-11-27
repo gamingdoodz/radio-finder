@@ -52,7 +52,7 @@ object MixLogic {
         "aus", "den", "der", "die", "das", "und", "and", "n", "roll", "von", "mit", "nur", "gute", "guter", "beste", "besten",
         "best", "of", "neue", "neu", "alte", "alter", "top", "40", "aktuelle", "aktuell", "sachen", "irgendwas", "was",
         "hard", "heavy", "classic", "deutsch", "deutsche", "deutscher", "german", "spiel", "spiele", "play", "bitte", "mal",
-        "jahre", "zum", "fur", "genre", "richtung", "stil", "hip", "hop", "r", "b", "drum", "bass", "k",
+        "jahre", "zum", "fur", "genre", "richtung", "stil", "ski", "hip", "hop", "r", "b", "drum", "bass", "k",
     )
 
     /** "Rock", "Rockmusik", "hard rock", "Songs aus den 80ern" → Schlüssel der Richtung. "Rock DJ", "Kid Rock" → null (Lied/Künstler). */
@@ -184,4 +184,52 @@ object MixLogic {
     /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen, Nachrichten, Werbung nicht. */
     fun isMusicTitle(title: String) =
         (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title) && !junk.containsMatchIn(title)
+
+    // ---------------- Daumen runter ----------------
+
+    /** Künstler-Teil eines Radiotitels ("Künstler - Titel"), normalisiert. */
+    fun artistOf(title: String): String = normalize(title.substringBefore(" - ").substringBefore(" – "))
+
+    /** Schlüssel eines Liedes (normalisiert, ohne Zusätze wie "Radio Edit"), für "nicht mehr spielen". */
+    fun songKey(title: String): String = normalize(title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " "))
+
+    /**
+     * Soll dieses Lied im Mix nicht kommen? Gleiches Lied (auch anders geschrieben) oder ein abgelehnter Künstler
+     * (als ganze Wörter im Künstler-Teil, "Queen" sperrt nicht "Queensryche" … aber "Queen & David Bowie").
+     */
+    fun disliked(title: String, songs: Set<String>, artists: Set<String>): Boolean {
+        if (songs.isEmpty() && artists.isEmpty()) return false
+        val key = songKey(title)
+        if (songs.any { it == key || sameSong(key, it) }) return true
+        val artist = artistOf(title)
+        if (artist.isEmpty()) return false
+        return artists.any { a -> a.isNotEmpty() && a.split(" ").all { w -> artist.split(" ").contains(w) } }
+    }
+
+    // ---------------- Fast vorbei, obwohl der Anfang unbekannt ist ----------------
+
+    /**
+     * Lied mit unbekanntem Anfang: wir wissen nur, seit wann wir es sehen (seenForMs). Läuft es schon länger,
+     * als es dauert (minus 1 Min.), oder ohne Länge schon über 3 Min., ist es wohl fast vorbei.
+     */
+    fun unknownStartAlmostOver(seenForMs: Long, durMs: Long): Boolean =
+        if (durMs > 0) seenForMs > durMs - 60_000L else seenForMs > 180_000L
+
+    // ---------------- Gleiche Lautstärke zwischen Sendern ----------------
+
+    /** Zielpegel für Musik (dBFS, gemessen als RMS). */
+    const val TARGET_DB = -16f
+
+    /** Verstärkung in dB, damit ein Sender mit diesem Pegel so laut ist wie die anderen (höchstens ±8 dB). */
+    fun loudnessGain(stationDb: Float): Float =
+        if (stationDb.isNaN() || stationDb < -60f) 0f else (TARGET_DB - stationDb).coerceIn(-8f, 8f)
+
+    /** RMS-Pegel eines Tonstücks in dBFS (-90 bei Stille). */
+    fun rmsDb(samples: FloatArray): Float {
+        if (samples.isEmpty()) return -90f
+        var sum = 0.0
+        for (v in samples) sum += v * v
+        val rms = kotlin.math.sqrt(sum / samples.size)
+        return if (rms <= 1e-5) -90f else (20 * kotlin.math.log10(rms)).toFloat()
+    }
 }
