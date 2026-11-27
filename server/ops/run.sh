@@ -1,5 +1,5 @@
 #!/bin/bash
-# Check 27.11. abends: Freigabe, KI-Umstellung, Hinweise, Liedanfang
+# Check 27.11. abends (2): Liedanfang nach Neustart
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null && $AB bereit; then
