@@ -521,8 +521,8 @@ async def h_list(req):
     if typ == "popular":
         sel = [st for st in stations if st.get("cc") in ("DE", "AT", "CH")][:150]
     elif typ == "kids":
-        rx = re.compile(r"kinder|kids|children|teddy|kiraka|toggo|kakadu")
-        sel = [st for st in stations if rx.search(st.get("tags", "")) or rx.search(st["name"].lower())][:60]
+        rx = re.compile(r"kinder|kids|children|teddy|kiraka|toggo|kakadu|disney|schlaflied|kinderfunk")
+        sel = [st for st in stations if rx.search(st.get("tags", "")) or rx.search(st["name"].lower())][:100]
     elif typ.startswith("tag:"):
         tag = typ[4:]
         de = [st for st in stations if tag in st.get("tags", "") and st.get("cc") == "DE"][:30]

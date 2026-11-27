@@ -60,6 +60,7 @@ class PlaybackService : MediaLibraryService() {
         const val CMD_SLEEP = "SLEEP_TIMER"
         const val CMD_HITMIX = "HITMIX"        // args: "genre" (leer = Deutsche Charts), "stop"
         const val CMD_NEXT = "NEXT_HIT"
+        const val CMD_PREV = "PREV_HIT"
         const val CMD_FADEIN = "FADE_IN"          // Wecker: leise anfangen, lauter werden
         const val CMD_BEDTIME = "BEDTIME"         // Einschlaf-Modus, args: "min"
         const val CMD_ENDLESS = "ENDLESS"         // Endlos freie Musik, args: "tag"
@@ -79,6 +80,7 @@ class PlaybackService : MediaLibraryService() {
     private val sleepCommand = SessionCommand(CMD_SLEEP, Bundle.EMPTY)
     private val hitMixCommand = SessionCommand(CMD_HITMIX, Bundle.EMPTY)
     private val nextCommand = SessionCommand(CMD_NEXT, Bundle.EMPTY)
+    private val prevCommand = SessionCommand(CMD_PREV, Bundle.EMPTY)
     private val shows = lru<String, Entry>(300)
     private val posRunnable = object : Runnable {
         override fun run() {
@@ -103,7 +105,7 @@ class PlaybackService : MediaLibraryService() {
         Positions.save(this, id, p.currentPosition, p.duration.coerceAtLeast(0))
     }
 
-    private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }) }
+    private val hitMix by lazy { HitMix(this, scope, { session?.player }, { liveTitle(it) ?: it }, { adMuted }) }
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bedtime = false
     private var endlessTag: String? = null
@@ -421,6 +423,9 @@ class PlaybackService : MediaLibraryService() {
             override fun getBufferedPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getBufferedPosition()
             override fun getContentBufferedPosition() = if (song()) NowSong.elapsed().coerceAtMost(NowSong.durMs) else super.getContentBufferedPosition()
             override fun isCurrentMediaItemLive() = if (song()) false else super.isCurrentMediaItemLive()
+            // Hit-Mix: "Zurück" (Benachrichtigung, Kopfhörer, Lenkrad) = vorheriger Sender statt Sprung an den Anfang
+            override fun seekToPrevious() { if (hitMix.isActive && hitMix.previous()) updateFavButton() else super.seekToPrevious() }
+            override fun seekToPreviousMediaItem() { if (hitMix.isActive && hitMix.previous()) updateFavButton() else super.seekToPreviousMediaItem() }
         }
         localPlayer = shown
         session = MediaLibrarySession.Builder(this, shown, LibraryCallback())
@@ -466,13 +471,14 @@ class PlaybackService : MediaLibraryService() {
                         clean.substringBefore(" - ").substringBefore(" – ").trim(), "", "", "")).matches(it.normalized) }
                     ?.takeIf { LiveIndex.sinceKnown(it, now) }?.since?.takeIf { it < now && now - it < 9 * 60_000L } ?: 0L
                 else now
+                NowSong.startLocal = !first
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
             }
             NowSong.localAt = now
             LiveIndex.titleFromStream(stationId, clean)
         } else if (NowSong.title != null) {
             // Lied vorbei: jetzt Moderation, Jingle oder Werbung
-            NowSong.title = null; NowSong.startMs = 0L; NowSong.durMs = 0L; NowSong.localAt = now
+            NowSong.title = null; NowSong.startMs = 0L; NowSong.durMs = 0L; NowSong.localAt = now; NowSong.startLocal = false
         }
         if (hitMix.isActive) scope.launch { hitMix.onStreamTitle(stationId, clean, music) }
     }
@@ -483,16 +489,27 @@ class PlaybackService : MediaLibraryService() {
             val p = exo ?: return
             // Nur prüfen, solange es etwas bringt: es läuft, und die Werbung am Senderanfang (höchstens ~3 Min.) ist noch möglich.
             // Startet wieder beim nächsten Sender bzw. beim Weiterspielen.
-            val again = p.isPlaying && (adMuted || NowSong.sinceTune() < 195_000L)
+            // Im Hit-Mix immer (wie ein Musikplayer: Ansagen und Werbung zwischen den Liedern stumm)
+            val mix = hitMix.isActive
+            val again = p.isPlaying && (adMuted || mix || NowSong.sinceTune() < 195_000L)
             if (again) sleepHandler.postDelayed(this, 1_000)
             val id = NowSong.stationId
-            val on = id != null && again && Settings.muteAds(this@PlaybackService) && session?.player === localPlayer
-            // Klang-Erkennung nur in diesem kurzen Fenster (spart Akku)
-            SoundSense.active = on && Settings.soundSense(this@PlaybackService)
-            if (!on || id == null) return
+            val local = session?.player === localPlayer
+            val sense = Settings.soundSense(this@PlaybackService)
+            val on = id != null && again && Settings.muteAds(this@PlaybackService) && local
+            val mixOn = id != null && again && mix && local && sense
+            // Klang-Erkennung nur in diesem kurzen Fenster bzw. während des Hit-Mix (spart Akku)
+            SoundSense.active = sense && (on || mixOn)
+            if ((!on && !mixOn) || id == null) return
+            // Hit-Mix: Sprache zwischen den Liedern (Moderation, Jingle, Werbung) = stumm, bis wieder Musik kommt
+            val talkMute = mixOn && hitMix.muteForTalk()
+            if (!on) {
+                if (talkMute && !adMuted) { adMuted = true; p.volume = 0f }
+                else if (!talkMute && adMuted) { adMuted = false; p.volume = 1f }
+                return
+            }
             val known = Ads.duration(this@PlaybackService, id)
             val since = NowSong.sinceTune()
-            val sense = Settings.soundSense(this@PlaybackService)
             // Klang sagt sicher Musik (4 s am Stück): Lied hat angefangen, sofort wieder laut
             val music = sense && SoundSense.musicFor(4_000)
             // Werbe-Stream ohne bekannte Dauer: am Anfang nur Sprache und noch kein Liedtitel = Vorab-Werbung, stumm bis Musik
@@ -502,7 +519,7 @@ class PlaybackService : MediaLibraryService() {
             if (music || since > 120_000L) soundMuted = false
             // Bekannte Werbung: ihre Dauer lang stumm (auch wenn der Sender schon den Liedtitel schickt),
             // ohne Titel bis zu 10 s länger, falls der Spot länger dauert
-            val shouldMute = !music && (soundMuted || known > 0 && (since < known || (NowSong.title == null && since < known + 10_000)))
+            val shouldMute = talkMute || !music && (soundMuted || known > 0 && (since < known || (NowSong.title == null && since < known + 10_000)))
             if (shouldMute && !adMuted) { adMuted = true; p.volume = 0f }
             else if (!shouldMute && adMuted) { adMuted = false; p.volume = 1f }
         }
@@ -640,6 +657,14 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
     @Suppress("DEPRECATION")
+    private fun prevButton(): CommandButton =
+        CommandButton.Builder()
+            .setDisplayName("Vorheriger Sender")
+            .setIconResId(R.drawable.ic_prev)
+            .setSessionCommand(prevCommand)
+            .build()
+
+    @Suppress("DEPRECATION")
     private fun nextButton(): CommandButton =
         CommandButton.Builder()
             .setDisplayName("Nächster Hit")
@@ -723,6 +748,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
     private fun buttons(): ImmutableList<CommandButton> = when {
+        hitMix.isActive && hitMix.hasPrevious() -> ImmutableList.of(prevButton(), nextButton(), favButton(currentIsFav()))
         hitMix.isActive -> ImmutableList.of(nextButton(), favButton(currentIsFav()))
         isStory(session?.player?.currentMediaItem?.mediaId) -> ImmutableList.of(seekButton(true), seekButton(false), favButton(currentIsFav()))
         else -> ImmutableList.of(favButton(currentIsFav()))
@@ -896,7 +922,7 @@ class PlaybackService : MediaLibraryService() {
             MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                        .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand)
+                        .buildUpon().add(favCommand).add(sleepCommand).add(hitMixCommand).add(nextCommand).add(prevCommand)
                         .add(SessionCommand(CMD_FADEIN, Bundle.EMPTY)).add(SessionCommand(CMD_BEDTIME, Bundle.EMPTY))
                         .add(SessionCommand(CMD_ENDLESS, Bundle.EMPTY)).build()
                 )
@@ -942,6 +968,12 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
                 if (p.hasNextMediaItem()) p.seekToNextMediaItem()
+            }
+            if (customCommand.customAction == CMD_PREV) {
+                // Hit-Mix: zurück zum vorherigen Sender (live: dort läuft inzwischen evtl. schon das nächste Lied)
+                val ok = hitMix.previous()
+                updateFavButton()
+                return Futures.immediateFuture(SessionResult(if (ok) SessionResult.RESULT_SUCCESS else SessionResult.RESULT_ERROR_UNKNOWN))
             }
             if (customCommand.customAction == CMD_SLEEP) {
                 startSleepTimer(args.getInt("min", 0))

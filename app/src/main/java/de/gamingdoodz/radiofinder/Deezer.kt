@@ -28,8 +28,14 @@ object Deezer {
             "Rolf Zuckowski", "Simone Sommerland", "Deine Freunde", "Volker Rosin", "Detlev Jöcker",
             "Bibi Blocksberg", "Bibi und Tina", "Benjamin Blümchen", "Lichterkinder", "Kinderlieder Superstar",
             "Die Schlümpfe", "Frederik Vahle", "Sternschnuppe Kinderlieder", "Kikaninchen", "Paw Patrol Lied",
-            "Die Eiskönigin Lied", "Pippi Langstrumpf Lied", "Biene Maja Lied", "Kinderlieder Klassiker"
-        ).flatMap { load("search?q=${URLEncoder.encode(it, "UTF-8")}&limit=6") }
+            "Die Eiskönigin Lied", "Pippi Langstrumpf Lied", "Biene Maja Lied", "Kinderlieder Klassiker",
+            "Kinderliederbande", "Bummi", "Kinderlieder zum Mitsingen", "Disney Songs deutsch", "Der König der Löwen deutsch",
+            "Vaiana deutsch", "Encanto deutsch", "Dschungelbuch Probiers mal mit Gemütlichkeit", "Feuerwehrmann Sam Titellied",
+            "Peppa Wutz Lied", "Bob der Baumeister Lied", "Pumuckl Lied", "Wickie Lied", "Heidi Titellied", "Löwenzahn Lied",
+            "Sendung mit der Maus Lied", "Baby Shark Deutsch", "Alle meine Entchen", "Hänschen klein", "Die Vogelhochzeit",
+            "Aramsamsam", "Der Gorilla mit der Sonnenbrille", "Meine Oma fährt im Hühnerstall Motorrad", "Tschu Tschu wa",
+            "Schlaflieder Kinder", "Kinderdisco", "Toggo Music", "Sing Kinderlieder", "Conni Lied"
+        ).flatMap { load("search?q=${URLEncoder.encode(it, "UTF-8")}&limit=8") }
             .distinctBy { it.id }
             .sortedByDescending { rank[it.id] ?: 0 }
     }

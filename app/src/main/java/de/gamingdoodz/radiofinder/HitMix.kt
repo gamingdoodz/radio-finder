@@ -27,6 +27,8 @@ class HitMix(
     private val scope: CoroutineScope,
     private val player: () -> Player?,
     private val prepareItem: (MediaItem) -> MediaItem,
+    /** Ist der Player gerade wegen Werbung/Ansage stumm? Dann blendet der Mix nicht selbst ein. */
+    private val muted: () -> Boolean = { false },
 ) {
     companion object {
         fun prefs(context: Context) = context.applicationContext.getSharedPreferences("hitmix", Context.MODE_PRIVATE)
@@ -56,6 +58,8 @@ class HitMix(
     private var artistWords: List<List<String>> = emptyList()
     /** Themen-Mix (Weihnachten, Kinder): nur passende Lieder, keine "ähnlichen" Künstler oder Zufallsmusik. */
     private var strict = false
+    /** Mix auf eine Zeit ausgelegt (80er, 90er, Oldies …): aktuelle Chart-Hits nicht bevorzugen. */
+    private var eraMix = false
     /** Wörter, an denen man ein Themen-Lied im Titel erkennt (z. B. "Christmas"). */
     private var themeWords: Regex? = null
     /** Titel, der beim Umschalten lief – ändert er sich, ist das Lied vorbei. */
@@ -195,8 +199,19 @@ class HitMix(
         artistWords = artistNames.map { Scanner.words(it) }.filter { it.isNotEmpty() }
         genreIds = genreStations.map { it.id }.toSet()
         strict = genre?.key == "xmas" || genre?.key == "kids"
+        eraMix = genre?.key in setOf("80s", "90s", "2000s", "oldies", "rockclassics", "classic", "jazz") ||
+            (newIsPlaylist && Regex("(?i)\\b(19)?[5-9]0(er|s)\\b|oldie|klassiker|classic|retro|kult").containsMatchIn(name))
         themeWords = if (genre?.key == "kids")
-            Regex("(?i)kinderlied|zuckowski|sommerland|deine freunde|volker rosin|jöcker|lichterkinder|bibi blocksberg|bibi und tina|benjamin blümchen|schlümpfe|biene maja|pippi|kikaninchen|sternschnuppe|frederik vahle|paw patrol|sandmännchen|die maus|kinderdisco")
+            Regex("(?i)kinderlied|kinder lied|zuckowski|sommerland|deine freunde|volker rosin|jöcker|lichterkinder|bibi blocksberg|bibi und tina|benjamin blümchen|schlümpfe|biene maja|pippi|kikaninchen|sternschnuppe|frederik vahle|paw patrol|sandmännchen|die maus|kinderdisco|" +
+                "kinderlieder superstar|kinderlieder-?bande|bummi|sing ?kinderlieder|toggolino|" +
+                "eiskönigin|lass jetzt los|vaiana|encanto|könig der löwen|dschungelbuch|probier'?s mal mit gemütlichkeit|arielle|" +
+                "feuerwehrmann sam|peppa|bob der baumeister|conni|janosch|tigerente|sendung mit der maus|löwenzahn|pumuckl|" +
+                "räuber hotzenplotz|wickie|alfred j|grüffelo|regenbogenfisch|bobo siebenschläfer|leo lausemaus|" +
+                "baby shark|old macdonald|wheels on the bus|twinkle twinkle|head shoulders|itsy bitsy|five little|" +
+                "alle meine entchen|hänschen klein|kuckuck|fuchs du hast|backe backe kuchen|häschen in der grube|ein vogel wollte|" +
+                "der mond ist aufgegangen|guten abend gut' nacht|weißt du wieviel|schlaf kindlein|bruder jakob|hoch auf dem gelben|" +
+                "die vogelhochzeit|ich bin ein musikante|meine oma fährt|das lied über mich|tschu tschu wa|der gorilla mit der|" +
+                "hey hey wickie|aramsamsam|laurentia|jetzt fahrn wir|in der weihnachtsbäckerei|lasst uns froh|kindergarten")
         else if (genre?.key == "xmas")
             Regex("(?i)christmas|xmas|weihnacht|santa claus|jingle bell|noel|navidad|rudolph|sleigh|mistletoe|let it snow|snowman|winter wonderland|silent night|stille nacht|tannenbaum|advent|nikolaus|lebkuchen|schneeflöckchen|leise rieselt|kling glöckchen|feliz navidad|little drummer|frosty")
         else null
@@ -283,6 +298,9 @@ class HitMix(
         songStartedAt = 0L
         waitingForNext = false
         autoSwitches.clear()
+        endTimer?.cancel(); endTimer = null
+        history.clear(); currentStation = null
+        fadeJob?.cancel(); fadeJob = null
         prefs(context).edit().remove("name").remove("now").apply()
     }
 
@@ -427,6 +445,10 @@ class HitMix(
             val overrun = NowSong.stationId == currentStationId && NowSong.overrun() &&
                 NowSong.title?.let { Scanner.normalize(it) } == switchedTitle
             if ((broken || overrun) && (!waitingForNext || tick % 3 == 0)) { switchNow(force = broken); continue }
+            // Klang-Erkennung hört Moderation/Werbung zwischen den Liedern (ist schon stumm): gleich zum nächsten Hit
+            if (muteForTalk() && SoundSense.talkFor(3_000)) { switchNow(); continue }
+            // Liedende sekundengenau bekannt: kurz vor Schluss umschalten, bevor die Moderation anfängt
+            planEndSwitch(myGen)
             if (waitingForNext && tick % 3 == 0) { switchNow(); continue }
             if (tick % 7 != 0) continue   // ca. alle 20 Sekunden: Server-Stand + nächsten Kandidaten vorbereiten
             poll(force = false)
@@ -455,6 +477,40 @@ class HitMix(
         }
     }
 
+    private var endTimer: Job? = null
+
+    /** Läuft ein Lied mit sekundengenau bekanntem Anfang und bekannter Länge, kurz vor dem Ende umschalten. */
+    private fun planEndSwitch(myGen: Int) {
+        if (endTimer?.isActive == true) return
+        if (NowSong.stationId != currentStationId || !NowSong.known() || !NowSong.startLocal) return
+        val left = NowSong.durMs - NowSong.elapsed()
+        if (left !in 0L..4_500L) return
+        val title = NowSong.title
+        endTimer = scope.launch {
+            delay((left - 1_200L).coerceAtLeast(0L))
+            if (gen == myGen && NowSong.title == title && NowSong.stationId == currentStationId && player()?.playWhenReady == true) switchNow()
+        }
+    }
+
+    /** Lied ist fast vorbei (weniger als 1,5 Min. übrig): gar nicht erst hinschalten. */
+    private fun almostOver(n: LiveIndex.Now, t: Long): Boolean {
+        if (!LiveIndex.sinceKnown(n, t)) return false
+        val age = t - n.since
+        val dur = Covers.byKey(n.normalized)?.durMs ?: 0L
+        return if (dur > 0) dur - age < 90_000L else age > 210_000L
+    }
+
+    /**
+     * Soll wegen Sprache stumm sein? Klang-Erkennung hört seit 1,5 s nur Sprache, und es läuft gerade kein Lied
+     * (oder das Lied ist laut Länge vorbei). Mitten in einem Lied (Rap, gesprochene Stelle, Intro) nie.
+     */
+    fun muteForTalk(): Boolean {
+        if (job?.isActive != true || !SoundSense.talkFor(1_500)) return false
+        if (NowSong.stationId != currentStationId) return false
+        if (NowSong.title == null) return true
+        return NowSong.known() && NowSong.elapsed() > NowSong.durMs - 15_000L
+    }
+
     /** Vorbereiteten Kandidaten nehmen, wenn er noch stimmt (läuft noch dasselbe Lied, nicht zu alt). */
     private fun takeCandidate(): Choice? {
         val (at, c) = candidate ?: return null
@@ -463,13 +519,40 @@ class HitMix(
         val cur = LiveIndex.get(c.now.station.id) ?: return null
         if (cur.normalized != c.now.normalized || c.now.station.id == currentStationId) return null
         if (c.key in played) return null
+        if (almostOver(cur, System.currentTimeMillis())) return null
         return c
     }
 
     /** Passt dieses Lied zum Mix? (Liste, Genre-Sender, Thema oder bekannter Hit bei offenen Mixen) */
     private fun fitsTitle(norm: String, stationId: String): Boolean =
         songs.any { it.matches(norm) } || stationId in genreIds || themeWords?.containsMatchIn(norm) == true ||
-            (!strict && genreIds.isEmpty() && (Radar.chartPlays[norm] ?: 0) >= 15)
+            (!strict && genreIds.isEmpty() && (Radar.chartPlays[norm] ?: 0) >= 15) ||
+            // Sender mit Herz (Favorit): dort bleiben, solange Musik ohne Ansage weiterläuft (nicht bei Themen-Mixen)
+            (!strict && Favorites.isFav(context, "st:$stationId"))
+
+    // ---------- Zurück: der vorherige Sender (live, also mit dem Lied, das dort jetzt läuft) ----------
+    private var currentStation: Station? = null
+    private val history = ArrayDeque<Station>()
+
+    /** Zum vorherigen Sender zurück. Es ist Live-Radio: man hört, was dort jetzt läuft, nicht den alten Liedanfang. */
+    fun previous(): Boolean {
+        if (job?.isActive != true) return false
+        val st = history.removeLastOrNull() ?: return false
+        val now = LiveIndex.get(st.id)
+        currentStation = st
+        currentStationId = st.id
+        currentSongKey = now?.normalized
+        switchedTitle = now?.normalized
+        songStartedAt = now?.since ?: System.currentTimeMillis()
+        waitingForNext = false
+        candidate = null
+        val song = now?.title?.takeIf { LiveIndex.isMusic(it) }
+        prefs(context).edit().putString("now", "Zurück zu ${st.name}" + (song?.let { " · läuft jetzt: $it" } ?: " · live")).apply()
+        switchTo(st.toEntry(song).toMediaItem())
+        return true
+    }
+
+    fun hasPrevious() = job?.isActive == true && history.isNotEmpty()
 
     private var rotation = 0
 
@@ -503,6 +586,9 @@ class HitMix(
 
     private fun commit(c: Choice): MediaItem {
         val n = c.now
+        // Für "Zurück": vorherigen Sender merken
+        currentStation?.let { prev -> if (prev.id != n.station.id) { history.addLast(prev); while (history.size > 20) history.removeFirst() } }
+        currentStation = n.station
         currentStationId = n.station.id
         currentSongKey = c.key
         switchedTitle = n.normalized
@@ -522,7 +608,7 @@ class HitMix(
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
         val pool = LiveIndex.fresh().filter {
             (ids == null || it.station.id in ids) && it.station.id != currentStationId && it.normalized != currentTitle &&
-                LiveIndex.isMusic(it.title) && !LiveIndex.endingSoon(it, t) &&
+                LiveIndex.isMusic(it.title) && !almostOver(it, t) &&
                 (anyMusic || LiveIndex.sinceKnown(it, t))   // nur Lieder, deren Anfang bekannt ist (sonst evtl. mittendrin)
         }
         fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
@@ -555,7 +641,9 @@ class HitMix(
         return list.sortedBy { (n, key) ->
                 // Bekannte Lieder deutlich bevorzugen: läuft auf vielen Sendern, oft gespielt heute, weit oben in der Liste
                 val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 60_000L
-                val played = (Radar.chartPlays[n.normalized] ?: 0).coerceAtMost(200) * 1_500L
+                // Gerade oft im Radio = aktuell und bekannt. Bei Ära-Mixen (80er, Oldies …) zählt das nicht,
+                // dort entscheidet die Liste des Mixes, sonst kämen nur die paar Dauerbrenner, die heute noch laufen.
+                val played = if (eraMix) 0L else (Radar.chartPlays[n.normalized] ?: 0).coerceAtMost(300) * 2_000L
                 val top = rank[key]?.let { (100 - it).coerceAtLeast(0) * 2_000L } ?: 0L
                 val knownArtist = if (artistWords.any { w -> w.all { n.normalized.contains(it) } }) 90_000L else 0L
                 // Frisch angefangen zählt; fast vorbei (über 3 Min.) und Sender mit Vorab-Werbung rutschen nach hinten
@@ -622,5 +710,29 @@ class HitMix(
         scope.launch { delay(1_500); refreshQueue() }
         p.prepare()
         p.play()
+        fadeIn(p)
+    }
+
+    private var fadeJob: Job? = null
+
+    /** Weicher Wechsel: leise starten und in ~0,6 s hochblenden, sobald der neue Sender spielt (kein Knacken, kein Anriss). */
+    private fun fadeIn(p: Player) {
+        fadeJob?.cancel()
+        if (Cast.active) return   // beim Casten ist die Lautstärke die des Lautsprechers: nicht anfassen
+        try { p.volume = 0f } catch (_: Exception) { return }
+        fadeJob = scope.launch {
+            try {
+                val start = System.currentTimeMillis()
+                while (!p.isPlaying && System.currentTimeMillis() - start < 10_000L) delay(100)
+                delay(250)
+                for (i in 1..10) {
+                    if (muted()) return@launch   // Werbung/Ansage: die Stummschaltung übernimmt
+                    p.volume = i / 10f
+                    delay(60)
+                }
+            } finally {
+                if (!muted() && p.volume < 1f) try { p.volume = 1f } catch (_: Exception) {}
+            }
+        }
     }
 }

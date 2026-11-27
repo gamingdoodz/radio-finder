@@ -11,8 +11,10 @@ object NowSong {
     @Volatile var durMs = 0L                 // Länge laut Deezer (0 = unbekannt)
     @Volatile var tunedAt = 0L               // Uhrzeit, zu der der Sender eingeschaltet wurde
     @Volatile var localAt = 0L               // zuletzt einen Titel direkt aus dem Stream bekommen
+    /** Liedanfang selbst beim Hören gesehen (Titelwechsel im Stream, sekundengenau), nicht nur vom Server geschätzt. */
+    @Volatile var startLocal = false
 
-    fun tune(id: String?) { stationId = id; title = null; startMs = 0L; durMs = 0L; tunedAt = System.currentTimeMillis(); localAt = 0L }
+    fun tune(id: String?) { stationId = id; title = null; startMs = 0L; durMs = 0L; tunedAt = System.currentTimeMillis(); localAt = 0L; startLocal = false }
 
     fun elapsed(): Long = if (startMs > 0) (System.currentTimeMillis() - startMs).coerceAtLeast(0) else 0L
 
