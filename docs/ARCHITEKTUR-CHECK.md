@@ -274,4 +274,10 @@ Nur, wo es wirklich etwas bringt, Lizenz frei nutzbar, kaum Akku und keine Serve
 | Empfehlungen („Mehr wie dieses“) | – | ❌ Kein Modell nötig: die Server-Statistik, welche Lieder Sender hintereinander spielen, ist besser und kostet fast nichts. |
 | Spracheingabe | Android-Spracherkennung | ✅ schon da (Android Auto/Google). |
 
+**Umgesetzt 27.11. (Wunsch von Kevin):** YAMNet (`SoundSense.kt`, Modell `assets/yamnet.tflite`, LiteRT 1.4.0, 16-KB-ausgerichtet geprüft).
+Hört nur in den ersten ~3 Minuten nach dem Umschalten bzw. solange „Werbung stumm“ aktiv ist, alle 2 s eine Sekunde, niedrige Priorität,
+nichts wird gespeichert oder gesendet. Wirkung: bei bekannten Werbe-Streams am Anfang nur Sprache ohne Liedtitel → stumm, bis Musik kommt;
+erkennt es 4 s Musik am Stück → sofort wieder laut (auch bei gelernter Werbedauer). Abschaltbar: Einstellungen → „Werbung am Klang erkennen“.
+Werbung herausfiltern geht nicht (sie ist Teil des Streams), nur stumm schalten. Noch nicht am Gerät getestet.
+
 Fazit: Ein großes Sprachmodell bringt in der App nichts. Einziger Kandidat ist die kleine Klang-Erkennung (YAMNet) – erst, wenn Grundfunktionen im Auto getestet sind.

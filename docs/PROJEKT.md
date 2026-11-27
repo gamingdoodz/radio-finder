@@ -91,7 +91,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
 ## Offen
 
-- Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft).
+- Android Auto, Hit-Mix, Playlists, Nachrichten im Auto testen (nur gebaut, nicht im Auto geprüft). Ebenso Klang (Equalizer) und Klang-Erkennung (YAMNet).
 - Prüfen, ob Hitradar `budget.hitradar.level` richtig liest, sobald Valdrakor es liefert (`/health` → `modus_quelle`).
 - Server wartet auf das nächste Valdrakor-Update: `lage.json` fehlt, `/api/last` hat noch kein `updateErlaubt` (Stand 27.11. 8 Uhr).
   radar läuft seit 27.11. 7:43 schon mit dem neuen Stand (vom Spiel neu gestartet; Verteiler, Shoutcast, rechtssicher, Hinweise),
@@ -123,3 +123,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 27.11.: radar-update erkennt, wenn radar schon anders neu gestartet wurde (kein unnötiger Neustart). Play-Upload vom 26.11. abends erfolgreich.
 - 27.11.: Klang-Voreinstellungen (Equalizer des Handys, `Klang.kt`): Aus, Mehr Bass, Klare Stimmen, Auto, Mehr Höhen.
 - 27.11.: Langsamer Hit-Mix: Server fragte ~10.000 Sender reihum ab (bei den Grenzen des Spiels nur ~5 Abfragen/s), jeder Sender kam nur alle ~30 Min. dran, kein Liedanfang war bekannt. Jetzt Kernliste: Musik-Sender (DE/AT/CH zuerst) alle ~80 s, der Rest selten, gleiche Last. /health zeigt kern, abfragen_s, anfang_bekannt. App: Hit-Mix lädt Lieder, Genre-Sender und Server-Stand gleichzeitig, Weihnachts-/Kinder-Mix spielt auch Lieder mit unbekanntem Anfang statt nichts, leere Genre-Senderlisten werden 30 Min. gemerkt.
+- 27.11.: Klang-Erkennung YAMNet auf dem Handy (`SoundSense.kt`): Werbung am Senderanfang stumm, bei erkannter Musik sofort laut. Nur kurz nach dem Umschalten aktiv, abschaltbar. Am Gerät testen!
