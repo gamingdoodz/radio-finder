@@ -64,6 +64,8 @@ fun sync(): Got {
     }
     // Wie die App: weg gemeldete Sender nicht sofort vergessen (kommen oft mit neuem Lied zurück)
     o.optJSONArray("gone")?.let { gone += it.length() }
+    // Wie die App: unveränderte Sender gelten als zum Abgleich-Zeitpunkt gesehen
+    if (o.optInt("full") != 1 && serverT > 0) live.values.forEach { if (it.seen < serverT) it.seen = serverT }
     return g
 }
 
