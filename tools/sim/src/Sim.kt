@@ -38,6 +38,7 @@ val live = HashMap<String, Live>()
 var version = 0L
 var serverT = 0L
 
+val brands: Set<String> get() = live.values.flatMap { MixLogic.stationBrands(it.name) }.toSet()
 var changes = 0; var exactChanges = 0; var estimated = 0; var reAdded = 0; var added = 0; var gone = 0
 
 fun sync(): Got {
@@ -154,7 +155,7 @@ fun main() {
         val songOver = curLive == null || MixLogic.normalize(curLive.title) != curTitle || !MixLogic.isMusicTitle(curLive.title)
         if (songOver) {
             val cand = rockIds.mapNotNull { id -> live[id]?.let { id to it } }
-                .filter { (id, l) -> id != cur && l.exact && MixLogic.isMusicTitle(l.title) && !MixLogic.isStationJingle(l.title, l.name) && now - l.since in 0..90_000 }
+                .filter { (id, l) -> id != cur && l.exact && MixLogic.isMusicTitle(l.title) && !MixLogic.isStationJingle(l.title, l.name) && !MixLogic.isProgramTitle(l.title, brands) && now - l.since in 0..90_000 }
                 .filter { (_, l) -> MixLogic.stationBaseName(l.name) != lastBase && played.takeLast(20).none { MixLogic.sameSong(it, MixLogic.normalize(l.title)) } }
                 .maxByOrNull { it.second.since }
             if (cand == null) { waits++ } else {
