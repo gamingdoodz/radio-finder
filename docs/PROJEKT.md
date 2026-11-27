@@ -34,6 +34,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 
 ## Wichtige Dateien der App
 
+- `config/servers.json` – Server-Adressen für die App (bei Umzug hier ändern).
 - `PlaybackService.kt` – Hintergrund-Wiedergabe, Android Auto (Listen, Suche, Sprachbefehle), Casten, Schlaf-Timer, Wecker-Einblenden,
   Werbung stumm, Weiterspielen nach dem letzten Lied. Android Auto darf nie „Auswahl konnte nicht geladen werden“ zeigen:
   `onSetMediaItems`/`onAddMediaItems` nie leer, Fehler abfangen, notfalls ein Sender mit Musik.
@@ -95,7 +96,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   vorgemerkt und wird ohne Freigabe nicht gemacht. Danach prüfen, ob der Neustart von selbst durchläuft (`/health` zeigt `hinweise`).
 - Prüfen, ob `lage.json` `updateErlaubt`/`updateDran` wirklich so liefert (Ausgabe von `server/ops/run.sh` im Lauf „Server aktualisieren“).
   Fehlt das Feld, startet radar nie neu (Neustart bleibt vorgemerkt).
-- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. Zuerst: Server-Adresse per `config.json` statt fester IP, HTTP-Cache, Signier-Schlüssel aus dem Repo, Abhängigkeiten aktualisieren.
+- Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite) und 8 erledigt; als Nächstes Abhängigkeiten, Liedtexte, Equalizer.
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
@@ -114,3 +115,4 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
 - 26.11.: Hitradar sparsamer: ein Verteiler statt 250 Abfrager (kaum noch Leerlauf-CPU), KI startet nur bei Bedarf (spart ~1 GB RAM), ehrliche cpu/ramMb stündlich gemeldet.
 - 26.11.: Anmeldung mit "unit":"radar.service"; Hinweise des Spiels (hinweise/hitradar.json) werden täglich gelesen und in /health gezeigt. Update-Freigabe auch aus /api/last, falls lage.json fehlt (nach Neustart des Servers fehlte sie). Kurze Aussetzer von /api/last lassen die Stufe nicht mehr hin und her springen.
 - 27.11.: Architektur-Check: Bauweise passt (Kotlin/Media3 + ein sparsamer Server), Vorschläge in `docs/ARCHITEKTUR-CHECK.md`. „App bauen“ startet nicht mehr bei reinen Doku-Änderungen (`docs/`, `*.md`, `alexa/`). README aktualisiert.
+- 27.11.: Server-Adressen aus `config/servers.json` (App liest täglich, eingebaute als Rückfall). Zwischenspeicher für seltene Server-Antworten auf dem Handy. Kein Signier-Schlüssel mehr im Repo, Release nur mit Upload-Secret.

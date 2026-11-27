@@ -186,6 +186,16 @@ Hintergrund, Android Auto (Listen, Suche, Sprache), Casten, Schlaf-Timer, Wecker
 
 - Workflow „App bauen“ startet nicht mehr bei Änderungen nur an `docs/`, `*.md` oder `alexa/` (spart Bau-Zeit und unnötige Releases).
 - README auf den aktuellen Stand gebracht (Name Hitradar, Dateiname `Hitradar.apk`, Play-Test erwähnt).
+- **Empfehlung 1 umgesetzt:** Server-Adressen stehen in `config/servers.json`. Die App holt die Liste einmal am Tag
+  (raw.githubusercontent.com, sonst jsDelivr), merkt sie sich und hängt die eingebauten Adressen immer als Rückfall an.
+  Umzug = neue Adresse oben in `servers.json` eintragen.
+- **Empfehlung 2 (App-Seite) umgesetzt:** Zwischenspeicher auf dem Handy für Antworten, die sich selten ändern
+  (Charts/Beliebt/Neu 10 min, Senderlisten und „Mehr wie dieses“ 1 h, Werbelängen 6 h, gefundene Cover 7 Tage).
+  Übersteht einen Neustart der App, ist der Server weg, gilt die letzte Antwort. Server unverändert
+  (`Cache-Control` am Server bleibt Vorschlag für ein späteres Server-Update).
+- **Empfehlung 8 umgesetzt:** `radiofinder.keystore` aus dem Repo entfernt. Release wird nur noch mit dem geheimen
+  Upload-Schlüssel signiert, ohne ihn bricht „App bauen“ mit klarer Meldung ab. Der alte Schlüssel steht weiter in der
+  Git-Geschichte und gilt als öffentlich, wird aber nicht mehr benutzt.
 
 Alles andere sind Vorschläge. Große Umbauten (Code aufteilen, Room, eigene Dateien, Push-Wächter, Server-Änderungen) nur nach Freigabe
 und Stück für Stück, damit Android Auto und Hit-Mix stabil bleiben. Server-Änderungen nur über die Serverabsprache.

@@ -17,14 +17,9 @@ android {
         versionName = "1.0.$buildNumber"
     }
 
-    // Fester Schlüssel, damit sich neue Versionen über die alte installieren lassen
+    // Signieren nur mit dem geheimen Upload-Schlüssel. Kein Schlüssel im (öffentlichen) Repo.
+    // Debug-Bauten nutzen den automatischen Debug-Schlüssel von Android.
     signingConfigs {
-        create("fixed") {
-            storeFile = file("radiofinder.keystore")
-            storePassword = "radiofinder"
-            keyAlias = "radiofinder"
-            keyPassword = "radiofinder"
-        }
         // Geheimer Upload-Schlüssel für Google Play (aus den GitHub-Secrets)
         val upload = System.getenv("UPLOAD_KEYSTORE_FILE")
         if (upload != null) {
@@ -43,10 +38,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("upload") ?: signingConfigs.getByName("fixed")
-        }
-        debug {
-            signingConfig = signingConfigs.getByName("fixed")
+            // Ohne Upload-Schlüssel bleibt die Release-Datei unsigniert (der Workflow bricht dann vorher ab)
+            signingConfig = signingConfigs.findByName("upload")
         }
     }
 

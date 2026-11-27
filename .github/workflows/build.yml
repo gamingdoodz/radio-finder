@@ -3,7 +3,7 @@ name: App bauen
 on:
   push:
     branches: [main]
-    paths-ignore: ["server/**", "README.md", "docs/**", "**/*.md", "alexa/**"]
+    paths-ignore: ["server/**", "README.md", "docs/**", "**/*.md", "alexa/**", "config/**"]
   workflow_dispatch:
   # Google erlaubt nur wenige Uploads pro Tag: nachts automatisch die neueste Version hochladen
   schedule:
@@ -41,6 +41,10 @@ jobs:
             echo "::add-mask::$CLEAN"
             echo "UPLOAD_KEYSTORE_FILE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
             echo "UPLOAD_KEYSTORE_PASSWORD=$CLEAN" >> "$GITHUB_ENV"
+          else
+            # Ohne Upload-Schlüssel nichts veröffentlichen (es gibt keinen Ersatz-Schlüssel mehr)
+            echo "::error::Upload-Schlüssel (UPLOAD_KEYSTORE_B64) fehlt in den Secrets"
+            exit 1
           fi
 
       - name: APK und Store-Paket bauen

@@ -6,7 +6,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.URLEncoder
+import java.security.MessageDigest
 
 /**
  * Der Hitradar-Server beobachtet rund um die Uhr tausende Sender.
@@ -14,18 +16,99 @@ import java.net.URLEncoder
  * Ist er weg, scannt die App wie bisher selbst.
  */
 object Radar {
-    /** Hitradar-Server bei Oracle: verschlüsselt zuerst, sonst die direkte Adresse. */
-    private val servers = listOf("https://130-61-78-232.sslip.io:8080", "http://130.61.78.232")
+    /** Eingebaute Adressen (Rückfall): verschlüsselt zuerst, sonst die direkte Adresse. */
+    private val builtIn = listOf("https://130-61-78-232.sslip.io:8080", "http://130.61.78.232")
+
+    /**
+     * Aktuelle Server-Adressen stehen in config/servers.json im Repo (kostenlos über GitHub ausgeliefert).
+     * Zieht der Server um, reicht eine Änderung dort: die App holt die Liste einmal am Tag.
+     * Die eingebauten Adressen bleiben immer als letzter Rückfall dabei.
+     */
+    private val configUrls = listOf(
+        "https://raw.githubusercontent.com/gamingdoodz/radio-finder/main/config/servers.json",
+        "https://cdn.jsdelivr.net/gh/gamingdoodz/radio-finder@main/config/servers.json",
+    )
+    @Volatile private var servers: List<String> = builtIn
     @Volatile private var active = 0
+    @Volatile private var configStarted = false
 
     /** Fragt den aktiven Server; geht er nicht, den nächsten. */
     private fun fetch(path: String, readMs: Int, maxBytes: Int): String? {
-        for (n in servers.indices) {
-            val i = (active + n) % servers.size
-            val text = Net.get(servers[i] + path, 4000, readMs, maxBytes)
+        val list = servers
+        for (n in list.indices) {
+            val i = (active + n) % list.size
+            val text = Net.get(list[i] + path, 4000, readMs, maxBytes)
             if (text != null) { active = i; return text }
         }
         return null
+    }
+
+    /** Liest {"servers":[...]} und übernimmt die Adressen (eingebaute immer hinten dran). */
+    private fun applyConfig(text: String): Boolean {
+        val arr = runCatching { JSONObject(text).optJSONArray("servers") }.getOrNull() ?: return false
+        val list = (0 until arr.length()).map { arr.optString(it).trim().trimEnd('/') }
+            .filter { it.startsWith("https://") || it.startsWith("http://") }
+            .distinct().take(5)
+        if (list.isEmpty()) return false
+        val all = (list + builtIn).distinct()
+        if (all != servers) { servers = all; active = 0 }
+        return true
+    }
+
+    /** Gespeicherte Liste sofort nutzen, höchstens einmal am Tag neu holen (im Hintergrund). */
+    private fun loadConfig(context: Context) {
+        if (configStarted) return
+        configStarted = true
+        Thread {
+            runCatching {
+                val p = context.getSharedPreferences("radar_config", Context.MODE_PRIVATE)
+                p.getString("json", null)?.let { applyConfig(it) }
+                if (System.currentTimeMillis() - p.getLong("at", 0L) < 24 * 3600_000L) return@runCatching
+                for (u in configUrls) {
+                    val t = Net.get(u, 5000, 8000, 50_000) ?: continue
+                    if (applyConfig(t)) {
+                        p.edit().putString("json", t).putLong("at", System.currentTimeMillis()).apply()
+                        break
+                    }
+                }
+            }
+            cleanCache(context)
+        }.start()
+    }
+
+    // ---- Zwischenspeicher auf dem Handy: Antworten, die sich selten ändern, übersteht auch einen Neustart der App ----
+    private fun cacheFile(path: String): File? {
+        val c = appContext ?: return null
+        val dir = File(c.cacheDir, "radar")
+        if (!dir.exists()) dir.mkdirs()
+        val h = MessageDigest.getInstance("SHA-1").digest(path.toByteArray()).joinToString("") { "%02x".format(it) }
+        return File(dir, h)
+    }
+
+    /**
+     * Wie fetch, aber höchstens alle maxAgeMs wirklich beim Server. Ist der Server weg, gilt die letzte Antwort.
+     * keep: nur solche Antworten speichern (z. B. Cover nur, wenn wirklich eins gefunden wurde).
+     */
+    private fun fetchCached(path: String, maxAgeMs: Long, readMs: Int, maxBytes: Int, keep: (String) -> Boolean = { true }): String? {
+        val f = runCatching { cacheFile(path) }.getOrNull()
+        if (f != null && f.exists() && System.currentTimeMillis() - f.lastModified() < maxAgeMs) {
+            runCatching { f.readText() }.getOrNull()?.let { return it }
+        }
+        val text = fetch(path, readMs, maxBytes)
+        if (text != null) {
+            if (f != null && keep(text)) runCatching { f.writeText(text) }
+            return text
+        }
+        return if (f != null && f.exists()) runCatching { f.readText() }.getOrNull() else null
+    }
+
+    /** Alte Einträge (über 8 Tage) und zu viele Dateien wegräumen. */
+    private fun cleanCache(context: Context) = runCatching {
+        val files = File(context.cacheDir, "radar").listFiles() ?: return@runCatching
+        val old = System.currentTimeMillis() - 8 * 24 * 3600_000L
+        files.filter { it.lastModified() < old }.forEach { it.delete() }
+        val rest = files.filter { it.exists() }.sortedByDescending { it.lastModified() }
+        rest.drop(1500).forEach { it.delete() }
     }
 
     @Volatile private var appContext: Context? = null
@@ -34,7 +117,11 @@ object Radar {
     @Volatile private var lastFail = 0L
     private val lock = Mutex()
 
-    fun init(context: Context) { appContext = context.applicationContext; Region.load(context) }
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        Region.load(context)
+        loadConfig(context.applicationContext)
+    }
 
     /** Länder geändert: alles neu vom Server holen. */
     fun resetSync() { synchronized(known) { resetGen++; known.clear(); version = 0L }; lastTry = 0L; LiveIndex.clear() }
@@ -165,7 +252,7 @@ object Radar {
 
     /** Neu & angesagt: Lieder, die gerade deutlich öfter im Radio laufen als vorher. */
     suspend fun rising(): List<String> = withContext(Dispatchers.IO) {
-        val text = fetch("/rising", 8000, 500_000) ?: return@withContext emptyList()
+        val text = fetchCached("/rising", 10 * 60_000L, 8000, 500_000) ?: return@withContext emptyList()
         runCatching {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("title")?.let { t -> Text.clean(t) } }
@@ -175,7 +262,7 @@ object Radar {
 
     suspend fun charts(): List<Pair<String, Int>> = withContext(Dispatchers.IO) {
         chartsCache?.let { (at, l) -> if (System.currentTimeMillis() - at < 10 * 60_000L && l.isNotEmpty()) return@withContext l }
-        val text = fetch("/charts", 8000, 2_000_000) ?: return@withContext chartsCache?.second.orEmpty()
+        val text = fetchCached("/charts", 10 * 60_000L, 8000, 2_000_000) ?: return@withContext chartsCache?.second.orEmpty()
         val list = runCatching {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { i ->
@@ -191,7 +278,7 @@ object Radar {
 
     /** Lieder, die Sender oft direkt vor oder nach diesem Lied spielen ("Mehr wie dieses"). */
     suspend fun similar(radioTitle: String): List<String> = withContext(Dispatchers.IO) {
-        val text = fetch("/similar?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 8000, 1_000_000) ?: return@withContext emptyList()
+        val text = fetchCached("/similar?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 3600_000L, 8000, 1_000_000) ?: return@withContext emptyList()
         runCatching {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("title")?.let { t -> Text.clean(t) } }
@@ -209,7 +296,7 @@ object Radar {
     /** Werbelängen aller Nutzer holen (höchstens alle 6 Stunden). */
     suspend fun loadAds() = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() - adsAt < 6 * 3600_000L) return@withContext
-        val text = fetch("/ads", 8000, 3_000_000) ?: return@withContext
+        val text = fetchCached("/ads", 6 * 3600_000L, 8000, 3_000_000) ?: return@withContext
         runCatching {
             val o = JSONObject(text)
             Ads.shared = o.keys().asSequence().associateWith { o.optLong(it) }
@@ -249,7 +336,8 @@ object Radar {
     class CoverInfo(val art: String, val title: String, val artist: String, val durMs: Long)
 
     fun coverBlocking(radioTitle: String): CoverInfo? {
-        val text = fetch("/cover?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 10_000, 100_000) ?: return null
+        val text = fetchCached("/cover?q=" + URLEncoder.encode(radioTitle, "UTF-8"), 7 * 24 * 3600_000L, 10_000, 100_000,
+            keep = { runCatching { JSONObject(it).optString("art").startsWith("http") }.getOrDefault(false) }) ?: return null
         return runCatching {
             val o = JSONObject(text)
             CoverInfo(o.optString("art"), o.optString("title"), o.optString("artist"), o.optLong("dur") * 1000L)
@@ -271,7 +359,7 @@ object Radar {
 
     /** Senderliste vom Server ("popular", "kids", "tag:rock"). null = nicht erreichbar. */
     fun listBlocking(type: String): List<Station>? {
-        val text = fetch("/list?t=" + URLEncoder.encode(type, "UTF-8"), 10_000, 2_000_000) ?: return null
+        val text = fetchCached("/list?t=" + URLEncoder.encode(type, "UTF-8"), 3600_000L, 10_000, 2_000_000) ?: return null
         return runCatching {
             val arr = JSONArray(text)
             (0 until arr.length()).mapNotNull { i ->
@@ -294,7 +382,7 @@ object Radar {
     /** Was Hitradar-Hörer gerade mögen (Lieder und Mixe), höchstens alle 10 Minuten neu. */
     suspend fun popular(): Popular? = withContext(Dispatchers.IO) {
         popularCache?.let { (at, p) -> if (System.currentTimeMillis() - at < 10 * 60_000L) return@withContext p }
-        val text = fetch("/popular", 8000, 1_000_000) ?: return@withContext popularCache?.second
+        val text = fetchCached("/popular", 10 * 60_000L, 8000, 1_000_000) ?: return@withContext popularCache?.second
         runCatching {
             val o = JSONObject(text)
             val s = o.optJSONArray("songs") ?: JSONArray()
