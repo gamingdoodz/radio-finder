@@ -20,7 +20,7 @@ object Region {
 
     fun load(c: Context) { current = Settings.region(c) }
 
-    fun label(c: Context) = when (Settings.region(c)) { "dach" -> "DACH"; "eu" -> "Europa"; "dach_en" -> "DACH + EN"; "all" -> "Weltweit"; else -> "DACH" }
+    fun label(c: Context) = when (Settings.region(c)) { "dach" -> "DE, AT, CH"; "eu" -> "Europa"; "dach_en" -> "DE, AT, CH + Englisch"; "all" -> "Weltweit"; else -> "DE, AT, CH" }
 
     /** cc = Länderkürzel vom Server; null = unbekannt (alter Server), dann erlauben. */
     fun allows(cc: String?): Boolean {

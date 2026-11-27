@@ -10,7 +10,8 @@ import androidx.media3.session.SessionToken
 
 /** Kurz mit dem Player verbinden (für Wecker und Widget), etwas tun, wieder trennen. */
 object PlayerControl {
-    fun run(context: Context, done: () -> Unit = {}, block: (MediaController) -> Unit) {
+    /** holdMs: so lange verbunden bleiben (Hit-Mix/Wecker brauchen zum Laden manchmal über 10 s). */
+    fun run(context: Context, done: () -> Unit = {}, holdMs: Long = 3_000L, block: (MediaController) -> Unit) {
         val app = context.applicationContext
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val future = MediaController.Builder(app, token).buildAsync()
@@ -19,10 +20,9 @@ object PlayerControl {
                 block(future.get())
             } catch (_: Exception) {
             }
-            Handler(Looper.getMainLooper()).postDelayed({
-                MediaController.releaseFuture(future)
-                done()
-            }, 3000)
+            val h = Handler(Looper.getMainLooper())
+            h.postDelayed({ done() }, 3_000)
+            h.postDelayed({ MediaController.releaseFuture(future) }, holdMs.coerceAtLeast(3_000L))
         }, ContextCompat.getMainExecutor(app))
     }
 

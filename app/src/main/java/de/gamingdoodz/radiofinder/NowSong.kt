@@ -13,6 +13,8 @@ object NowSong {
     @Volatile var localAt = 0L               // zuletzt einen Titel direkt aus dem Stream bekommen
     /** Liedanfang selbst beim Hören gesehen (Titelwechsel im Stream, sekundengenau), nicht nur vom Server geschätzt. */
     @Volatile var startLocal = false
+    /** Seit dem Einschalten schon einen Liedtitel bekommen? (danach ist jeder neue Titel ein selbst gehörter Wechsel) */
+    @Volatile var musicSinceTune = false
 
     /** Zuletzt bekannter Liedanfang je Sender: Zurück zum Sender zeigt die echte Liedzeit statt bei 0 anzufangen. */
     private class Known(val title: String, val startMs: Long, val durMs: Long, val local: Boolean)
@@ -24,7 +26,7 @@ object NowSong {
         // Beim Wegschalten merken, was dort lief und seit wann
         val old = stationId; val t = title
         if (old != null && t != null && startMs > 0) synchronized(known) { known[old] = Known(t, startMs, durMs, startLocal) }
-        stationId = id; title = null; startMs = 0L; durMs = 0L; tunedAt = System.currentTimeMillis(); localAt = 0L; startLocal = false
+        stationId = id; title = null; startMs = 0L; durMs = 0L; tunedAt = System.currentTimeMillis(); localAt = 0L; startLocal = false; musicSinceTune = false
     }
 
     /** Läuft auf diesem Sender noch dasselbe Lied wie beim letzten Mal? Dann Anfang (und Länge) wiederherstellen. */

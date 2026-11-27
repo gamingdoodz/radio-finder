@@ -58,7 +58,7 @@ class AlarmReceiver : BroadcastReceiver() {
         PlayerControl.run(context, done = {
             AlarmScheduler.schedule(context)
             result.finish()
-        }) { c ->
+        }, holdMs = 25_000L) { c ->
             c.sendCustomCommand(SessionCommand(PlaybackService.CMD_FADEIN, Bundle.EMPTY), Bundle.EMPTY)
             c.setMediaItem(PlayerControl.itemFor(Settings.alarmSource(context)))
             c.prepare()

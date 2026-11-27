@@ -191,7 +191,7 @@ object Changes {
             "Radiosender suchen: alle rund 50.000 Sender",
             "Hit-Mix nutzt alle laufenden Sender und spielt bekannte Lieder zuerst",
             "Werbung am Senderanfang wird erkannt und für alle gemerkt",
-            "Wächter repariert: findet Lieder zuverlässig, läuft höchstens 1 Stunde",
+            "Wunschlieder repariert: werden zuverlässig gefunden, Suche läuft höchstens 1 Stunde",
             "Hell- und Dunkel-Design, Schriftgröße, kompakte Ansicht",
             "Meistgespielt im Radio: was heute auf allen Sendern am häufigsten lief",
             "Mehr davon: ähnliche Lieder, gelernt aus dem Radio",

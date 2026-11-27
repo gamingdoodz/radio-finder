@@ -193,7 +193,7 @@ class WatchService : Service() {
             val wishes = queries(this)
             if (wishes.isEmpty()) break
             round++
-            setStatus("Suche läuft… (Runde $round)", true)
+            setStatus("Ich suche gerade auf allen Sendern…", true)
             val matchers = wishes.map { it to it }
             var found: Pair<String, Scanner.Hit>? = null
             // Erst den Server fragen (tausende Sender, kaum Daten)
@@ -226,7 +226,7 @@ class WatchService : Service() {
                 onFound(f.first, f.second)
                 if (queries(this).isEmpty()) break
                 // Das gefundene Lied in Ruhe hören lassen, dann weitersuchen
-                setStatus("Gefunden – in ein paar Minuten suche ich weiter", false)
+                setStatus("Gefunden! Ich schaue gleich nach den anderen Wunschliedern", false)
                 waitFor(4 * 60_000L)
             } else {
                 setStatus("Noch nicht gefunden – nächste Suche in 1 Minute", false)
@@ -347,7 +347,7 @@ class WatchService : Service() {
 
     private fun runningNotification(status: String, searching: Boolean): Notification {
         val wishes = queries(this)
-        val title = if (wishes.size <= 1) "🔔 Wartet auf „${wishes.firstOrNull() ?: ""}“" else "🔔 Wartet auf ${wishes.size} Wunschlieder"
+        val title = if (wishes.size <= 1) "🔔 Ich sage Bescheid, sobald „${wishes.firstOrNull() ?: ""}“ läuft" else "🔔 Ich achte auf ${wishes.size} Wunschlieder"
         val style = NotificationCompat.InboxStyle().setBigContentTitle(title).setSummaryText(status)
         wishes.take(6).forEach { style.addLine("♪  $it") }
         val b = NotificationCompat.Builder(this, CHANNEL_RUN)
@@ -378,6 +378,8 @@ class WatchService : Service() {
             .setAutoCancel(true)
             .setContentIntent(play ?: openApp())
         if (play != null) b.addAction(R.drawable.ic_play, "Jetzt hören", play)
+        // Ein Lied dauert nur ein paar Minuten: danach wäre "Jetzt hören" irreführend
+        if (play != null) b.setTimeoutAfter(5 * 60_000L)
         val n = b.build()
         try {
             getSystemService(NotificationManager::class.java).notify(ID_HIT, n)

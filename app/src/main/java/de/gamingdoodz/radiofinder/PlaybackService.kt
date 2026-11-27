@@ -110,6 +110,9 @@ class PlaybackService : MediaLibraryService() {
     private val sleepHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bedtime = false
     private var endlessTag: String? = null
+    private var folderTag: String? = null
+    @Volatile private var folderIds: Set<String> = emptySet()
+    private var lullaby = false
     private var endlessOffset = 0
     private var endlessLoading = false
 
@@ -167,23 +170,26 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** Am Ende des Schlaf-Timers: 60 Sekunden langsam leiser, dann aus. */
+    private var sleepStep = 0
     private val sleepRunnable = object : Runnable {
-        private var step = 0
         override fun run() {
             val p = session?.player ?: return
-            if (step < 12) {
-                step++
-                p.volume = (1f - step / 12f).coerceAtLeast(0f)
+            if (sleepStep < 12) {
+                sleepStep++
+                // Grundlautstärke senken: Werbung-Ende oder Senderwechsel springen sonst wieder auf voll
+                baseVolume = (1f - sleepStep / 12f).coerceAtLeast(0f)
+                if (!adMuted) p.volume = baseVolume
                 sleepHandler.postDelayed(this, 5_000)
             } else {
-                step = 0
+                sleepStep = 0
                 p.pause()
                 // Hörspiel: ein paar Minuten zurück, damit man beim Weiterhören nichts Verschlafenes verpasst
                 if (isStory(p.currentMediaItem?.mediaId)) {
                     p.seekTo((p.currentPosition - 3 * 60_000L).coerceAtLeast(0L))
                     savePosition()
                 }
-                p.volume = 1f
+                baseVolume = 1f
+                if (!adMuted) p.volume = 1f
                 bedtime = false
                 Settings.setSleepEnd(this@PlaybackService, 0L)
             }
@@ -256,6 +262,15 @@ class PlaybackService : MediaLibraryService() {
 
     private val reconnectRunnable = Runnable { tryReconnect() }
 
+    /** Spielt gerade das Handy selbst (nicht ein Lautsprecher per Cast)? */
+    private fun onPhone() = localPlayer != null && session?.player === localPlayer
+
+    /** Sender kurz nach einem Fehler nochmal versuchen – nur wenn weiter abgespielt werden soll. */
+    private val retryRunnable = Runnable {
+        val p = session?.player ?: return@Runnable
+        if (p.playWhenReady && p.playerError != null) { p.prepare(); p.play() }
+    }
+
     /** Neu verbinden mit wachsender Pause (2, 4, 6 … höchstens 20 s), höchstens 20 Minuten lang. */
     private fun scheduleReconnect() {
         if (reconnectSince == 0L) reconnectSince = System.currentTimeMillis()
@@ -268,7 +283,7 @@ class PlaybackService : MediaLibraryService() {
     private fun tryReconnect() {
         val p = exo ?: return
         // Inzwischen gestoppt/pausiert oder läuft wieder: nichts tun (Stopp bleibt Stopp)
-        if (!p.playWhenReady || p.playerError == null || session?.player !== p) { reconnectSince = 0L; reconnectTry = 0; return }
+        if (!p.playWhenReady || p.playerError == null || !onPhone()) { reconnectSince = 0L; reconnectTry = 0; return }
         if (!Net.online(this)) { scheduleReconnect(); return }
         p.prepare(); p.play()
     }
@@ -297,8 +312,9 @@ class PlaybackService : MediaLibraryService() {
 
     private fun startSleepTimer(min: Int) {
         sleepHandler.removeCallbacks(sleepRunnable)
+        sleepStep = 0
         baseVolume = 1f
-        session?.player?.volume = 1f
+        if (!adMuted) session?.player?.volume = 1f
         if (min > 0) {
             // Ausblenden beginnt eine Minute vor Schluss
             sleepHandler.postDelayed(sleepRunnable, (min * 60_000L - 60_000L).coerceAtLeast(0L))
@@ -428,6 +444,7 @@ class PlaybackService : MediaLibraryService() {
                         val p = session?.player ?: return@launch
                         if (songs.isNotEmpty()) {
                             p.setMediaItems(songs.map { it.toMediaItem() })
+                            baseVolume = 0.7f; lullaby = true
                             p.volume = 0.7f
                             p.prepare(); p.play()
                         }
@@ -449,10 +466,12 @@ class PlaybackService : MediaLibraryService() {
                 val sub = HitMix.activeName(this@PlaybackService)?.let { "⚡ Hit-Mix · $it" } ?: m?.artist?.toString().orEmpty()
                 val fav = item?.let { Favorites.isFav(this@PlaybackService, it.mediaId) } == true
                 // Nur bei echter Änderung (sonst bei jedem Player-Ereignis Speichern + Widget neu zeichnen)
-                val key = "$title|$sub|${player.isPlaying}|$fav"
+                // Beim Verbinden/Puffern schon "Pause" zeigen (wie die App), damit man stoppen kann
+                val on = player.playWhenReady && player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
+                val key = "$title|$sub|$on|$fav"
                 if (key != widgetKey) {
                     widgetKey = key
-                    RadioWidget.update(this@PlaybackService, title, sub, player.isPlaying, fav)
+                    RadioWidget.update(this@PlaybackService, title, sub, on, fav)
                 }
                 updateWidgetArt(m?.artworkUri?.toString())
             }
@@ -462,12 +481,17 @@ class PlaybackService : MediaLibraryService() {
                 val p = session?.player ?: return
                 // Funkloch/Tunnel/Netzwechsel: nicht überspringen (sonst rauscht die ganze Liste durch), sondern an
                 // derselben Stelle weitermachen, sobald wieder Netz da ist – wie bei großen Musik-Apps
-                if (isNetworkError(error) && p === exo) { scheduleReconnect(); return }
+                if (isNetworkError(error) && onPhone()) { scheduleReconnect(); return }
+                // Zu lange hinter dem Live-Punkt: einfach wieder live
+                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    p.seekToDefaultPosition(); p.prepare(); return
+                }
                 if (p.hasNextMediaItem()) {
                     p.seekToNextMediaItem(); p.prepare(); p.play()
                 } else if (retries < 2 && p.currentMediaItem?.mediaId?.startsWith("st:") == true) {
                     retries++
-                    sleepHandler.postDelayed({ p.prepare(); p.play() }, 3000)
+                    sleepHandler.removeCallbacks(retryRunnable)
+                    sleepHandler.postDelayed(retryRunnable, 3000)
                 }
             }
 
@@ -505,14 +529,16 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 // Wecker von Hand gestoppt: Ersatz-Ton auch aus
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) stopAlarmTone()
+                // Pause/Stopp gilt: kein verspätetes Neu-Verbinden mehr
+                if (!playWhenReady) { sleepHandler.removeCallbacks(retryRunnable); sleepHandler.removeCallbacks(reconnectRunnable) }
                 if (!playWhenReady) pausedAt = System.currentTimeMillis()
                 else {
-                    // Radio länger als 30 s pausiert: neu verbinden, damit man live hört (nicht den alten Puffer)
+                    // Radio länger als 8 s pausiert: neu verbinden, damit man live hört (nicht den alten Puffer)
                     // und die Liedzeit wieder zum Gehörten passt
                     val p = exo
-                    val longPause = pausedAt > 0L && System.currentTimeMillis() - pausedAt > 30_000L
+                    val longPause = pausedAt > 0L && System.currentTimeMillis() - pausedAt > 8_000L
                     pausedAt = 0L
-                    if (longPause && p != null && session?.player === p && p.currentMediaItem?.mediaId?.startsWith("st:") == true &&
+                    if (longPause && p != null && onPhone() && p.currentMediaItem?.mediaId?.startsWith("st:") == true &&
                         p.playbackState != Player.STATE_IDLE) {
                         sleepHandler.post { try { p.seekToDefaultPosition(); p.prepare() } catch (_: Exception) {} }
                     }
@@ -629,7 +655,10 @@ class PlaybackService : MediaLibraryService() {
         } else if (music) adTitleSince = 0L
         if (music) {
             if (clean != NowSong.title) {
-                val first = NowSong.title == null
+                // "Erster Titel" nur direkt nach dem Einschalten – nicht das nächste Lied nach einem Jingle
+                // (dessen Anfang haben wir selbst gehört, also sekundengenau)
+                val first = !NowSong.musicSinceTune && NowSong.sinceTune() < 20_000L
+                NowSong.musicSinceTune = true
                 NowSong.title = clean
                 // Erster Titel nach dem Einschalten: Startzeit vom Server, sonst unbekannt. Wechsel beim Hören: jetzt.
                 val norm = Scanner.normalize(clean)
@@ -651,6 +680,7 @@ class PlaybackService : MediaLibraryService() {
                             MixLogic.sameSong(Scanner.normalize(song.title), Scanner.normalize(clean))) {
                             NowSong.startMs = song.startMs; NowSong.startLocal = true
                             if (song.durMs > 0) NowSong.durMs = song.durMs
+                            touchItem()   // Auto/Benachrichtigung sollen die neue Liedzeit sofort zeigen
                         }
                     }
                 }
@@ -685,7 +715,11 @@ class PlaybackService : MediaLibraryService() {
             // Klang-Erkennung nur in diesem kurzen Fenster bzw. während des Hit-Mix (spart Akku)
             SoundSense.active = sense && (on || mixOn)
             if (SoundSense.active && Settings.normalize(this@PlaybackService)) updateGainFromSound()
-            if ((!on && !mixOn) || id == null) return
+            if ((!on && !mixOn) || id == null) {
+                // Stummschaltung nicht hängen lassen (Mix beendet, Einstellung ausgeschaltet …)
+                if (adMuted) { adMuted = false; soundMuted = false; p.volume = baseVolume }
+                return
+            }
             // Hit-Mix: Sprache zwischen den Liedern (Moderation, Jingle, Werbung) = stumm, bis wieder Musik kommt
             val talkMute = mixOn && hitMix.muteForTalk()
             if (!on) {
@@ -694,7 +728,8 @@ class PlaybackService : MediaLibraryService() {
                 return
             }
             val known = Ads.duration(this@PlaybackService, id)
-            val since = NowSong.sinceTune()
+            // Gelernt wird die Werbelänge ab dem ersten Ton – also auch ab dem ersten Ton vergleichen (nicht ab dem Umschalten)
+            val since = if (stationStart > 0L) System.currentTimeMillis() - stationStart else 0L
             // Klang sagt sicher Musik (4 s am Stück): Lied hat angefangen, sofort wieder laut
             val music = sense && SoundSense.musicFor(4_000)
             // Werbe-Stream ohne bekannte Dauer: am Anfang nur Sprache und noch kein Liedtitel = Vorab-Werbung, stumm bis Musik
@@ -719,13 +754,21 @@ class PlaybackService : MediaLibraryService() {
     private inner class CastWrapper(cp: CastPlayer) : ForwardingPlayer(cp) {
         val originals = HashMap<String, MediaItem>()
         private fun conv(items: List<MediaItem>) = items.mapNotNull { o -> Cast.convert(o)?.also { originals[o.mediaId] = o } }
-        override fun setMediaItem(mediaItem: MediaItem) = super.setMediaItems(conv(listOf(mediaItem)))
-        override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) = super.setMediaItems(conv(listOf(mediaItem)), 0, startPositionMs)
-        override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) = super.setMediaItems(conv(listOf(mediaItem)), resetPosition)
-        override fun setMediaItems(mediaItems: List<MediaItem>) = super.setMediaItems(conv(mediaItems))
-        override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) = super.setMediaItems(conv(mediaItems), resetPosition)
+        /** Gewählter Eintrag nach dem Umwandeln (http-Sender fallen weg, die Position verschiebt sich). -1 = geht nicht. */
+        private fun setAt(items: List<MediaItem>, startIndex: Int, pos: Long) {
+            val want = items.getOrNull(startIndex)?.mediaId
+            val c = conv(items)
+            val i = c.indexOfFirst { it.mediaId == want }
+            if (i < 0) { castRefused(); return }
+            super.setMediaItems(c, i, pos)
+        }
+        override fun setMediaItem(mediaItem: MediaItem) = setAt(listOf(mediaItem), 0, C.TIME_UNSET)
+        override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) = setAt(listOf(mediaItem), 0, startPositionMs)
+        override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) = setAt(listOf(mediaItem), 0, if (resetPosition) C.TIME_UNSET else currentPosition)
+        override fun setMediaItems(mediaItems: List<MediaItem>) = setAt(mediaItems, 0, C.TIME_UNSET)
+        override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) = setAt(mediaItems, 0, C.TIME_UNSET)
         override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) =
-            super.setMediaItems(conv(mediaItems), startIndex, startPositionMs)
+            setAt(mediaItems, startIndex, startPositionMs)
         override fun addMediaItem(mediaItem: MediaItem) = super.addMediaItems(conv(listOf(mediaItem)))
         override fun addMediaItem(index: Int, mediaItem: MediaItem) = super.addMediaItems(index, conv(listOf(mediaItem)))
         override fun addMediaItems(mediaItems: List<MediaItem>) = super.addMediaItems(conv(mediaItems))
@@ -743,6 +786,14 @@ class PlaybackService : MediaLibraryService() {
             val c = Text.clean(t)
             return if (c == t) m else m.buildUpon().setTitle(c).build()
         }
+    }
+
+    /** Sender ohne sichere Adresse kann der Lautsprecher nicht abspielen: Bescheid sagen statt still zu bleiben. */
+    private fun castRefused() {
+        sleepHandler.post {
+            try { android.widget.Toast.makeText(this, "Dieser Sender lässt sich nicht auf den Lautsprecher übertragen", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+        }
+        if (hitMix.isActive) scope.launch { hitMix.next() }
     }
 
     @OptIn(UnstableApi::class)
@@ -780,8 +831,16 @@ class PlaybackService : MediaLibraryService() {
         }
         val index = old.currentMediaItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
         val live = items.getOrNull(index)?.mediaId?.startsWith("st:") == true
+        // Läuft gerade etwas, das der Lautsprecher nicht kann: auf dem Handy weiterspielen
+        if (toCast && items.isNotEmpty() && Cast.convert(items[index]) == null) {
+            sleepHandler.post {
+                try { android.widget.Toast.makeText(this, "Dieser Sender geht nicht auf dem Lautsprecher – spielt weiter auf dem Handy", android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+            }
+            return
+        }
         val pos = old.currentPosition
-        val play = old.playWhenReady || toCast
+        // Lautsprecher weg (WLAN aus, Haus verlassen): nicht plötzlich laut aus dem Handy weiterspielen
+        val play = toCast
         Cast.active = toCast
         Cast.deviceName = if (toCast) try {
             @Suppress("DEPRECATION") CastContext.getSharedInstance(this).sessionManager.currentCastSession?.castDevice?.friendlyName
@@ -817,6 +876,8 @@ class PlaybackService : MediaLibraryService() {
         sleepHandler.removeCallbacks(reconnectRunnable)
         netCallback?.let { cb -> try { getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } catch (_: Exception) {} }
         netCallback = null
+        // Alle noch geplanten Aufgaben weg (sonst greifen sie auf den freigegebenen Player zu)
+        sleepHandler.removeCallbacksAndMessages(null)
         try { dynamics?.release() } catch (_: Exception) {}
         try { equalizer?.release() } catch (_: Exception) {}
         SoundSense.release()
@@ -922,6 +983,15 @@ class PlaybackService : MediaLibraryService() {
             // Falls kein Wechsel-Ereignis kam: Merker nicht stehen lassen (sonst würde ein echter Senderwechsel übersehen)
             sleepHandler.postDelayed({ sameItemReplace = false }, 500)
         }
+    }
+
+    /** Eintrag unverändert neu setzen: Android Auto und Benachrichtigung lesen Länge und Stelle neu. */
+    private fun touchItem() {
+        val p = session?.player ?: return
+        val cur = p.currentMediaItem ?: return
+        sameItemReplace = true
+        p.replaceMediaItem(p.currentMediaItemIndex, cur.buildUpon().build())
+        sleepHandler.postDelayed({ sameItemReplace = false }, 500)
     }
 
     /** Beim Bild-Tausch nicht so tun, als wäre ein neuer Sender gestartet. */
@@ -1286,7 +1356,7 @@ class PlaybackService : MediaLibraryService() {
                     // Vom Server: alles, was gerade an Musik läuft, frisch angefangene Lieder zuerst
                     if (!Radar.sync()) {
                         val stations = StationRepository.load(applicationContext, big = false).take(80)
-                        withTimeoutOrNull(15_000) { LiveIndex.refresh(stations) }
+                        withTimeoutOrNull(7_000) { LiveIndex.refresh(stations) }
                     }
                     val list = withContext(Dispatchers.Default) { LiveIndex.topMusic().take(60) }
                     withCovers(list.map { it.station.toEntry(it.title) })
@@ -1309,7 +1379,7 @@ class PlaybackService : MediaLibraryService() {
                     val charts = Deezer.topGermany()
                     if (!Radar.sync()) {
                         val stations = StationRepository.load(applicationContext, big = false).take(150)
-                        withTimeoutOrNull(20_000) { LiveIndex.refresh(stations) }
+                        withTimeoutOrNull(7_000) { LiveIndex.refresh(stations) }
                     }
                     withCovers(withContext(Dispatchers.Default) {
                         charts.mapNotNull { LiveIndex.findSong(it.title, it.subtitle) }
@@ -1333,8 +1403,8 @@ class PlaybackService : MediaLibraryService() {
                     }
                     parentId.startsWith("ftag:") -> {
                         val tag = parentId.removePrefix("ftag:")
-                        endlessTag = tag; endlessOffset = 200
-                        Jamendo.many(tag).map { it.toMediaItem() }
+                        // Erst beim Abspielen aus diesem Ordner "endlos" schalten (nicht schon beim Durchblättern)
+                        Jamendo.many(tag).map { it.toMediaItem() }.also { l -> folderTag = tag; folderIds = l.map { it.mediaId }.toSet() }
                     }
                     parentId.startsWith("show:") ->
                         findShow(parentId)?.let { Podcasts.episodes(it) }.orEmpty().map { it.toMediaItem() }
@@ -1461,8 +1531,17 @@ class PlaybackService : MediaLibraryService() {
         override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
             // Kopfhörer/Auto verbindet sich und schickt "Play": nicht starten, wenn der Nutzer vorher selbst gestoppt hat
             val key = intent.getParcelableExtra<android.view.KeyEvent>(Intent.EXTRA_KEY_EVENT)
-            val play = key?.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY ||
-                (key?.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && session.player.playWhenReady.not())
+            // Wecker-Ersatzton klingelt: jeder Tastendruck (Benachrichtigung, Kopfhörer) macht ihn aus
+            if (alarmTone != null && key != null) {
+                if (key.action == android.view.KeyEvent.ACTION_DOWN) sleepHandler.post {
+                    stopAlarmTone()
+                    session.player.playWhenReady = false
+                }
+                return true
+            }
+            // Nur ein reines "Play" (schicken Auto/Kopfhörer beim Verbinden von selbst) wird blockiert –
+            // ein echter Druck auf Play/Pause am Kopfhörer spielt wie bei großen Musik-Apps weiter
+            val play = key?.keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY
             if (play && blockAutoStart(controllerInfo)) return true
             return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
@@ -1511,7 +1590,12 @@ class PlaybackService : MediaLibraryService() {
                 // bis ein passender Hit anfängt, läuft ein Sender mit Musik, der Mix springt dann selbst um
                 return MediaSession.MediaItemsWithStartPosition(listOf(first ?: anyMusicStation()), 0, C.TIME_UNSET)
             }
-            bedtime = false
+            // Einschlaf-Geschichte selbst nicht zurücksetzen (der Befehl dafür kann kurz vor dieser Stelle ankommen)
+            if (mediaItems.none { isStory(it.mediaId) }) bedtime = false
+            // Nach Schlafliedern wieder normale Lautstärke
+            if (lullaby) { lullaby = false; baseVolume = 1f; if (!adMuted) session?.player?.volume = 1f }
+            // Freie Musik aus einem Android-Auto-Ordner: endlos weiter mit dieser Richtung
+            if (mediaItems.firstOrNull()?.mediaId?.let { it in folderIds } == true) { endlessTag = folderTag; endlessOffset = 200 }
             // Etwas anderes gewählt: Hit-Mix beenden
             if (hitMix.isActive) { hitMix.stop(); updateFavButton() }
             val resolved = mediaItems.mapNotNull { safeResolve(it) }.ifEmpty {
