@@ -140,6 +140,9 @@ class MixLogicTest {
         assertFalse(MixLogic.sameSong(n("Queen - Bohemian Rhapsody"), n("Queen - Radio Ga Ga")))
         assertFalse(MixLogic.sameSong(n("Ed Sheeran - Perfect"), n("ROCK ANTENNE - Wir rocken Bayern")))
         assertFalse(MixLogic.sameSong(n("Adele - Hello"), null))
+        // Künstler mit langem Namen: verschiedene Lieder bleiben verschieden
+        assertFalse(MixLogic.sameSong(n("Red Hot Chili Peppers - Californication"), n("Red Hot Chili Peppers - Otherside")))
+        assertFalse(MixLogic.sameSong(n("Earth, Wind & Fire - September"), n("Earth, Wind & Fire - Boogie Wonderland")))
     }
 
     @Test fun normalisieren() {

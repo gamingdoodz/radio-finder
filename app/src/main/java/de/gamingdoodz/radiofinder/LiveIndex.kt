@@ -47,17 +47,30 @@ object LiveIndex {
     fun clear() { map.clear(); rebuild() }
 
     /** Titel aus dem laufenden Stream übernehmen (Sender ist schon bekannt). */
-    fun titleFromStream(stationId: String, title: String) {
+    /** startMs > 0: Liedanfang selbst gehört (sekundengenau). 0 = unbekannt (erster Titel nach dem Einschalten). */
+    fun titleFromStream(stationId: String, title: String, startMs: Long = 0L) {
         val old = map[stationId] ?: return
-        put(old.station, title)
+        put(old.station, title, startMs)
     }
 
-    fun put(s: Station, raw: String) {
+    /**
+     * Titel gesehen (eigene Abfrage, Stream). Liedanfang: wie bisher, wenn es dasselbe Lied ist; ein beobachteter
+     * Wechsel = ungefähr zwischen den beiden Abfragen; zum ersten Mal gesehen = unbekannt (es läuft vielleicht schon lange).
+     */
+    fun put(s: Station, raw: String, startMs: Long = 0L, sinceMs: Long = 0L) {
         val title = Text.clean(raw)
         val t = System.currentTimeMillis()
-        val old = map[s.id]
-        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) old.since else t
-        map[s.id] = Now(s, title, t, since)
+        val old = map[s.id]?.takeIf { t - it.time < MAX_AGE }
+        val norm = Scanner.normalize(title)
+        val since = when {
+            startMs in 1..t -> startMs
+            sinceMs in 1..t -> sinceMs
+            old != null && (old.title == title || MixLogic.sameSong(old.normalized, norm)) -> old.since
+            old != null && LiveIndex.isMusic(old.title) || old != null && t - old.time < 30_000L -> old.time + (t - old.time) / 2
+            old != null -> old.time   // vorher Moderation/Werbung: Lied fing danach an
+            else -> t - UNKNOWN_AGE
+        }
+        map[s.id] = Now(s, title, t, since, norm)
         // Kein Neuberechnen hier: einzelne Treffer stehen sofort über get() bereit,
         // die großen Listen werden beim nächsten Abgleich im Hintergrund erneuert
     }
@@ -70,12 +83,19 @@ object LiveIndex {
         val t = if (seenMs in 1..now) seenMs else now
         val old = map[s.id]
         if (old != null && old.time > t) return
-        // sinceMs < 0: Anfang unbekannt -> als "läuft schon lange" behandeln (wird nicht als frisches Lied gewählt).
+        // sinceMs < 0 (oder 0 = nicht mitgeschickt): Anfang unbekannt -> als "läuft schon lange" behandeln (wird nicht als frisches Lied gewählt).
         // Kleiner als -1: der Server hat das Lied zu -sinceMs zuerst gesehen (= läuft mindestens seitdem)
         val firstSeen = if (sinceMs < -1L && -sinceMs <= t) -sinceMs else t
-        val since = if (old != null && old.title == title && t - old.time < MAX_AGE)
-            (if (sinceMs > 0) minOf(old.since, sinceMs) else if (sinceMs < -1L) minOf(old.since, firstSeen - UNKNOWN_AGE) else old.since)
-        else if (sinceMs in 1..t) sinceMs else if (sinceMs < 0) firstSeen - UNKNOWN_AGE else t
+        val since = if (old != null && old.title == title && t - old.time < MAX_AGE) {
+            val oldKnown = sinceKnown(old, now)
+            when {
+                // Genauer Anfang vom Server: nehmen, außer wir kennen ihn selbst schon genau
+                sinceMs > 0 -> if (oldKnown) minOf(old.since, sinceMs) else sinceMs
+                // Server weiß den Anfang nicht: einen genau bekannten eigenen Wert behalten
+                sinceMs < -1L -> if (oldKnown) old.since else minOf(old.since, firstSeen - UNKNOWN_AGE)
+                else -> old.since
+            }
+        } else if (sinceMs in 1..t) sinceMs else firstSeen - UNKNOWN_AGE
         map[s.id] = Now(old?.station ?: s, title, t, since)
     }
 
@@ -240,6 +260,8 @@ object LiveIndex {
             val due = stations.filter { s -> map[s.id]?.let { t - it.time >= maxAgeMs } ?: true }
             Scanner.titles(due, statusOnly = statusOnly) { _, _ -> }
             lastRefresh = System.currentTimeMillis()
+            // Neue Titel sofort in die Listen übernehmen (sonst sähe der Hit-Mix ohne Server minutenlang alte Daten)
+            if (due.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { rebuild() }
         } finally {
             refreshLock.unlock()
         }

@@ -2,6 +2,9 @@ package de.gamingdoodz.radiofinder
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.async
 import org.json.JSONObject
 import java.net.URLEncoder
 
@@ -35,7 +38,13 @@ object Deezer {
             "Sendung mit der Maus Lied", "Baby Shark Deutsch", "Alle meine Entchen", "Hänschen klein", "Die Vogelhochzeit",
             "Aramsamsam", "Der Gorilla mit der Sonnenbrille", "Meine Oma fährt im Hühnerstall Motorrad", "Tschu Tschu wa",
             "Schlaflieder Kinder", "Kinderdisco", "Toggo Music", "Sing Kinderlieder", "Conni Lied"
-        ).flatMap { load("search?q=${URLEncoder.encode(it, "UTF-8")}&limit=8") }
+        ).let { qs ->
+            // Mehrere Suchen gleichzeitig (höchstens 6), vorher dauerte der erste Kinder-Mix bis zu einer Minute
+            val gate = kotlinx.coroutines.sync.Semaphore(6)
+            kotlinx.coroutines.coroutineScope {
+                qs.map { q -> async { gate.withPermit { load("search?q=${URLEncoder.encode(q, "UTF-8")}&limit=8") } } }.awaitAll()
+            }.flatten()
+        }
             .distinctBy { it.id }
             .sortedByDescending { rank[it.id] ?: 0 }
     }

@@ -686,7 +686,7 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
             NowSong.localAt = now
-            LiveIndex.titleFromStream(stationId, clean)
+            LiveIndex.titleFromStream(stationId, clean, if (NowSong.startLocal) NowSong.startMs else 0L)
         } else if (NowSong.title != null) {
             // Lied vorbei: jetzt Moderation, Jingle oder Werbung
             NowSong.title = null; NowSong.startMs = 0L; NowSong.durMs = 0L; NowSong.localAt = now; NowSong.startLocal = false
@@ -1521,7 +1521,9 @@ class PlaybackService : MediaLibraryService() {
             val out = mediaItems.mapNotNull { m ->
                 try {
                     if (m.mediaId.startsWith("hitmix:")) {
-                        (hitMix.start(m.mediaId.removePrefix("hitmix:").ifBlank { null }) ?: anyMusicStation()).also { updateFavButton() }
+                        // Beim Laden gestoppt: nichts abspielen
+                        (hitMix.start(m.mediaId.removePrefix("hitmix:").ifBlank { null }) ?: if (hitMix.isActive) anyMusicStation() else null)
+                            .also { updateFavButton() }
                     } else safeResolve(m)
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
             }
@@ -1588,6 +1590,8 @@ class PlaybackService : MediaLibraryService() {
                 updateFavButton()
                 // Nie leer zurückgeben (Android Auto zeigt sonst "Auswahl konnte nicht geladen werden"):
                 // bis ein passender Hit anfängt, läuft ein Sender mit Musik, der Mix springt dann selbst um
+                // Während des Ladens gestoppt (oder ein anderer Mix gewählt): nichts abspielen – Stopp bleibt Stopp
+                if (first == null && !hitMix.isActive) return MediaSession.MediaItemsWithStartPosition(emptyList(), 0, C.TIME_UNSET)
                 return MediaSession.MediaItemsWithStartPosition(listOf(first ?: anyMusicStation()), 0, C.TIME_UNSET)
             }
             // Einschlaf-Geschichte selbst nicht zurücksetzen (der Befehl dafür kann kurz vor dieser Stelle ankommen)

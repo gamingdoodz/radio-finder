@@ -161,6 +161,9 @@ object Radar {
 
     /** Was der Server zuletzt gemeldet hat: Sender-ID -> (Sender, Titel, seit, gesehen). */
     private class Live(val station: Station, var title: String, var since: Long, var seen: Long)
+    /** Handy-Uhr minus Server-Uhr (ms), beim letzten Abgleich gemessen. */
+    @Volatile var clockOffset = 0L
+        private set
     private val known = HashMap<String, Live>()
     @Volatile private var version = 0L
 
@@ -194,9 +197,15 @@ object Radar {
         o.optJSONArray("gone")?.let { g -> for (i in 0 until g.length()) known.remove(g.optString(i)) }
         // Unveränderte Einträge sind laut Server weiterhin aktuell
         if (!full) known.values.forEach { if (it.seen < t) it.seen = t }
+        // Handy-Uhr geht anders als die Server-Uhr: Zeiten des Servers auf die Handy-Uhr umrechnen
+        // (sonst wären bei 3 Min. Abweichung alle Lieder "fast vorbei" oder "gerade angefangen")
+        if (t > 0) clockOffset = (System.currentTimeMillis() - t).let { if (kotlin.math.abs(it) < 3_000L) 0L else it }
+        val off = clockOffset
+        fun since(v: Long) = when { off == 0L -> v; v > 0 -> v + off; v < -1L -> -((-v) + off).coerceAtLeast(2L); else -> v }
+        fun seen(v: Long) = if (off != 0L && v > 0) v + off else v
         known.forEach { (id, it) ->
-            if (full || id in changed) LiveIndex.putRemote(it.station, it.title, it.since, it.seen)
-            else LiveIndex.touchRemote(it.station, it.title, it.since, it.seen)
+            if (full || id in changed) LiveIndex.putRemote(it.station, it.title, since(it.since), seen(it.seen))
+            else LiveIndex.touchRemote(it.station, it.title, since(it.since), seen(it.seen))
         }
         version = o.optLong("v")
         return known.isNotEmpty()
@@ -352,7 +361,7 @@ object Radar {
             val o = JSONObject(text)
             o.keys().asSequence().associateWith { k ->
                 val v = o.getJSONObject(k)
-                Text.clean(v.optString("title")) to v.optLong("since") * 1000L
+                Text.clean(v.optString("title")) to v.optLong("since").let { if (it > 0) it * 1000L + clockOffset else 0L }
             }
         }.getOrNull()
     }

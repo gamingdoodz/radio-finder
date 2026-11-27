@@ -69,6 +69,9 @@ class HitMix(
     private var focused = false
     /** Nur die eigene Senderliste verwenden (Lieblingssender-Mix oder ohne Server). */
     private var onlyListed = true
+    private var favOnly = false
+    /** Server fiel während des Mix aus: eigene Senderliste einmal erweitert. */
+    private var widened = false
 
     /**
      * Zählt jeden Start und jeden Stopp hoch. Alles, was nach einer Wartezeit (Netz, Hintergrund-Suche)
@@ -222,10 +225,13 @@ class HitMix(
         else if (genre?.key == "xmas")
             Regex("(?i)christmas|xmas|weihnacht|santa claus|jingle bell|noel|navidad|rudolph|sleigh|mistletoe|let it snow|snowman|winter wonderland|silent night|stille nacht|tannenbaum|advent|nikolaus|lebkuchen|schneeflöckchen|leise rieselt|kling glöckchen|feliz navidad|little drummer|frosty")
         else null
+        favOnly = favMix
         onlyListed = favMix || !Radar.ok
         stations = newStations
+        widened = false
 
-        poll(force = true)
+        // Ohne Server kann das Abfragen vieler Sender dauern: nicht ewig auf den Start warten
+        withTimeoutOrNull(12_000) { poll(force = true) }
         val found = withContext(Dispatchers.Default) {
             // Auch bei Themen-Mixen (Weihnachten, Kinder) Lieder mit unbekanntem Anfang nehmen, statt gar nichts zu spielen.
             // Zufallsmusik gibt es bei ihnen trotzdem nicht (fromAny ist bei strict aus).
@@ -234,7 +240,7 @@ class HitMix(
         if (stale()) return null
         // Nichts Passendes gefunden: bei einem Mix mit fester Richtung einen Sender dieser Richtung spielen
         // (vorher kam irgendein Musiksender, z. B. Pop im Rock-Mix), bis woanders ein passendes Lied anfängt
-        val first = found?.let { commit(it) } ?: if (focused) genreFallback(genreStations) else null
+        val first = found?.let { commit(it) } ?: if (focused) genreFallback(genreStations) ?: artistFallback() else null
         switchedAt = System.currentTimeMillis(); confirmed = false
         // Nichts gefunden: solange läuft ein Ersatz-Sender, der Mix springt um, sobald ein passender Hit anfängt
         waitingForNext = found == null
@@ -254,10 +260,19 @@ class HitMix(
         currentStationId = st.id
         switchedTitle = now?.normalized
         currentSongKey = now?.normalized
-        songStartedAt = now?.since ?: System.currentTimeMillis()
+        songStartedAt = now?.let { startOf(it) } ?: System.currentTimeMillis()
         val song = now?.title?.takeIf { LiveIndex.isMusic(it) }
         prefs(context).edit().putString("now", "${st.name} · ich springe, sobald woanders ein passendes Lied anfängt").apply()
         return st.toEntry(song).toMediaItem()
+    }
+
+    /** Künstler-/Ähnlich-Mix ohne passendes Genre: ein Sender, auf dem gerade etwas von diesen Künstlern läuft. */
+    private fun artistFallback(): MediaItem? {
+        if (artistWords.isEmpty()) return null
+        val n = LiveIndex.fresh().filter { n ->
+            LiveIndex.isMusic(n.title) && MixLogic.artistOf(n.title).let { a -> artistWords.any { w -> w.all { MixLogic.hasWord(a, it) } } }
+        }.maxByOrNull { it.since } ?: return null
+        return genreFallback(listOf(n.station))
     }
 
     /** Passende Sender zum Genre (Tags geprüft: kein Hit-Sender im Rock-Mix; Weihnachten/Kinder mit eigenen Listen). */
@@ -450,11 +465,13 @@ class HitMix(
     private suspend fun switchNow(force: Boolean = false) {
         if (switching) return
         val g = gen
+        val at = switchedAt
         // Lieber andere Musik als Moderation: notfalls auch ein schon gespieltes oder irgendein Lied (nicht bei Themen-Mixen)
         val done = autoSwitch(force) {
             takeCandidate() ?: choose() ?: choose(allowRepeats = true) ?: choose(allowRepeats = true, anyMusic = true)
         }
-        if (!done && g == gen) waitingForNext = true
+        // Inzwischen von Hand umgeschaltet: der neue Sender gilt, nicht weiter "warten"
+        if (!done && g == gen && at == switchedAt) waitingForNext = true
     }
 
     private suspend fun loop(myGen: Int) {
@@ -501,7 +518,7 @@ class HitMix(
             // Server-Stand ist bis zu ~1,5 Min. alt: hört die Klang-Erkennung noch Musik, nicht umschalten
             if ((!stillHit || tooLong) && !stillMusic()) {
                 if (LiveIndex.isMusic(now.title) && fitsTitle(now.normalized, now.station.id) && now.normalized !in played) {
-                    switchedTitle = now.normalized; songStartedAt = now.since
+                    switchedTitle = now.normalized; songStartedAt = startOf(now)
                     addPlayed(now.normalized)
                 } else switchNow()
             }
@@ -562,6 +579,12 @@ class HitMix(
     /** Dasselbe Lied, nur anders geschrieben ("(Radio Edit)", feat., Reihenfolge)? Dann kein neues Lied. */
     private fun sameSong(a: String, b: String?): Boolean = MixLogic.sameSong(a, b)
 
+    /** Liedanfang: genau, wenn bekannt – sonst "läuft mindestens seit" (nicht 30 Min. zurück, sonst gilt jedes Lied sofort als zu lang). */
+    private fun startOf(n: LiveIndex.Now): Long {
+        val t = System.currentTimeMillis()
+        return if (LiveIndex.sinceKnown(n, t)) n.since else t - LiveIndex.minRunning(n, t)
+    }
+
     /** Lied ist fast vorbei (weniger als 1,5 Min. übrig): gar nicht erst hinschalten. */
     private fun almostOver(n: LiveIndex.Now, t: Long): Boolean {
         // Anfang unbekannt: wir wissen nur, seit wann wir das Lied dort sehen (ein Lied, das wir schon 4 Min. sehen, ist fast vorbei)
@@ -579,6 +602,16 @@ class HitMix(
      * (oder das Lied ist laut Länge vorbei). Mitten in einem Lied (Rap, gesprochene Stelle, Intro) nie.
      */
     fun muteForTalk(): Boolean {
+        val r = talkNow()
+        val t = System.currentTimeMillis()
+        if (!r) { talkSince = 0L; return false }
+        if (talkSince == 0L) talkSince = t
+        // Nie endlos stumm (Nachrichten, Talkshow, nichts anderes zu finden): nach 90 s wieder hörbar
+        return t - talkSince < 90_000L
+    }
+    @Volatile private var talkSince = 0L
+
+    private fun talkNow(): Boolean {
         if (job?.isActive != true || !SoundSense.talkFor(2_000)) return false
         if (NowSong.stationId != currentStationId) return false
         // Kein Lied gemeldet: nur, wenn der Sender überhaupt Titel schickt und zuletzt "kein Lied" gemeldet hat
@@ -602,7 +635,7 @@ class HitMix(
     /** Passt dieses Lied zum Mix? (Liste, Genre-Sender, Thema oder bekannter Hit bei offenen Mixen) */
     private fun fitsTitle(norm: String, stationId: String): Boolean =
         songs.any { it.matches(norm) } || stationId in genreIds || themeWords?.containsMatchIn(norm) == true ||
-            (!strict && genreIds.isEmpty() && (Radar.chartPlays[norm] ?: 0) >= 15) ||
+            (!strict && !focused && genreIds.isEmpty() && (Radar.chartPlays[norm] ?: 0) >= 15) ||
             // Sender mit Herz (Favorit): dort bleiben, solange Musik ohne Ansage weiterläuft – nur bei offenen Mixen
             // (im Rock-Mix bleibt er nicht auf dem Lieblings-Popsender, außer der ist selbst ein Rocksender, s. genreIds)
             (!focused && Favorites.isFav(context, "st:$stationId"))
@@ -620,7 +653,7 @@ class HitMix(
         currentStationId = st.id
         currentSongKey = now?.normalized
         switchedTitle = now?.normalized
-        songStartedAt = now?.since ?: System.currentTimeMillis()
+        songStartedAt = now?.let { startOf(it) } ?: System.currentTimeMillis()
         waitingForNext = false
         candidate = null
         val song = now?.title?.takeIf { LiveIndex.isMusic(it) }
@@ -642,6 +675,12 @@ class HitMix(
 
     private suspend fun poll(force: Boolean) {
         val wifi = Net.isUnmetered(context)
+        // Server ist weg, die Liste hat aber nur die Genre-Sender (oder gar keine): selbst genug Sender abfragen
+        if (!Radar.ok && !favOnly && !widened && stations.size < 60) {
+            widened = true
+            val base = try { StationRepository.load(context, big = false) } catch (_: Exception) { emptyList() }
+            stations = (stations + base).distinctBy { it.id }.take(if (wifi) 400 else 220)
+        }
         if (force || wifi) {
             LiveIndex.refresh(stations, maxAgeMs = if (force) 0L else 15_000L)
             return
@@ -676,8 +715,10 @@ class HitMix(
         currentStationId = n.station.id
         currentSongKey = c.key
         switchedTitle = n.normalized
-        songStartedAt = n.since
+        songStartedAt = startOf(n)
+        talkSince = 0L
         addPlayed(c.key)
+        if (n.normalized != c.key) addPlayed(n.normalized)
         prefs(context).edit().putString("now", "${n.title} · ${n.station.name}").apply()
         return n.station.toEntry(n.title).toMediaItem()
     }
@@ -688,6 +729,8 @@ class HitMix(
     /** Die besten Kandidaten der Reihe nach (für "Als Nächstes" in der Wiedergabeliste). */
     private fun ranked(allowRepeats: Boolean = false, anyMusic: Boolean = false, limit: Int = 6, onlyPrimary: Boolean = false): List<Choice> {
         val t = System.currentTimeMillis()
+        // Jedes Mal neu: Server kann während des Mix weg- oder wiederkommen
+        onlyListed = favOnly || !Radar.ok
         val ids = if (onlyListed) stations.map { it.id }.toHashSet() else null
         val currentTitle = currentStationId?.let { LiveIndex.get(it) }?.normalized
         val noSongs = Dislikes.songs(context); val noArtists = Dislikes.artists(context)
@@ -697,21 +740,27 @@ class HitMix(
                 (anyMusic || LiveIndex.sinceKnown(it, t)) &&   // nur Lieder, deren Anfang bekannt ist (sonst evtl. mittendrin)
                 !MixLogic.disliked(it.title, noSongs, noArtists)   // Daumen runter
         }
-        fun ok(key: String) = (allowRepeats || key !in played) && key != currentSongKey
+        fun ok(key: String, norm: String = key) = (allowRepeats || (key !in played && norm !in played)) && key != currentSongKey
+        // Künstler nur im Künstler-Teil suchen ("ABBA - Dancing Queen" ist kein Queen-Lied)
+        fun byArtist(n: LiveIndex.Now): Boolean {
+            if (artistWords.isEmpty()) return false
+            val a = MixLogic.artistOf(n.title)
+            return artistWords.any { w -> w.all { MixLogic.hasWord(a, it) } }
+        }
 
         fun theme(n: LiveIndex.Now) = themeWords?.containsMatchIn(n.title) == true
         // Schnell über den Wort-Index statt jedes Lied mit jedem laufenden Titel zu vergleichen
         val poolIds = pool.mapTo(HashSet()) { it.station.id }
         fun liveOf(l: List<LiveIndex.Song>) = l.flatMap { sg -> LiveIndex.matching(sg).filter { it.station.id in poolIds }.map { it to sg.key } }
             .distinctBy { it.first.station.id }
-            .filter { (_, k) -> ok(k) }
+            .filter { (n, k) -> ok(k, n.normalized) }
         // Playlist: zuerst ihre eigenen Lieder, dann das Ersatz-Genre
         val fromPrimary = if (isPlaylist) liveOf(primary) else emptyList()
         if (onlyPrimary) return fromPrimary.filter { (n, _) -> !Ads.likely(context, n.station.id, n.station.url) }
             .sortedBy { (n, _) -> t - n.since }.take(limit).map { Choice(it.first, it.second) }
         val fromList = liveOf(songs)
         val fromGenre = pool.filter { it.station.id in genreIds || theme(it) }.map { it to it.normalized }.filter { (_, k) -> ok(k) }
-        val fromArtist = if (strict) emptyList() else pool.filter { n -> artistWords.any { w -> w.all { MixLogic.hasWord(n.normalized, it) } } }
+        val fromArtist = if (strict) emptyList() else pool.filter { n -> byArtist(n) }
             .map { it to it.normalized }.filter { (_, k) -> ok(k) }
         // Irgendeine Musik nur bei offenen Mixen (Charts, Mein Mix): sonst liefe im Rock-Mix plötzlich Schlager
         val fromAny = if (anyMusic && !focused) pool.map { it to it.normalized }.filter { (_, k) -> ok(k) } else emptyList()
@@ -725,21 +774,22 @@ class HitMix(
         // Beim Casten nur Sender mit https (andere lassen sich nicht casten, Weiterleiten über den Server gibt es nicht)
         fun castable(l: List<Pair<LiveIndex.Now, String>>) = if (Cast.active) l.filter { (n, _) -> Cast.isHttps(n.station.url) } else l
         val list = (tiers.map { castable(noAds(it)) } + tiers.map { castable(it) }).firstOrNull { it.isNotEmpty() } ?: return emptyList()
-        return list.sortedBy { (n, key) ->
+        // Bewertung einmal je Eintrag ausrechnen (nicht bei jedem Vergleich der Sortierung neu)
+        return list.map { (n, key) ->
                 // Bekannte Lieder deutlich bevorzugen: läuft auf vielen Sendern, oft gespielt heute, weit oben in der Liste
                 val many = ((pop[n.normalized] ?: 1) - 1).coerceAtMost(6) * 60_000L
                 // Gerade oft im Radio = aktuell und bekannt. Bei Ära-Mixen (80er, Oldies …) zählt das nicht,
                 // dort entscheidet die Liste des Mixes, sonst kämen nur die paar Dauerbrenner, die heute noch laufen.
                 val played = if (eraMix) 0L else (Radar.chartPlays[n.normalized] ?: 0).coerceAtMost(300) * 2_000L
                 val top = rank[key]?.let { (100 - it).coerceAtLeast(0) * 2_000L } ?: 0L
-                val knownArtist = if (artistWords.any { w -> w.all { MixLogic.hasWord(n.normalized, it) } }) 90_000L else 0L
+                val knownArtist = if (byArtist(n)) 90_000L else 0L
                 // Frisch angefangen zählt; fast vorbei (über 3 Min.) und Sender mit Vorab-Werbung rutschen nach hinten
                 val age = t - n.since
                 // Sender, die beim Umschalten lange brauchen (Lücke), nach hinten
                 val slow = startDelay(n.station.id).let { d -> if (d > 6_000L) 240_000L else if (d > 3_000L) d * 15 else 0L }
-                age + slow + (if (age > 180_000L) 300_000L else 0L) +
-                    (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist
-            }.distinctBy { it.second }.take(limit).map { Choice(it.first, it.second) }
+                Triple(n, key, age + slow + (if (age > 180_000L) 300_000L else 0L) +
+                    (if (Ads.duration(context, n.station.id) > 0) 120_000L else 0L) - many - played - top - knownArtist)
+            }.sortedBy { it.third }.distinctBy { it.first.normalized }.take(limit).map { Choice(it.first, it.second) }
     }
 
     // ---------- Wiedergabeliste: "Als Nächstes" zeigen, antippen springt hin ----------
@@ -788,6 +838,7 @@ class HitMix(
         commit(c)
         switchedAt = System.currentTimeMillis()
         confirmed = false
+        waitingForNext = false
         scope.launch { delay(1_500); refreshQueue() }
     }
 

@@ -125,7 +125,7 @@ object MixLogic {
 
     /**
      * Dasselbe Lied, nur anders geschrieben ("(Radio Edit)", "feat.", andere Reihenfolge)?
-     * Beide Titel normalisiert. Mindestens 2 gemeinsame Wörter und 70 % der Wörter des kürzeren Titels.
+     * Beide Titel normalisiert. Mindestens 2 gemeinsame Wörter; der kürzere steckt ganz im längeren, oder 85 % sind gleich.
      */
     fun sameSong(a: String, b: String?): Boolean {
         if (b == null) return false
@@ -135,7 +135,12 @@ object MixLogic {
         if (wa.isEmpty() || wb.isEmpty()) return false
         if (wa == wb) return true
         val common = wa.intersect(wb).size
-        return common >= 2 && common >= 0.7 * minOf(wa.size, wb.size)
+        if (common < 2) return false
+        // Ein Titel steckt ganz im anderen ("… (feat. Sia)", "Radio Edit"): dasselbe Lied
+        if (common == minOf(wa.size, wb.size)) return true
+        // Beide haben eigene Wörter: fast alles muss gleich sein. Sonst wären zwei Lieder desselben Künstlers
+        // mit langem Namen ("Red Hot Chili Peppers - Californication" / "- Otherside") fälschlich gleich.
+        return common >= 0.85 * maxOf(wa.size, wb.size)
     }
 
     /** Zusätze, die nichts über das Lied sagen. */
@@ -191,7 +196,8 @@ object MixLogic {
     fun artistOf(title: String): String = normalize(title.substringBefore(" - ").substringBefore(" – "))
 
     /** Schlüssel eines Liedes (normalisiert, ohne Zusätze wie "Radio Edit"), für "nicht mehr spielen". */
-    fun songKey(title: String): String = normalize(title.replace(Regex("\\(.*?\\)|\\[.*?\\]"), " "))
+    fun songKey(title: String): String = normalize(title.replace(BRACKETS, " "))
+    private val BRACKETS = Regex("\\(.*?\\)|\\[.*?\\]")
 
     /**
      * Soll dieses Lied im Mix nicht kommen? Gleiches Lied (auch anders geschrieben) oder ein abgelehnter Künstler

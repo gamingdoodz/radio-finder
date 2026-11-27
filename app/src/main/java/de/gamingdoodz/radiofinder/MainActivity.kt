@@ -418,7 +418,7 @@ class MainActivity : ComponentActivity() {
                     // Noch nichts da (Server-Abgleich beim Start fehlgeschlagen o. Ä.): sofort neu holen
                     if (empty) try { Radar.sync(force = true) } catch (_: Exception) {}
                     try { LiveIndex.refresh(list.take(n)) } catch (_: Exception) {}
-                    LiveIndex.rebuild()
+                    withContext(kotlinx.coroutines.Dispatchers.Default) { LiveIndex.rebuild() }   // nicht im Haupt-Thread (ruckelt sonst)
                     render()
                 }
                 // "Jetzt im Radio" darf nicht bei "Schaue nach…" hängen bleiben: bis zu 6 Versuche alle 20 s
@@ -2089,7 +2089,7 @@ class MainActivity : ComponentActivity() {
             val t0 = System.currentTimeMillis()
             // Der Server prüft die Sender (schneller, ohne mobile Daten); geht das nicht, prüft das Handy selbst
             val remote = Radar.verify(candidates.map { it.station.id })
-            if (remote != null) candidates.forEach { c -> remote[c.station.id]?.let { (title, _) -> LiveIndex.put(c.station, title) } }
+            if (remote != null) candidates.forEach { c -> remote[c.station.id]?.let { (title, since) -> LiveIndex.put(c.station, title, sinceMs = since) } }
             else Scanner.titles(candidates.map { it.station }) { _, _ -> }
             val checked = candidates.filter { c -> (LiveIndex.get(c.station.id)?.time ?: 0L) >= t0 }
             // Bestätigt läuft es noch – oder der Sender verrät nichts, dann trotzdem versuchen
