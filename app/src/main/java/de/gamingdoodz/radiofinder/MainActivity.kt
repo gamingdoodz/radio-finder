@@ -1598,6 +1598,8 @@ class MainActivity : ComponentActivity() {
                 toggle = norm, chevron = false) { Settings.setNormalize(this, !norm); render() },
             Row.Setting(R.drawable.ic_radio, "Werbung stumm schalten", "Bekannte Werbung am Senderanfang, mit Countdown",
                 toggle = Settings.muteAds(this), chevron = false) { Settings.setMuteAds(this, !Settings.muteAds(this)); render() },
+            Row.Setting(R.drawable.ic_eq, "Werbung am Klang erkennen", "Hört kurz nach dem Umschalten, ob Musik oder Sprache läuft (nur auf dem Handy)",
+                toggle = Settings.soundSense(this), chevron = false) { Settings.setSoundSense(this, !Settings.soundSense(this)); render() },
             Row.Setting(R.drawable.ic_bell, "Wächter schaltet sofort um", "Aus: laufendes Lied bleibt, du bekommst „Jetzt hören“",
                 toggle = Settings.watchAuto(this), chevron = false) { Settings.setWatchAuto(this, !Settings.watchAuto(this)); render() },
             Row.Setting(R.drawable.ic_note, "Meine Musik-Apps", "Zum Öffnen von Liedern",

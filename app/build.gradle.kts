@@ -49,6 +49,9 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
+    // Modell unkomprimiert lassen (schneller laden)
+    androidResources { noCompress += "tflite" }
+
     lint {
         checkReleaseBuilds = false
         abortOnError = false
@@ -72,4 +75,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
     implementation("com.google.guava:guava:33.3.1-android")
+    // Klang-Erkennung (YAMNet) auf dem Handy, Apache 2.0
+    implementation("com.google.ai.edge.litert:litert:1.4.0")
 }

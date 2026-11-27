@@ -50,6 +50,8 @@ object Settings {
 
     /** Werbung am Senderanfang stumm schalten (mit Countdown). */
     fun muteAds(context: Context) = prefs(context).getBoolean("mute_ads", true)
+    fun soundSense(context: Context) = prefs(context).getBoolean("sound_sense", true)
+    fun setSoundSense(context: Context, on: Boolean) = prefs(context).edit().putBoolean("sound_sense", on).apply()
     fun setMuteAds(context: Context, on: Boolean) = prefs(context).edit().putBoolean("mute_ads", on).apply()
 
     /** Aus welchen Ländern Sender genommen werden (gegen fremdsprachige Werbung). */

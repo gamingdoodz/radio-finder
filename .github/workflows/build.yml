@@ -50,6 +50,11 @@ jobs:
       - name: APK und Store-Paket bauen
         run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
 
+      - name: 16-KB-Speicherseiten prüfen (Pflicht bei Google Play)
+        run: |
+          ZA=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)zipalign
+          if "$ZA" -c -P 16 4 app/build/outputs/apk/release/app-release.apk; then echo "16 KB: ok"; else echo "::warning::APK ist nicht 16-KB-ausgerichtet"; "$ZA" -c -P 16 -v 4 app/build/outputs/apk/release/app-release.apk | grep -i "lib/" | grep -iv "OK" | head -20 || true; fi
+
       - name: Dateien umbenennen
         run: |
           cp app/build/outputs/apk/release/app-release.apk Hitradar.apk

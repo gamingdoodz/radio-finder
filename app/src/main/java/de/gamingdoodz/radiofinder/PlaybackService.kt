@@ -18,7 +18,11 @@ import androidx.media3.cast.SessionAvailabilityListener
 import com.google.android.gms.cast.framework.CastContext
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
@@ -243,7 +247,18 @@ class PlaybackService : MediaLibraryService() {
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(10_000)
             .setReadTimeoutMs(15_000)
-        val player = ExoPlayer.Builder(this)
+        SoundSense.init(this)
+        // Tondaten zusätzlich an die Klang-Erkennung geben (liest nur mit, verändert nichts)
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessors(arrayOf(TeeAudioProcessor(SoundSense)))
+                .build()
+        }
+        val player = ExoPlayer.Builder(this, renderers)
             .setSeekBackIncrementMs(30_000)
             .setSeekForwardIncrementMs(30_000)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
@@ -369,7 +384,8 @@ class PlaybackService : MediaLibraryService() {
                     hitMix.onJump(mediaItem.mediaId)
                 stationStart = 0L; musicSeen = false; nonMusicSeen = false
                 NowSong.tune(mediaItem?.mediaId?.takeIf { it.startsWith("st:") }?.removePrefix("st:"))
-                adMuted = false
+                adMuted = false; soundMuted = false
+                SoundSense.reset()
                 if (exo?.volume == 0f) exo?.volume = 1f
                 if (exo?.isPlaying == true) { sleepHandler.removeCallbacks(adMuteCheck); sleepHandler.post(adMuteCheck) }
                 // Tempo gilt nur für Hörspiele und Hörbücher
@@ -431,6 +447,8 @@ class PlaybackService : MediaLibraryService() {
 
     // ---------------- Liedposition, Lied-Ende, Werbung stumm ----------------
     private var adMuted = false
+    /** Stumm, weil die Klang-Erkennung am Senderanfang nur Sprache hört (Werbe-Stream, noch kein Lied). */
+    private var soundMuted = false
 
     /** Titel direkt aus dem Stream (genau zum Hören passend, ohne Verzögerung). */
     private fun onStreamTitle(stationId: String, raw: String) {
@@ -465,14 +483,26 @@ class PlaybackService : MediaLibraryService() {
             val p = exo ?: return
             // Nur prüfen, solange es etwas bringt: es läuft, und die Werbung am Senderanfang (höchstens ~3 Min.) ist noch möglich.
             // Startet wieder beim nächsten Sender bzw. beim Weiterspielen.
-            if (p.isPlaying && (adMuted || NowSong.sinceTune() < 195_000L)) sleepHandler.postDelayed(this, 1_000)
-            val id = NowSong.stationId ?: return
-            if (!Settings.muteAds(this@PlaybackService) || session?.player !== localPlayer || !p.isPlaying) return
+            val again = p.isPlaying && (adMuted || NowSong.sinceTune() < 195_000L)
+            if (again) sleepHandler.postDelayed(this, 1_000)
+            val id = NowSong.stationId
+            val on = id != null && again && Settings.muteAds(this@PlaybackService) && session?.player === localPlayer
+            // Klang-Erkennung nur in diesem kurzen Fenster (spart Akku)
+            SoundSense.active = on && Settings.soundSense(this@PlaybackService)
+            if (!on || id == null) return
             val known = Ads.duration(this@PlaybackService, id)
             val since = NowSong.sinceTune()
+            val sense = Settings.soundSense(this@PlaybackService)
+            // Klang sagt sicher Musik (4 s am Stück): Lied hat angefangen, sofort wieder laut
+            val music = sense && SoundSense.musicFor(4_000)
+            // Werbe-Stream ohne bekannte Dauer: am Anfang nur Sprache und noch kein Liedtitel = Vorab-Werbung, stumm bis Musik
+            if (sense && !music && known == 0L && since < 90_000L && NowSong.title == null &&
+                Ads.likely(this@PlaybackService, id, p.currentMediaItem?.localConfiguration?.uri?.toString().orEmpty()) &&
+                SoundSense.talkFor(5_000)) soundMuted = true
+            if (music || since > 120_000L) soundMuted = false
             // Bekannte Werbung: ihre Dauer lang stumm (auch wenn der Sender schon den Liedtitel schickt),
             // ohne Titel bis zu 10 s länger, falls der Spot länger dauert
-            val shouldMute = known > 0 && (since < known || (NowSong.title == null && since < known + 10_000))
+            val shouldMute = !music && (soundMuted || known > 0 && (since < known || (NowSong.title == null && since < known + 10_000)))
             if (shouldMute && !adMuted) { adMuted = true; p.volume = 0f }
             else if (!shouldMute && adMuted) { adMuted = false; p.volume = 1f }
         }
@@ -583,6 +613,7 @@ class PlaybackService : MediaLibraryService() {
         sleepHandler.removeCallbacks(fadeInRunnable)
         try { dynamics?.release() } catch (_: Exception) {}
         try { equalizer?.release() } catch (_: Exception) {}
+        SoundSense.release()
         session?.run {
             if (player !== localPlayer) localPlayer?.release()
             player.release()

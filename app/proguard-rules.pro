@@ -21,3 +21,7 @@
 -dontwarn javax.annotation.**
 -dontwarn org.checkerframework.**
 -keep class de.gamingdoodz.radiofinder.CastOptionsProvider { *; }
+
+# Klang-Erkennung (LiteRT / TensorFlow Lite)
+-keep class org.tensorflow.lite.** { *; }
+-dontwarn org.tensorflow.lite.**
