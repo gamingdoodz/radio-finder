@@ -17,10 +17,17 @@ object Messen {
     class Angabe(val since: Long, val exact: Boolean, val estimated: Boolean)
     val angaben = ConcurrentHashMap<String, ConcurrentHashMap<String, Angabe>>()
     @Volatile var stop = false
+    val alleTitel = ConcurrentHashMap<String, MutableList<String>>()
+    val beispiele = ArrayList<String>()
 
     fun melde(id: String, title: String, since: Long, exact: Boolean, estimated: Boolean) {
-        if (since <= 0) return
-        angaben.getOrPut(id) { ConcurrentHashMap() }.putIfAbsent(MixLogic.normalize(title), Angabe(since, exact, estimated))
+        if (since <= 0) { alleTitel.getOrPut(id) { java.util.Collections.synchronizedList(ArrayList()) }.let { if (it.lastOrNull() != title) it.add(title) }; return }
+        val m = angaben.getOrPut(id) { ConcurrentHashMap() }
+        val k = MixLogic.normalize(title)
+        // Erste Meldung zählt; eine spätere genaue Server-Angabe ersetzt eine geschätzte/unbekannte
+        val old = m[k]
+        if (old == null || (!old.exact && exact) || (old.estimated && exact && !estimated)) m[k] = Angabe(since, exact, estimated)
+        alleTitel.getOrPut(id) { java.util.Collections.synchronizedList(ArrayList()) }.let { if (it.lastOrNull() != title) it.add(title) }
     }
 
     fun start(ids: List<Pair<String, String>>) = ids.map { (id, url) ->
@@ -70,7 +77,7 @@ object Messen {
             val key = MixLogic.normalize(w.title)
             val a = angaben[id]?.entries?.firstOrNull { it.key == key || MixLogic.sameSong(it.key, key) }?.value
             when {
-                a == null -> keineAngabe++
+                a == null -> { keineAngabe++; if (beispiele.size < 8) beispiele.add("„${w.title}“ – Server meldete dort: ${alleTitel[id]?.takeLast(4)?.joinToString(" | ") ?: "nichts"}") }
                 a.exact && !a.estimated -> server.add((a.since + offset - w.at) / 1000)
                 a.estimated -> app.add((a.since + offset - w.at) / 1000)
                 else -> unbekannt++
@@ -86,7 +93,8 @@ object Messen {
         say("## Wie genau ist die Liedzeit? (echter Titelwechsel im Datenstrom gegen die Angabe)")
         say("- Mitgehört: ${wechsel.size} Sender, ${wechsel.values.sumOf { it.size }} Titelwechsel")
         say("- Anfang genau vom Server: ${stat(server)}")
-        say("- Anfang von der App aus dem Abgleich geschätzt: ${stat(app)}")
+        say("- Nur aus den Abgleich-Zeiten geschätzt (in der App nicht mehr benutzt): ${stat(app)}")
         say("- Anfang unbekannt (App zeigt „mind.“): $unbekannt, vom Server (noch) nicht gemeldet: $keineAngabe")
+        beispiele.forEach { say("  - nicht gemeldet: $it") }
     }
 }

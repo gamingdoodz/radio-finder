@@ -106,10 +106,8 @@ object LiveIndex {
                 else -> old.since
             }
         } else if (sinceMs in 1..t) sinceMs
-        // Server kennt den Anfang nicht, wir sehen aber den Wechsel: altes Lied zuletzt vor kurzem gesehen, jetzt ein neues.
-        // Dann fing es dazwischen an (wie beim eigenen Abfragen); nur bei kurzer Lücke, sonst bleibt es "unbekannt"
-        else if (old != null && old.title != title && !MixLogic.sameSong(old.normalized, Scanner.normalize(title)) &&
-            firstSeen - old.time in 0..150_000L) old.time + (firstSeen - old.time) / 2
+        // Server kennt den Anfang nicht: unbekannt lassen. (Eine Schätzung aus unseren Abgleich-Zeiten lag beim Nachmessen
+        // mit echten Sendern im Mittel 60 s zu spät, weil der Server den Sender nicht bei jedem Abgleich neu abfragt.)
         else firstSeen - UNKNOWN_AGE
         map[s.id] = Now(old?.station ?: s, title, t, since)
     }
