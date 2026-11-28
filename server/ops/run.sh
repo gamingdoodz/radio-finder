@@ -1,5 +1,5 @@
 #!/bin/bash
-# 28.11.: KI schneller starten (ohne Aufwärmen, 30 min wach), danach testen
+# 28.11.: KI-Kaltstart untersuchen
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! grep -q -- "--no-warmup" /etc/systemd/system/llm.service 2>/dev/null && $AB bereit; then
@@ -22,5 +22,8 @@ curl -s -m 5 http://127.0.0.1:8100/api/last | python3 -c 'import sys,json; d=jso
 ls -la /var/lib/hitradar-neustart-offen 2>&1
 echo "== Speicher Hitradar =="; du -sh $R /opt/llama.cpp /opt/models 2>/dev/null
 echo "radar seit: $(systemctl show -p ActiveEnterTimestamp --value radar)"; echo "== KI-Test =="; S=$(date +%s); curl -s -m 30 "http://localhost:8081/wish?q=Musik%20wie%20von%20Coldplay"; echo " ($(( $(date +%s) - S )) s)"; systemctl is-active llm
+sleep 60; echo "nach 60 s: $(systemctl is-active llm)"; S=$(date +%s); curl -s -m 30 "http://localhost:8081/wish?q=Musik%20wie%20von%20Adele"; echo " ($(( $(date +%s) - S )) s)"
+journalctl -u llm --since "-5 min" --no-pager | grep -viE "slot|token|prompt" | tail -15
+nproc; free -m | head -2
 echo "== Hitradar =="; curl -s http://localhost:8081/health; echo
 journalctl -u radar --since "-30 min" --no-pager | grep -iE "Serverabsprache|Traceback|Error" | tail -8
