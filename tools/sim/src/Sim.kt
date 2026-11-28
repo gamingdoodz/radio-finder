@@ -33,7 +33,7 @@ fun get(url: String, gzip: Boolean = true): Got {
     } catch (e: Exception) { Got(null, 0, System.currentTimeMillis() - t0) }
 }
 
-class Live(var name: String, var url: String, var title: String, var since: Long, var seen: Long, var exact: Boolean)
+class Live(var name: String, var url: String, var title: String, var since: Long, var seen: Long, var exact: Boolean, var acc: Int = -1)
 val live = HashMap<String, Live>()
 var version = 0L
 var serverT = 0L
@@ -55,7 +55,7 @@ fun sync(): Got {
         if (r.length() >= 7) {
             val old = live[id]
             val n = Live(r.optString(1), r.optString(2), Text.clean(r.optString(4)), r.optLong(5) * 1000, r.optLong(6) * 1000,
-                r.length() < 9 || r.optInt(8, 1) == 1)
+                r.length() < 9 || r.optInt(8, 1) == 1, if (r.length() >= 10) r.optInt(9, -1) else -1)
             if (o.optInt("full") != 1) { if (old == null) added++ else if (n.title != old.title) { changes++; reAdded++; if (n.exact) exactChanges++ } }
             // Wie die App: Sender kam mit neuem Lied zurück, altes kurz vorher gesehen -> Mitte als Anfang
             if (old != null && !n.exact && n.title != old.title && n.seen - old.seen in 0..150_000L) { n.since = old.seen + (n.seen - old.seen) / 2; n.exact = true; est = true; estimated++ }
@@ -65,11 +65,12 @@ fun sync(): Got {
             val newTitle = Text.clean(r.optString(1)); val oldSeen = it.seen; val changed = newTitle != it.title
             it.title = newTitle; it.since = r.optLong(2) * 1000; it.seen = r.optLong(3) * 1000
             it.exact = r.length() < 5 || r.optInt(4, 1) == 1
+            it.acc = if (r.length() >= 6) r.optInt(5, -1) else -1
             changes++; if (it.exact) exactChanges++
             // Wie die App: Wechsel zwischen zwei Abgleichen gesehen, Lücke kurz -> Mitte als Anfang
             if (!it.exact && changed && it.seen - oldSeen in 0..150_000L) { it.since = oldSeen + (it.seen - oldSeen) / 2; it.exact = true; est = true; estimated++ }
         }
-        live[id]?.let { Messen.melde(id, it.title, if (it.exact) it.since else -1, it.exact, est) }
+        live[id]?.let { Messen.melde(id, it.title, if (it.exact) it.since else -1, it.exact, est, it.acc) }
     }
     // Wie die App: weg gemeldete Sender nicht sofort vergessen (kommen oft mit neuem Lied zurück)
     o.optJSONArray("gone")?.let { gone += it.length() }

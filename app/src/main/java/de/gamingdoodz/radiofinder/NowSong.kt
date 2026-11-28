@@ -13,6 +13,8 @@ object NowSong {
     @Volatile var localAt = 0L               // zuletzt einen Titel direkt aus dem Stream bekommen
     /** Liedanfang selbst beim Hören gesehen (Titelwechsel im Stream, sekundengenau), nicht nur vom Server geschätzt. */
     @Volatile var startLocal = false
+    /** Wie genau der Anfang ist (± ms): 0 = selbst gehört bzw. vom Sender, sonst laut Server. */
+    @Volatile var startAccMs = 0L
     /** Seit dem Einschalten schon einen Liedtitel bekommen? (danach ist jeder neue Titel ein selbst gehörter Wechsel) */
     @Volatile var musicSinceTune = false
     /** Seit wann steht dieser Liedtitel im Stream (beim Hören gesehen)? */
@@ -35,6 +37,7 @@ object NowSong {
     fun recall(id: String, songTitle: String): Boolean {
         val k = synchronized(known) { known[id] } ?: return false
         if (k.title != songTitle) return false
+        startAccMs = if (k.local) 0L else 20_000L
         val age = System.currentTimeMillis() - k.startMs
         if (age < 0 || age > 12 * 60_000L || (k.durMs > 0 && age > k.durMs + 60_000L)) return false
         startMs = k.startMs; startLocal = k.local

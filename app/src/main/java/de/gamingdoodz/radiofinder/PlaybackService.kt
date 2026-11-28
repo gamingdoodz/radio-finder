@@ -675,6 +675,7 @@ class PlaybackService : MediaLibraryService() {
                 val norm = Scanner.normalize(clean)
                 NowSong.startMs = 0L
                 NowSong.startLocal = !first
+                NowSong.startAccMs = if (first) 60_000L else 0L
                 NowSong.durMs = Covers.get(clean)?.durMs ?: 0L
                 if (!first) {
                     NowSong.startMs = now
@@ -684,6 +685,8 @@ class PlaybackService : MediaLibraryService() {
                     // 1. Selbst schon gehört (oben): sekundengenau. 2. Server hat den Wechsel beobachtet: dessen Anfang
                     // plus der gemessene Versatz dieses Senders (man hört später, als der Server sieht). 3. Sonst unbekannt.
                     val server = Radar.serverStart(stationId, norm)
+                    // Genauigkeit laut Server (± s); ohne Angabe als ungenau (ca. 20 s, so wurde es gemessen)
+                    NowSong.startAccMs = Radar.serverAcc(stationId).let { if (it >= 0) it * 1000L else 20_000L }
                     NowSong.startMs = if (server > 0L) (server + Latency.of(this, stationId)).takeIf { it < now && now - it < 9 * 60_000L } ?: 0L
                     else LiveIndex.get(stationId)?.takeIf { it.normalized == norm || LiveIndex.Song(
                         Entry("", Kind.TRACK, clean.substringAfter(" - ").substringAfter(" – ").trim(),
@@ -697,7 +700,7 @@ class PlaybackService : MediaLibraryService() {
                         val song = try { LautFm.current(url) } catch (_: Exception) { null } ?: return@launch
                         if (NowSong.stationId == stationId && NowSong.title == clean &&
                             MixLogic.sameSong(Scanner.normalize(song.title), Scanner.normalize(clean))) {
-                            NowSong.startMs = song.startMs; NowSong.startLocal = true
+                            NowSong.startMs = song.startMs; NowSong.startLocal = true; NowSong.startAccMs = 0L
                             if (song.durMs > 0) NowSong.durMs = song.durMs
                             touchItem()   // Auto/Benachrichtigung sollen die neue Liedzeit sofort zeigen
                         }
@@ -718,7 +721,9 @@ class PlaybackService : MediaLibraryService() {
     private fun calibrate(stationId: String, norm: String, heardAt: Long) {
         for (delayMs in longArrayOf(90_000L, 200_000L)) sleepHandler.postDelayed({
             val server = Radar.serverStart(stationId, norm)
-            if (server > 0L && calibrated != "$stationId|$norm") {
+            // Nur mit genauer Server-Angabe messen (sonst lernt die App das Rauschen der Abfrage-Abstände)
+            val acc = Radar.serverAcc(stationId)
+            if (server > 0L && acc in 0..6 && calibrated != "$stationId|$norm") {
                 calibrated = "$stationId|$norm"
                 Latency.record(this, stationId, heardAt - server)
             }

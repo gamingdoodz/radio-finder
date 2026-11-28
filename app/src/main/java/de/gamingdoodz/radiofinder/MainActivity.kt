@@ -2821,8 +2821,8 @@ class MainActivity : ComponentActivity() {
                     seek.visibility = View.VISIBLE; seek.isEnabled = false
                     seek.max = NowSong.durMs.toInt().coerceAtLeast(1); seek.progress = e.toInt()
                     // Wie bei Spotify: links wie weit, rechts wie lang das Lied insgesamt ist
-                    // Anfang selbst gehört: sekundengenau. Sonst vom Server (bis ca. 20 s daneben): ehrlich "ca."
-                    posText.text = (if (NowSong.startLocal) "" else "ca. ") + fmt(e); durText.text = fmt(NowSong.durMs)
+                    // Anfang selbst gehört oder vom Server auf wenige Sekunden genau: ohne Zusatz. Sonst ehrlich "ca."
+                    posText.text = (if (NowSong.startAccMs > 5_000L) "ca. " else "") + fmt(e); durText.text = fmt(NowSong.durMs)
                 }
                 NowSong.startMs > 0 -> { seek.visibility = View.INVISIBLE
                      posText.text = "Lied läuft seit ${fmt(e)}"; durText.text = "LIVE" }
