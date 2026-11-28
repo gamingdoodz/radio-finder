@@ -97,6 +97,9 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   radar läuft seit 27.11. 7:43 schon mit dem neuen Stand (vom Spiel neu gestartet; Verteiler, Shoutcast, rechtssicher, Hinweise),
   radar läuft als root und schreibt `hitradar.json` selbst. Noch offen bis zur Freigabe: KI nur bei Bedarf (`llm-dienst.sh`, macht `ops/run.sh`).
   Danach prüfen, ob `updateErlaubt`/`updateDran` so ankommen, wie `absprache.py` sie liest.
+- KI („Wünsch dir was“) ist auf diesem Server sehr langsam: ~0,7 Token/s (2 Kerne, mit dem Spiel geteilt), Kaltstart 24 s, eine Antwort ~27 s.
+  Die App bekommt nach höchstens 12 s die Stichwort-Antwort, die KI rechnet im Hintergrund fertig und merkt sich die Antwort (beim nächsten Mal sofort).
+  Möglich: kleineres Modell (Qwen2.5 0.5B, ~3x schneller, etwas ungenauer); das alte Modell (1,1 GB) löschen nur nach Kevins OK.
 - Architektur-Check (`docs/ARCHITEKTUR-CHECK.md`, 27.11.): Vorschläge warten auf Kevins Freigabe. 1, 2 (App-Seite), 8, 9 und Media3 1.8.0 erledigt; Equalizer („Klang“) erledigt; als Nächstes eigene Musik vom Handy. Rechtssicherheit: Abschnitt 11 (keine Liedtexte, kein Mitschnitt, kein Weiterleiten).
 - Suche/Mix nach Richtung am Handy prüfen (z. B. „Rock“ eingeben, Rock-Mix 30 Min. laufen lassen), Wecker ohne Netz testen.
 - Server: Liedanfang („exact“). Kernliste seit 27.11. 19:00 live, um 21:20 aber nur noch 1,6 Abfragen/s, kern 150, anfang_bekannt 69.
