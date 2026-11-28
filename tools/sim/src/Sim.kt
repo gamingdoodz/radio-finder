@@ -51,17 +51,25 @@ fun sync(): Got {
     for (i in 0 until rows.length()) {
         val r = rows.getJSONArray(i)
         val id = r.getString(0)
-        if (r.length() >= 7 && o.optInt("full") != 1) live[id]?.let { old -> if (Text.clean(r.optString(4)) != old.title) { changes++; reAdded++ } } ?: run { added++ }
-        if (r.length() >= 7) live[id] = Live(r.optString(1), r.optString(2), Text.clean(r.optString(4)), r.optLong(5) * 1000, r.optLong(6) * 1000,
-            r.length() < 9 || r.optInt(8, 1) == 1)
+        var est = false
+        if (r.length() >= 7) {
+            val old = live[id]
+            val n = Live(r.optString(1), r.optString(2), Text.clean(r.optString(4)), r.optLong(5) * 1000, r.optLong(6) * 1000,
+                r.length() < 9 || r.optInt(8, 1) == 1)
+            if (o.optInt("full") != 1) { if (old == null) added++ else if (n.title != old.title) { changes++; reAdded++; if (n.exact) exactChanges++ } }
+            // Wie die App: Sender kam mit neuem Lied zurück, altes kurz vorher gesehen -> Mitte als Anfang
+            if (old != null && !n.exact && n.title != old.title && n.seen - old.seen in 0..150_000L) { n.since = old.seen + (n.seen - old.seen) / 2; n.exact = true; est = true; estimated++ }
+            live[id] = n
+        }
         else if (r.length() >= 4) live[id]?.let {
             val newTitle = Text.clean(r.optString(1)); val oldSeen = it.seen; val changed = newTitle != it.title
             it.title = newTitle; it.since = r.optLong(2) * 1000; it.seen = r.optLong(3) * 1000
             it.exact = r.length() < 5 || r.optInt(4, 1) == 1
             changes++; if (it.exact) exactChanges++
             // Wie die App: Wechsel zwischen zwei Abgleichen gesehen, Lücke kurz -> Mitte als Anfang
-            if (!it.exact && changed && it.seen - oldSeen in 0..150_000L) { it.since = oldSeen + (it.seen - oldSeen) / 2; it.exact = true; estimated++ }
+            if (!it.exact && changed && it.seen - oldSeen in 0..150_000L) { it.since = oldSeen + (it.seen - oldSeen) / 2; it.exact = true; est = true; estimated++ }
         }
+        live[id]?.let { Messen.melde(id, it.title, if (it.exact) it.since else -1, it.exact, est) }
     }
     // Wie die App: weg gemeldete Sender nicht sofort vergessen (kommen oft mit neuem Lied zurück)
     o.optJSONArray("gone")?.let { gone += it.length() }
@@ -145,6 +153,11 @@ fun main() {
     say("## Hit-Mix „Rock“ $MINUTES Minuten (vereinfacht: springt am Liedende zum frischesten passenden Lied)")
     val rockIds = tagged.filter { MixLogic.stationFits("rock", it.value, live[it.key]?.name.orEmpty()) }.keys
     say("- passende Rock-Sender mit Titel: ${rockIds.count { it in live }}")
+    // Gleichzeitig bei 20 Sendern die Titel im Datenstrom mitlesen (Ton wird verworfen), um die Liedzeit zu messen
+    val horchen = live.entries.filter { (_, l) -> MixLogic.isMusicTitle(l.title) && l.url.startsWith("http") && !l.url.contains(".m3u8") }
+        .sortedByDescending { (id, l) -> (if (l.exact) 2 else 0) + (if (id in rockIds) 1 else 0) }
+        .distinctBy { MixLogic.stationBaseName(it.value.name) }.take(20).map { it.key to it.value.url }
+    Messen.start(horchen)
     var cur: String? = null; var curTitle = ""; val played = ArrayList<String>(); var lastBase = ""
     var waits = 0; var joins = 0; var repeats = 0; var sameStation = 0; val ages = ArrayList<Long>()
     val diffSizes = ArrayList<Int>(); val diffMs = ArrayList<Long>()
@@ -176,6 +189,8 @@ fun main() {
     say("- Lieder: $joins, Wiederholungen: $repeats, gleicher Sender direkt danach: $sameStation, Minuten ohne passendes frisches Lied: $waits")
     if (ages.isNotEmpty()) say("- Eingestiegen nach Liedbeginn: Mittel ${ages.average().toInt()} s, max ${ages.max()} s")
     if (diffSizes.isNotEmpty()) say("- `/sync` Änderungen je Minute: Mittel ${diffSizes.average().toInt() / 1024} KB, ${diffMs.average().toInt()} ms (≈ ${diffSizes.sum() / 1024 * 60 / MINUTES / 1024} MB pro Stunde bei 1/min)")
+    Messen.stop = true
+    Messen.bericht(if (kotlin.math.abs(offset) >= 45_000L) offset else 0L)
     save()
 }
 
