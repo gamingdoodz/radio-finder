@@ -1089,17 +1089,33 @@ async def status_for(session, key):
     return titles
 
 
+icy_only: set = set()          # Sender, deren Statusseite einen veralteten/fremden Titel zeigt: immer den Datenstrom fragen
+_status_ok: dict = {}          # Sender -> wann der Titel der Statusseite zuletzt am Datenstrom geprüft wurde
+
+
 async def check(session, st):
     key = server_key(st["url"])
-    titles = await status_for(session, key)
+    sid = st["id"]
     t = None
-    if titles:
-        path = urlparse(st["url"]).path or "/"
-        t = titles.get(path) or titles.get(path.rstrip("/")) or titles.get("*")
+    if sid not in icy_only:
+        titles = await status_for(session, key)
+        if titles:
+            path = urlparse(st["url"]).path or "/"
+            t = titles.get(path) or titles.get(path.rstrip("/")) or titles.get("*")
+        # Steht derselbe Titel schon über 9 Minuten auf der Statusseite, einmal am Datenstrom gegenprüfen
+        # (manche Server zeigen dort einen alten Titel oder den eines anderen Streams)
+        n = now.get(sid)
+        if t and n and n["title"] == html.unescape(t).strip() and time.time() - n["since"] > 540 \
+                and time.time() - _status_ok.get(sid, 0) > 600:
+            echt = await icy_title(session, st["url"])
+            if echt and normalize(echt) != normalize(t):
+                icy_only.add(sid)
+                t = echt
+            else:
+                _status_ok[sid] = time.time()
     if t is None:
         t = await icy_title(session, st["url"])
     stats["checked"] += 1
-    sid = st["id"]
     if t:
         put(st, t)
         fails[sid] = 0
@@ -1772,7 +1788,7 @@ async def h_health(_):
                               "spar": SPAR["low"], "modus": SPAR["modus"], "modus_quelle": SPAR["quelle"], "meldung": MELDUNG["jetzt"],
                               "hinweise": len(HINWEISE["liste"]), "hinweise_wichtig": HINWEISE["wichtig"],
                               "spiel_stufe": SPAR["stufe"], "kern": len(CORE["ids"]), "abfragen_s": CORE["rate"], "leistung_s": CORE.get("cap", 0),
-                              "anfang_bekannt": sum(1 for _, n in fresh() if n.get("exact"))})
+                              "anfang_bekannt": sum(1 for _, n in fresh() if n.get("exact")), "nur_datenstrom": len(icy_only)})
 
 
 _search_cache: dict = {}  # Suchwörter -> (Zeit, Antwort)
