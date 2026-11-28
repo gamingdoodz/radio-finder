@@ -738,11 +738,38 @@ async def ask_llm(session, q: str):
     async with _llm_lock:
         async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 32, "temperature": 0.1,
                                                "json_schema": schema, "cache_prompt": True},
-                                timeout=aiohttp.ClientTimeout(total=30)) as r:   # erster Wunsch startet die KI erst
+                                timeout=aiohttp.ClientTimeout(total=90)) as r:   # erster Wunsch startet die KI erst (läuft im Hintergrund)
             data = await r.json()
     out = json.loads(data.get("content", "{}"))
     return {"genre": out.get("genre") if out.get("genre") in GENRES else None,
             "artist": (out.get("artist") or "").strip() or None, "ai": True}
+
+
+def _wish_clean(q, res):
+    # Künstler nur übernehmen, wenn er wirklich im Wunsch vorkommt (die KI erfindet sonst gern einen)
+    if res and res.get("artist"):
+        a = res["artist"].lower()
+        if a not in q.lower() or len(a) > 0.8 * len(q):
+            res["artist"] = None
+    return res if res and (res.get("genre") or res.get("artist")) else None
+
+
+async def _wish_ai(q, key):
+    """KI-Antwort holen und merken. Läuft weiter, auch wenn die App nicht so lange wartet
+    (die KI startet erst bei Bedarf; so ist sie danach warm und die Antwort beim nächsten Mal da)."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            res = _wish_clean(q, await ask_llm(session, q))
+    except Exception:
+        res = None
+    if res:
+        if len(_wish_cache) > 2000:
+            _wish_cache.clear()
+        _wish_cache[key] = res
+    return res
+
+
+_wish_tasks: dict = {}
 
 
 async def h_wish(req):
@@ -755,23 +782,19 @@ async def h_wish(req):
         return web.json_response(hit)
     # Eindeutige Stichwörter ("ruhig", "Party", "90er" …) sofort beantworten, die KI nur für den Rest
     res = wish_rules(q)
-    if res is None:
+    if res is None and not SPAR["low"]:
+        task = _wish_tasks.get(key)
+        if task is None or task.done():
+            task = _wish_tasks[key] = asyncio.create_task(_wish_ai(q, key))
+            task.add_done_callback(lambda _t, k=key: _wish_tasks.pop(k, None))
         try:
-            async with aiohttp.ClientSession() as session:
-                res = await ask_llm(session, q)
+            res = await asyncio.wait_for(asyncio.shield(task), 12)
         except Exception:
             res = None
-    # Künstler nur übernehmen, wenn er wirklich im Wunsch vorkommt (die KI erfindet sonst gern einen)
-    if res and res.get("artist"):
-        a = res["artist"].lower()
-        if a not in q.lower() or len(a) > 0.8 * len(q):
-            res["artist"] = None
-    if not res or not (res.get("genre") or res.get("artist")):
-        res = wish_rules(q) or {"genre": None, "artist": None, "ai": False}
-    if len(_wish_cache) > 2000:
-        _wish_cache.clear()
-    _wish_cache[key] = res
-    return web.json_response(res)
+    if res and res.get("ai"):
+        return web.json_response(res)
+    # Ohne KI-Antwort: Stichwort-Regeln, wird nicht gemerkt (die KI-Antwort kommt beim nächsten Mal)
+    return web.json_response(wish_rules(q) or {"genre": None, "artist": None, "ai": False})
 
 
 # ---------------- Radio-Charts: meistgespielt in den letzten 24 Stunden ----------------
