@@ -1,8 +1,8 @@
 #!/bin/bash
-# Check 28.11.: KI bei Bedarf testen (erster Wunsch startet die KI)
+# 28.11.: KI schneller starten (ohne Aufwärmen, 30 min wach), danach testen
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
-if ! systemctl is-enabled -q llm-proxy.socket 2>/dev/null && $AB bereit; then
+if ! grep -q -- "--no-warmup" /etc/systemd/system/llm.service 2>/dev/null && $AB bereit; then
   $AB melde update 1200
   if $AB warte 900; then
     bash $R/server/llm-dienst.sh 2>&1 | tail -5

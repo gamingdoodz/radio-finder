@@ -738,7 +738,7 @@ async def ask_llm(session, q: str):
     async with _llm_lock:
         async with session.post(LLM_URL, json={"prompt": prompt, "n_predict": 32, "temperature": 0.1,
                                                "json_schema": schema, "cache_prompt": True},
-                                timeout=aiohttp.ClientTimeout(total=20)) as r:
+                                timeout=aiohttp.ClientTimeout(total=30)) as r:   # erster Wunsch startet die KI erst
             data = await r.json()
     out = json.loads(data.get("content", "{}"))
     return {"genre": out.get("genre") if out.get("genre") in GENRES else None,
@@ -1119,7 +1119,14 @@ def update_core():
     # Gemessen wird, wie viele Abfragen fällig waren, nicht wie viele gehen würden. Nur wenn sich Arbeit staut,
     # ist das die echte Leistung; sonst vorsichtig mehr zutrauen (sonst schrumpft die Kernliste immer weiter).
     stau = bool(due) and due[0][0] < t - 10
-    cap = rate if stau else min(200.0, max(rate, CORE.get("cap", 0) * 1.25, 5.0))
+    alt_cap = CORE.get("cap", 0)
+    if stau:
+        cap = rate
+    elif rate >= 0.8 * alt_cap:
+        cap = min(200.0, max(rate, alt_cap * 1.1, 5.0))     # ausgelastet ohne Stau: etwas mehr zutrauen
+    else:
+        cap = max(rate, alt_cap)                            # noch nicht ausgelastet: so lassen
+    cap = max(cap, 1.0)
     CORE["cap"] = round(cap, 1)
     # 70 % der Abfragen für die Kernliste (alle ~80 s je Sender), 30 % für alle anderen
     size = int(min(3000, max(150, cap * 0.7 * 80)))
