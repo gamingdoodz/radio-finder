@@ -296,14 +296,22 @@ def put(st: dict, title: str):
     t = time.time()
     old = now.get(st["id"])
     # exact = Liedanfang wirklich beobachtet (Wechsel zwischen zwei Abfragen). Sonst unbekannt (lief schon vorher).
+    # acc = Genauigkeit des Anfangs in Sekunden (± so viel), nur sinnvoll bei exact
     if old and old["title"] == title and t - old["time"] < FRESH_SECONDS:
-        since, exact = old["since"], old.get("exact", False)
+        since, exact, acc = old["since"], old.get("exact", False), old.get("acc", 60)
     elif old and t - old["time"] < 120:
-        since, exact = (old["time"] + t) / 2, True     # Mitte zwischen den zwei Abfragen ist die beste Schätzung
+        # Mitte zwischen den zwei Abfragen ist die beste Schätzung ...
+        since, exact, acc = (old["time"] + t) / 2, True, (t - old["time"]) / 2
+        # ... außer Anfang und Länge des vorigen Liedes sind bekannt: dann beginnt das neue, wo das alte endet
+        dur = (covers.get(old.get("norm", "")) or {}).get("dur", 0)
+        if old.get("exact") and dur and old.get("acc", 99) <= 15:
+            ende = old["since"] + dur
+            if old["time"] <= ende <= t:
+                since, acc = ende, max(3, old.get("acc", 5))
     else:
-        since, exact = t, False
+        since, exact, acc = t, False, 60
     norm = normalize(title)
-    now[st["id"]] = {"title": title, "norm": norm, "since": since, "time": t, "exact": exact}
+    now[st["id"]] = {"title": title, "norm": norm, "since": since, "time": t, "exact": exact, "acc": round(acc)}
     # Für die Kernliste: wann hier zuletzt Musik lief (Sender bleiben auch während Nachrichten drin)
     if is_song(title) and not TALK.search(title):
         song_seen[st["id"]] = t
@@ -504,7 +512,7 @@ async def h_verify(req):
     for st in sts:
         n = now.get(st["id"])
         if n and t - n["time"] < 15:
-            out[st["id"]] = {"title": n["title"], "since": int(n["since"]), "exact": bool(n.get("exact"))}
+            out[st["id"]] = {"title": n["title"], "since": int(n["since"]), "exact": bool(n.get("exact")), "acc": int(n.get("acc", 60)) if n.get("exact") else -1}
     return web.json_response(out)
 
 
@@ -1081,7 +1089,7 @@ async def check(session, st):
                 if left > 0:
                     return max(8, min(left - 3, 90))
                 if left > -150:
-                    return 12      # müsste vorbei sein: kurz nacheinander prüfen, bis der Wechsel kommt
+                    return 5       # müsste vorbei sein: kurz nacheinander prüfen, bis der Wechsel kommt (genauer Anfang)
         return 60 + (hash(sid) % 30)
     f = fails.get(sid, 0) + 1
     fails[sid] = f
@@ -1718,7 +1726,7 @@ by_id = lambda: {s["id"]: s for s in stations}
 
 def item(st, n):
     return {"id": st["id"], "name": st["name"], "url": st["url"], "favicon": st["favicon"], "cc": st.get("cc", ""),
-            "title": n["title"], "since": int(n["since"]), "seen": int(n["time"]), "exact": bool(n.get("exact"))}
+            "title": n["title"], "since": int(n["since"]), "seen": int(n["time"]), "exact": bool(n.get("exact")), "acc": int(n.get("acc", 60)) if n.get("exact") else -1}
 
 
 def gz(resp):
@@ -1802,7 +1810,9 @@ def snapshot():
     t = time.time()
     if _snaps and t - _snaps[-1][1] < 15:
         return _snaps[-1]
-    snap = {sid: (n["title"], int(n["since"]), int(n["time"]), 1 if n.get("exact") else 0)
+    # Letzter Wert: Genauigkeit des Anfangs in s (±), -1 = Anfang unbekannt
+    snap = {sid: (n["title"], int(n["since"]), int(n["time"]), 1 if n.get("exact") else 0,
+                  int(n.get("acc", 60)) if n.get("exact") else -1)
             for sid, n in fresh() if is_song(n["title"])}
     _ver["n"] += 1
     _snaps.append((_ver["n"], t, snap))
@@ -1824,8 +1834,8 @@ async def h_sync(req):
         old = next((s for v, _, s in _snaps if v == frm), None)
         if old is None:
             # Erstes Mal oder zu alt: alles, mit Senderdaten
-            # Reihenfolge: ..., Titel, seit, gesehen, Land, genau (Land an Stelle 7 für ältere Apps)
-            rows = [[sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val[:3], ids[sid].get("cc", ""), val[3]]
+            # Reihenfolge: ..., Titel, seit, gesehen, Land, genau, Genauigkeit in s (Land an Stelle 7 für ältere Apps)
+            rows = [[sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val[:3], ids[sid].get("cc", ""), *val[3:]]
                     for sid, val in snap.items() if sid in ids]
             out = {"v": ver, "t": int(t), "full": 1, "rows": rows}
         else:
@@ -1837,7 +1847,7 @@ async def h_sync(req):
                 if o is not None:
                     rows.append([sid, *val])  # Sender kennt die App schon
                 elif sid in ids:
-                    rows.append([sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val[:3], ids[sid].get("cc", ""), val[3]])
+                    rows.append([sid, ids[sid]["name"], ids[sid]["url"], ids[sid]["favicon"], *val[:3], ids[sid].get("cc", ""), *val[3:]])
             gone = [sid for sid in old if sid not in snap]
             out = {"v": ver, "t": int(t), "rows": rows, "gone": gone}
         body = gzip.compress(json.dumps(out, separators=(",", ":"), ensure_ascii=False).encode(), 6)
