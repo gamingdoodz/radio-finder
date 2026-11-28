@@ -1,5 +1,5 @@
 #!/bin/bash
-# 28.11.: KI-Wunsch: App wartet höchstens 12 s, KI rechnet im Hintergrund fertig
+# 28.11.: KI-Geschwindigkeit messen
 R=/root/radio-finder
 AB="python3 $R/server/absprache.py"
 if ! grep -q -- "--no-warmup" /etc/systemd/system/llm.service 2>/dev/null && $AB bereit; then
@@ -21,6 +21,8 @@ echo "== Update-Freigabe =="; $AB darf 2>&1; ls -la /run/serverabsprache 2>&1
 curl -s -m 5 http://127.0.0.1:8100/api/last | python3 -c 'import sys,json; d=json.load(sys.stdin); print("api/last Felder:", sorted(d)); print({k: d.get(k) for k in ("updateErlaubt","updateDran","stufe")})' 2>&1
 ls -la /var/lib/hitradar-neustart-offen 2>&1
 echo "== Speicher Hitradar =="; du -sh $R /opt/llama.cpp /opt/models 2>/dev/null
-echo "radar seit: $(systemctl show -p ActiveEnterTimestamp --value radar)"; echo "== KI-Test =="; for q in "Musik%20wie%20von%20Adele" "Musik%20wie%20von%20Adele" "etwas%20wie%20Queen"; do S=$(date +%s); curl -s -m 40 "http://localhost:8081/wish?q=$q"; echo " ($(( $(date +%s) - S )) s)"; sleep 45; done
+echo "radar seit: $(systemctl show -p ActiveEnterTimestamp --value radar)"; echo "== KI-Test =="; df -h / | tail -1
+for q in "Musik%20wie%20von%20Adele" "etwas%20wie%20Queen" "Musik%20wie%20von%20Adele" "etwas%20wie%20Queen"; do S=$(date +%s); curl -s -m 40 "http://localhost:8081/wish?q=$q"; echo " ($(( $(date +%s) - S )) s, KI: $(systemctl is-active llm))"; sleep 50; done
+journalctl -u llm --since "-6 min" --no-pager | grep -E "prompt eval time|eval time|total time" | tail -6
 echo "== Hitradar =="; curl -s http://localhost:8081/health; echo
 journalctl -u radar --since "-30 min" --no-pager | grep -iE "Serverabsprache|Traceback|Error" | tail -8
