@@ -18,6 +18,7 @@ object Messen {
     val angaben = ConcurrentHashMap<String, ConcurrentHashMap<String, Angabe>>()
     @Volatile var stop = false
     val alleTitel = ConcurrentHashMap<String, MutableList<String>>()
+    val namen = ConcurrentHashMap<String, String>()
     val beispiele = ArrayList<String>()
 
     fun melde(id: String, title: String, since: Long, exact: Boolean, estimated: Boolean, acc: Int = -1) {
@@ -77,7 +78,8 @@ object Messen {
             val key = MixLogic.normalize(w.title)
             val a = angaben[id]?.entries?.firstOrNull { it.key == key || MixLogic.sameSong(it.key, key) }?.value
             when {
-                a == null -> { keineAngabe++; if (beispiele.size < 8) beispiele.add("„${w.title}“ – Server meldete dort: ${alleTitel[id]?.takeLast(4)?.joinToString(" | ") ?: "nichts"}") }
+                a == null -> { keineAngabe++; if (beispiele.size < 8) beispiele.add("${namen[id] ?: id} (`$id`): „${w.title}“ – Server meldete dort: ${alleTitel[id]?.takeLast(4)?.joinToString(" | ") ?: "nichts"}") }
+                a.exact && !a.estimated && kotlin.math.abs(a.since + offset - w.at) > 300_000L -> { if (beispiele.size < 12) beispiele.add("${namen[id] ?: id} (`$id`): „${w.title}“ – Server-Anfang ${(a.since + offset - w.at) / 1000} s daneben (acc ${a.acc})") }
                 a.exact && !a.estimated && a.acc in 0..5 -> genau.add((a.since + offset - w.at) / 1000)
                 a.exact && !a.estimated -> server.add((a.since + offset - w.at) / 1000)
                 a.estimated -> app.add((a.since + offset - w.at) / 1000)
@@ -97,6 +99,6 @@ object Messen {
         say("- Server-Anfang ungenauer (App zeigt „ca.“): ${stat(server)}")
         say("- Nur aus den Abgleich-Zeiten geschätzt (in der App nicht mehr benutzt): ${stat(app)}")
         say("- Anfang unbekannt (App zeigt „mind.“): $unbekannt, vom Server (noch) nicht gemeldet: $keineAngabe")
-        beispiele.forEach { say("  - nicht gemeldet: $it") }
+        beispiele.forEach { say("  - $it") }
     }
 }

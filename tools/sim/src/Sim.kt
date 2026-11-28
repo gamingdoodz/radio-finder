@@ -158,6 +158,7 @@ fun main() {
     val horchen = live.entries.filter { (_, l) -> MixLogic.isMusicTitle(l.title) && l.url.startsWith("http") && !l.url.contains(".m3u8") }
         .sortedByDescending { (id, l) -> (if (l.exact) 2 else 0) + (if (id in rockIds) 1 else 0) }
         .distinctBy { MixLogic.stationBaseName(it.value.name) }.take(20).map { it.key to it.value.url }
+    horchen.forEach { (id, _) -> live[id]?.let { Messen.namen[id] = it.name } }
     Messen.start(horchen)
     var cur: String? = null; var curTitle = ""; val played = ArrayList<String>(); var lastBase = ""
     var waits = 0; var joins = 0; var repeats = 0; var sameStation = 0; val ages = ArrayList<Long>()
