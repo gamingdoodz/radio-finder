@@ -106,6 +106,7 @@ Wer etwas Wichtiges ändert, trägt es hier ein (Abschnitt „Verlauf“).
   Ursache: die Kernliste richtete sich nach den gemessenen Abfragen; die messen aber nur, was fällig war → Kernliste schrumpfte immer weiter.
   Behoben (b6c13c2 + Leistungs-Schätzung: nur bei Stau zählt die Messung, sonst langsam mehr zutrauen; `/health` → `leistung_s`).
   Wartet auf den nächsten Neustart durch das Spiel. Danach `/health` → `anfang_bekannt` (Ziel: mehrere Hundert), `kern`, `abfragen_s`.
+- Pause bis Di 1.12. 3 Uhr (Valdrakor). Danach: Liedzeit nachmessen (`gh workflow run sim.yml --ref main -f minutes=20`, Abschnitt „Wie genau ist die Liedzeit?“, Werte für acc an den Server-Thread). Stand 28.11. 9 Uhr: Server-Fix (Ende des vorigen Liedes, 5-s-Prüfung am Liedende, acc in /sync, hängende Titel 3d15c79) noch nicht warm gemessen. App nutzt acc („ca.“ nur bei > 5 s), Build 1.0.191 grün, nicht hochgeladen (Kevin: erst nach vollständiger Prüfung).
 - Noch keine 12 Tester für den geschlossenen Test. Ideen: `docs/TESTER.md` (Google-Gruppe als Testerliste, Link per WhatsApp, Tester-Tausch).
 
 ## Verlauf
