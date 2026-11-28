@@ -182,6 +182,13 @@ class MixLogicTest {
         for ((n, k) in names) assertEquals(n, k, MixLogic.genreKeyFor(n))
     }
 
+    @Test fun nurNummernSindKeinLied() {
+        assertFalse(MixLogic.isMusicTitle("9999999 - 9999999"))
+        assertFalse(MixLogic.isMusicTitle("6700483 - 6700483"))
+        assertTrue(MixLogic.isMusicTitle("Blink-182 - All The Small Things"))
+        assertTrue(MixLogic.isMusicTitle("UB40 - Red Red Wine"))
+    }
+
     @Test fun sendernameStattLied() {
         // Echte Titel vom Server (27.11.): das sind Sender/Programme, keine Lieder
         val names = listOf("RADIO BOB! Classic Rock", "Sunshine Live - Techno Live", "Rockland Radio - Linz / Remagen", "FluxFM - FluxLounge",

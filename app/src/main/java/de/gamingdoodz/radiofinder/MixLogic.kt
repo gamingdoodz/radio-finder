@@ -228,7 +228,10 @@ object MixLogic {
 
     /** Ein Liedtitel sieht meist so aus: "Künstler - Titel". Sendungen, Nachrichten, Werbung nicht. */
     fun isMusicTitle(title: String) =
-        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title) && !junk.containsMatchIn(title)
+        (title.contains(" - ") || title.contains(" – ")) && !talkWords.containsMatchIn(title) && !junk.containsMatchIn(title) && !numbersOnly.matches(title.trim())
+
+    /** Nur Nummern ("9999999 - 9999999", Kennungen mancher Sender-Systeme) ist kein Liedtitel. */
+    private val numbersOnly = Regex("^[\\d\\s._#–-]+$")
 
     // ---------------- Daumen runter ----------------
 
